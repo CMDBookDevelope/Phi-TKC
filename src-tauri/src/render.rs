@@ -46,10 +46,6 @@ use std::{
 };
 use term_size::dimensions;
 
-fn get_term_width() -> usize {
-    dimensions().map(|(w, _)| w).unwrap_or(80)
-}
-
 use std::{ffi::OsStr, fmt::Write as _};
 use tempfile::NamedTempFile;
 
