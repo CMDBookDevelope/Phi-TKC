@@ -5,7 +5,7 @@ use render::{render_cli, CliArgs};
 fn build_conf() -> macroquad::window::Conf {
     let is_cli = std::env::args().any(|arg| arg == "--input" || arg == "-i");
     macroquad::window::Conf {
-        window_title: "Phi-TK (GUI/CLI)".to_string(),
+        window_title: "Phi-TKC (GUI/CLI)".to_string(),
         window_width: 1920,
         window_height: 1440,
         headless: is_cli,

@@ -139,7 +139,6 @@ const { t } = useI18n();
 
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { VForm } from 'vuetify/components';
 import { toast, anyFilter, toastError } from '../common';
 import type { RenderConfig } from '../model';
 import TipSwitch from './TipSwitch.vue';

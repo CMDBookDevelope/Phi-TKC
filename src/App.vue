@@ -1,312 +1,321 @@
-<i18n>
-en:
-  render: Render
-  rpe: RPE
-  tasks: Tasks
-  about: About
-  batch-render: Batch Render
-  setting: Setting
-  more: More
-
-zh-CN:
-  render: 渲染
-  rpe: RPE
-  tasks: 任务列表
-  about: 关于
-  batch-render: 批量渲染
-  setting: 设置
-  more: 更多
-
-</i18n>
-
-<script lang="ts">
-import { ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import { useI18n } from 'vue-i18n';
-import { VSonner } from 'vuetify-sonner';
-
-const onLoaded = ref<() => void>();
-const component = ref();
-
-watch(component, (comp) => {
-  if (comp && onLoaded.value) onLoaded.value();
-});
-
-export function useOnLoaded() {
-  return onLoaded;
-}
-
-declare global {
-  interface Window {
-    goto: (name: string) => void;
-  }
-}
-</script>
-
-<script setup lang="ts">
-import { computed, onMounted } from 'vue';
-import { convertFileSrc } from '@tauri-apps/api/core';
-const { t } = useI18n();
-const route = useRoute();
-const router = useRouter();
-
-const navItems = [
-  { key: 'render', icon: 'mdi-play-circle-outline', activeIcon: 'mdi-play-circle' },
-  { key: 'rpe', icon: 'mdi-book-open-page-variant-outline', activeIcon: 'mdi-book-open-page-variant' },
-  { key: 'tasks', icon: 'mdi-server-network-outline', activeIcon: 'mdi-server-network' },
-  { key: 'batch-render', icon: 'mdi-timeline-clock-outline', activeIcon: 'mdi-timeline-clock' },
-  { key: 'setting', icon: 'mdi-cog-outline', activeIcon: 'mdi-cog' },
-  { key: 'about', icon: 'mdi-information-outline', activeIcon: 'mdi-information' },
-];
-
-const navigateTo = (name: string) => {
-  router.push({ name });
-};
-
-window.goto = navigateTo;
-
-const customBackground = ref<string | null>(null);
-
-onMounted(() => {
-  customBackground.value = localStorage.getItem('customBackground');
-  window.addEventListener('customBackgroundChanged', ((event: CustomEvent) => {
-    customBackground.value = event.detail;
-  }) as EventListener);
-});
-
-const backgroundStyle = computed(() => {
-  if (customBackground.value) {
-    try {
-      const imageUrl = convertFileSrc(customBackground.value);
-      return {
-        backgroundImage: `url('${imageUrl}')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundAttachment: 'fixed',
-      };
-    } catch {
-      return {};
-    }
-  }
-  return {};
-});
-</script>
-
 <template>
-  <v-app id="phi-tk">
-    <div v-if="customBackground" class="custom-bg-layer" :style="backgroundStyle"></div>
-    <div v-if="customBackground" class="custom-bg-overlay"></div>
+  <!-- 全局Toast -->
+	<fv-dialog v-model:open="toastOpen" modal persistent class="toast-wrap">
+		<div class="toast-container" v-for="item in toastList" :key="item">
+		  <div class="toast-item" :class="item.type">
+		    <span class="toast-icon">
+		      <template v-if="item.type === 'success'">✅</template>
+		      <template v-if="item.type === 'error'">❌</template>
+		      <template v-if="item.type === 'warning'">⚠️</template>
+		      <template v-if="item.type === 'info'">ℹ️</template>
+		    </span>
+		    <span class="toast-text">{{ item.msg }}</span>
+		    <fv-button appearance="text" @click="dismissToast(item.id)">×</fv-button>
+		  </div>
+		</div>
+	 </fv-dialog>
 
-    <v-sonner position="top-center" />
+  <!-- 自定义背景 -->
+  <div class="custom-bg-layer" :style="backgroundStyle"></div>
+  <div class="custom-bg-overlay"></div>
+  
+  <div class="app-root">
+	  <aside class="sidebar fluent-glass">
+			<div class="brand-text">Phi TKC</div>
+			<div class="nav-list">
+				<div class="nav-spacer"></div>
+				<div class="nav-items-wrap">
+					<div
+						v-for="item in navItems"
+						:key="item.key"
+						class="nav-item"
+						:class="{ selected: route.name === item.key }"
+						@click="navigateTo(item.key)"
+					>
+					    <span class="nav-label">{{ t(item.key) }}</span>
+					</div>
+				</div>
+				<div class="nav-spacer"></div>
+			</div>
+	  </aside>
 
-    <!-- MD3 NavigationRail (left side) -->
-    <nav class="md3-nav-rail">
-      <div class="rail-brand">
-        <span class="brand-text">Phi TK</span>
-      </div>
-
-      <div class="rail-items">
-        <button
-          v-for="item in navItems"
-          :key="item.key"
-          class="rail-item"
-          :class="{ 'is-active': route.name === item.key }"
-          @click="navigateTo(item.key)"
-        >
-          <v-icon :icon="route.name === item.key ? item.activeIcon : item.icon" size="24" class="rail-icon" />
-          <span class="rail-label">{{ t(item.key) }}</span>
-        </button>
-      </div>
-    </nav>
-
-    <!-- Main content area -->
-    <v-main class="md3-main">
+    <main class="main-content">
       <router-view v-slot="{ Component }">
-        <Suspense timeout="0">
+        <Suspense>
           <template #default>
-            <component :is="Component" ref="component" class="route-view" />
+            <component :is="Component" ref="component" class="page-view" />
           </template>
           <template #fallback>
-            <div class="loading-container">
-              <v-progress-circular indeterminate size="48" color="primary" />
+            <div class="loading-box">
+              <fv-spinner size="large" />
             </div>
           </template>
         </Suspense>
       </router-view>
-    </v-main>
-  </v-app>
+    </main>
+  </div>
 </template>
 
-<style>
-/* ===== MD3 Global Resets ===== */
-* { box-sizing: border-box; }
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { convertFileSrc } from '@tauri-apps/api/core'
+const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
+const component = ref()
 
-.v-main { background: transparent !important; }
-.v-main__wrap { background: transparent !important; }
-</style>
+// 删掉 export，改为挂载window全局
+function useOnLoaded() {
+  return component
+}
+window.useOnLoaded = useOnLoaded
+
+// 导航菜单图标使用VFluent内置图标名
+const navItems = [
+  { key: 'render', icon: 'Play', activeIcon: 'PlaySolid' },
+  { key: 'rpe', icon: 'BookOpenOutline', activeIcon: 'BookOpenFilled' },
+  { key: 'tasks', icon: 'ServerOutline', activeIcon: 'ServerFilled' },
+  { key: 'batch-render', icon: 'TimelineClockOutline', activeIcon: 'TimelineClockFilled' },
+  { key: 'setting', icon: 'SettingsOutline', activeIcon: 'SettingsFilled' },
+  { key: 'about', icon: 'InfoOutline', activeIcon: 'InfoFilled' },
+]
+const navigateTo = (name: string) => router.push({ name })
+window.goto = navigateTo
+
+// 自定义背景路径（null 表示未设置）
+const customBackground = ref<string | null>(null)
+window.addEventListener('customBackgroundChanged', ((e: CustomEvent) => {
+  customBackground.value = e.detail
+}) as EventListener)
+
+// 背景样式计算
+const backgroundStyle = computed(() => {
+  if (customBackground.value) {
+    try {
+      const imgUrl = convertFileSrc(customBackground.value)
+      return {
+        backgroundImage: `url(${imgUrl})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        backgroundAttachment: 'fixed',
+      }
+    } catch {
+      // 转换失败则回退至默认 API
+      return defaultBgStyle()
+    }
+  } else {
+    return defaultBgStyle()
+  }
+})
+
+// 默认背景样式（使用 API）
+function defaultBgStyle() {
+  return {
+    backgroundImage: `url("https://api.yppp.net/api.php")`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+    backgroundAttachment: 'fixed',
+  }
+}
+
+// 手动封装Toast状态（VFluent无useToastController）
+type ToastType = 'success' | 'info' | 'warning'
+interface ToastItem {
+  id: string
+  msg: string
+  type: ToastType
+  timer?: ReturnType<typeof setTimeout>
+}
+const toastList = ref<ToastItem[]>([])
+const toastOpen = computed({
+  get() {
+    return toastList.value.length > 0
+  },
+  set(val) {
+    // 关闭弹窗时清空所有toast
+    if (!val) toastList.value = []
+  }
+})
+function genId() {
+  return Math.random().toString(36).slice(2)
+}
+// 全局挂载toast方法供common.ts调用
+window.$toast = (msg: string, type: ToastType = 'info') => {
+  const id = genId()
+  const item: ToastItem = { id, msg, type }
+  item.timer = setTimeout(() => {
+    toastList.value = toastList.value.filter(i => i.id !== id)
+  }, 2000)
+  toastList.value.push(item)
+}
+function dismissToast(id: string) {
+  const target = toastList.value.find(i => i.id === id)
+  if (target) {
+    clearTimeout(target.timer)
+    toastList.value = toastList.value.filter(i => i.id !== id)
+  }
+}
+</script>
 
 <style scoped>
-/* ===== Custom Background ===== */
-.custom-bg-layer {
-  position: fixed; inset: 0;
-  pointer-events: none; z-index: 0;
+/* 整体布局 */
+.app-root {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent !important; /* 确保根容器透明 */
 }
-.custom-bg-overlay {
-  position: fixed; inset: 0;
-  background: radial-gradient(ellipse at center, transparent 0%, rgba(13,13,13,0.4) 40%, rgba(13,13,13,0.92) 100%);
-  pointer-events: none; z-index: 0;
-}
-
-/* ===== MD3 NavigationRail ===== */
-.md3-nav-rail {
-  position: fixed;
-  left: 0; top: 0; bottom: 0;
-  width: 80px;
+.sidebar {
+  width: 235px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  background: rgba(20, 20, 20, 0.92);
-  backdrop-filter: blur(24px) saturate(180%);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  z-index: 100;
   padding: 12px 0;
 }
-
-.rail-brand {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 48px;
-  margin-bottom: 12px;
-  flex-shrink: 0;
-}
-
 .brand-text {
-  font-size: 14px;
+  padding: 6px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.5px;
-  background: linear-gradient(135deg, #82b1ff, #d1e4ff);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #39c8bbff;
+  text-align: center;
+  margin-bottom: 16px;
+}
+.main-content {
+  flex: 1;
+  min-height: 100vh;
+  padding: 0;
+  overflow: hidden;
+}
+.page-view {
+  width: 100%;
+  min-height: 100vh;
+  animation: pageEnter 0.35s ease both;
+}
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.loading-box {
+  width: 100%;
+  height: 100vh;
+  display: grid;
+  place-items: center;
 }
 
-.rail-items {
+/* ===== 侧边栏导航项（纯 div 实现） ===== */
+.nav-list {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
+  height: 100%;
   flex: 1;
+  padding: 0 8px;
 }
 
-/* MD3 NavRail Destination */
-.rail-item {
+.nav-spacer {
+  flex: 1; /* 上下各占 1/6，使中间区域占 2/3 */
+}
+
+.nav-items-wrap {
+  flex: 2; /* 占 2/3 高度 */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  gap: 4px;
+}
+
+.nav-item {
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
   position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  width: 56px;
-  padding: 4px 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 16px;
-  transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
-  -webkit-tap-highlight-color: transparent;
+  /* 移除自定义 transition，使用全局 .fluent-glass 的 all .2s ease-in-out 即可（父级已包含） */
+  /* 但父级的 transition 不会作用于子元素的背景或伪元素，所以需要显式设置，但统一参数 */
+  transition: background 0.2s ease-in-out; /* 只对背景做过渡，与 .fluent-glass 保持一致 */
 }
 
-.rail-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+.nav-item:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
-/* MD3 pill indicator */
-.rail-indicator {
+.nav-item.selected {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.nav-item.selected::before {
+  content: '';
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) scaleX(0);
-  width: 32px;
-  height: 32px;
-  border-radius: 16px;
-  background: rgba(130, 177, 255, 0.15);
-  transition: transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: #39c8bb;
+  opacity: 1;
+  transition: opacity 0.2s ease-in-out; /* 与 .fluent-glass 一致 */
+}
+
+.nav-item::before {
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out; /* 保持统一 */
+}
+
+/* ===== 自定义背景 ===== */
+.custom-bg-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.custom-bg-overlay {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 0%, rgba(13,13,13,0.4) 40%, rgba(13,13,13,0.92) 100%);
+  pointer-events: none;
   z-index: 0;
 }
 
-.rail-item.is-active .rail-indicator {
-  transform: translate(-50%, -50%) scaleX(1);
-  background: rgba(130, 177, 255, 0.25);
+/* ===== Toast 弹窗 ===== */
+.toast-wrap {
+  --fv-dialog-surface: transparent !important;
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  pointer-events: none;
 }
-
-.rail-icon {
-  position: relative;
-  z-index: 1;
-  color: rgba(255, 255, 255, 0.6);
-  transition: color 0.25s ease;
-}
-
-.rail-item.is-active .rail-icon {
-  color: #82b1ff;
-}
-
-.rail-label {
-  position: relative;
-  z-index: 1;
-  font-size: 11px;
-  font-weight: 500;
-  margin-top: 2px;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 0.2px;
-  transition: color 0.25s ease;
-  white-space: nowrap;
-}
-
-.rail-item.is-active .rail-label {
-  color: #82b1ff;
-  font-weight: 600;
-}
-
-/* ===== Main Content ===== */
-.md3-main {
-  margin-left: 80px !important;
-  min-height: 100vh;
-  position: relative;
-  z-index: 1;
-}
-
-.route-view {
-  width: 100%;
-  min-height: 100vh;
-  animation: routeEnter 0.35s cubic-bezier(0.2, 0, 0, 1) both;
-}
-
-@keyframes routeEnter {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.loading-container {
+.toast-container {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
 }
+.toast-item {
+  min-width: 320px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(30,30,30,0.95);
+  backdrop-filter: blur(16px);
+  border-radius: 12px;
+  border-left: 4px #82b1ff;
+}
+.toast-item.success { border-left-color: #7dd87d; }
+.toast-item.warning { border-left-color: #ffb86b; }
+.toast-item.error { border-left-color: #ffb4ab; }
+.toast-icon { font-size: 18px; }
+.toast-text { flex: 1; font-size: 14px; }
 
-/* ===== Responsive: collapse rail on narrow ===== */
+/* ===== 响应式 ===== */
 @media (max-width: 600px) {
-  .md3-nav-rail { width: 64px; }
-  .md3-main { margin-left: 64px !important; }
-  .rail-label { font-size: 9px; }
-  .rail-item { width: 48px; }
-  .brand-text { font-size: 11px; }
+  .sidebar { width: 64px; }
 }
 </style>

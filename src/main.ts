@@ -1,42 +1,29 @@
-import './assets/main.css';
-import '@mdi/font/css/materialdesignicons.css';
+import './assets/main.css'
+import { createApp } from 'vue'
+import { createI18n } from 'vue-i18n'
+import router from './router'
+import { changeLocale } from './common'
+// 引入VFluent3
+import VueFluent from '@creatorsn/vfluent3'
+// 必须引入全局样式
+import '@creatorsn/vfluent3/style.css'
+import App from "./App.vue"
 
-import { createApp } from 'vue';
-
-import { createI18n } from 'vue-i18n';
-
-import { changeLocale } from './common';
-
-import App from './App.vue';
-import router from './router';
-
-import { createVuetify } from 'vuetify';
-import * as components from 'vuetify/components';
-import { VStepper, VStepperActions, VStepperHeader, VStepperItem } from 'vuetify/components';
-import * as directives from 'vuetify/directives';
-import { aliases, mdi } from 'vuetify/iconsets/mdi';
-import 'vuetify/styles';
-
-import theme from './theme';
-
-export const SUPPORTED_LOCALES = ['en', 'zh-CN', 'zh-TW'];
-
-let locale = localStorage.getItem('locale');
-if (!locale) {
-  locale = 'en';
-  for (const alt of navigator.languages) {
-    if (SUPPORTED_LOCALES.includes(alt)) {
-      locale = alt;
-      break;
-    }
-  }
-}
+export const SUPPORTED_LOCALES = ['en', 'zh-CN', 'zh-TW']
+let locale = localStorage.getItem('locale')
 
 const i18n = createI18n({
   locale: 'en',
   fallbackLocale: 'en',
   messages: {
     en: {
+      // 新增导航菜单翻译
+      render: 'Render',
+      rpe: 'RPE',
+      tasks: 'Tasks',
+      'batch-render': 'Batch Render',
+      setting: 'Settings',
+      about: 'About',
       rules: {
         'non-empty': 'Must not be empty',
         positive: 'Must be a positive number',
@@ -48,6 +35,13 @@ const i18n = createI18n({
       'any-filter': 'All files',
     },
     'zh-CN': {
+      // 中文导航翻译
+      render: '渲染',
+      rpe: 'RPE配置',
+      tasks: '任务队列',
+      'batch-render': '批量渲染',
+      setting: '设置',
+      about: '关于',
       rules: {
         'non-empty': '不能为空',
         positive: '必须是正数',
@@ -61,56 +55,28 @@ const i18n = createI18n({
   },
   legacy: false,
   missing(_locale, key) {
-    if (key.startsWith('title-')) return '';
-    return key;
+    if (key.startsWith('title-')) return ''
+    return key
   },
-});
-changeLocale(locale);
+})
 
-const vuetify = createVuetify({
-  components: {
-    ...components,
-    VStepper,
-    VStepperActions,
-    VStepperHeader,
-    VStepperItem,
-  },
-  directives,
-  theme: {
-    defaultTheme: 'customTheme',
-    themes: {
-      customTheme: theme,
-    },
-  },
-  icons: {
-    defaultSet: 'mdi',
-    aliases,
-    sets: {
-      mdi,
-    },
-  },
-  defaults: {
-    VCard: { rounded: 'lg', flat: true },
-    VBtn: { rounded: 'xl' },
-    VTextField: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
-    VSelect: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
-    VCombobox: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
-    VTextarea: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
-    VAutocomplete: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
-    VChip: { rounded: 'lg' },
-    VDialog: { scrollable: true },
-    VList: { rounded: 'lg' },
-    VSlider: { color: 'primary' },
-    VSwitch: { color: 'primary', inset: true },
-    VCheckboxBtn: { color: 'primary' },
-    VProgressLinear: { rounded: true },
-    VProgressCircular: { color: 'primary' },
-  },
-});
+if (!locale) {
+  locale = 'en'
+  for (const alt of navigator.languages) {
+    if (SUPPORTED_LOCALES.includes(alt)) {
+      locale = alt
+      break
+    }
+  }
+}
+changeLocale(locale)
 
-const app = createApp(App);
-app.use(i18n).use(router).use(vuetify);
+const app = createApp(App)
+// 全局安装VFluent
+app.use(VueFluent)
+app.use(i18n)
+app.use(router)
+app.mount('#app')
 
-app.mount('#app');
+export { i18n }
 
-export { i18n };

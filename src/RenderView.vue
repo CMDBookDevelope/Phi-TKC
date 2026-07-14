@@ -47,7 +47,7 @@
     next-chart: Render Next Chart
     render-status: 'Progress: {progress}% | FPS: {fps} | ETA: {estimate}'
 
-    ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and put it in the specific folder.
+    ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and set Path correctly.
 
   zh-CN:
     already-running: Phi TK 已经在运行
@@ -91,7 +91,7 @@
     next-chart: 渲染下一个谱面
     render-status: '进度：{progress}% | FPS: {fps} | 预计：{estimate}'
 
-    ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并放置在指定文件夹内。
+    ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并设置 Path。
 
   </i18n>
 
@@ -105,7 +105,6 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { event } from '@tauri-apps/api';
 import { toastError, RULES, toast, anyFilter, isString } from './common';
 import type { ChartInfo, FileDropEvent, Task } from './model';
-import { VForm } from 'vuetify/components';
 import ConfigView from './components/ConfigView.vue';
 import moment from 'moment';
 import * as dialog from '@tauri-apps/plugin-dialog';

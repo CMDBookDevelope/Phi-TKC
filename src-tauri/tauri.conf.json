@@ -56,15 +56,16 @@
         "title": "Phi-TKC",
         "width": 1280,
         "dragDropEnabled": true,
-        "useHttpsScheme": true
+        "useHttpsScheme": true,
+        "transparent": false,
+        "decorations": true,
+        "center": true
       }
     ],
     "security": {
       "assetProtocol": {
         "scope": {
-          "allow": [
-            "**"
-          ],
+          "allow": ["**"],
           "deny": [],
           "requireLiteralLeadingDot": false
         },

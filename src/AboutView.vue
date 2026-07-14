@@ -80,7 +80,7 @@ const fetchVersion = async () => {
 };
 
 const openGitHub = () => {
-  open('https://github.com/Winamin/Phi-TK.git').catch((e) => {
+  open('https://github.com/CMDBookDevelope/Phi-TKC.git').catch((e) => {
     console.error('Failed to open GitHub:', e);
   });
 };
@@ -92,15 +92,15 @@ onMounted(() => {
 
 <i18n>
 en:
-  app: Phi TK
+  app: Phi TKC
   license: Licensed by GPLv3
   footer:
-    copyright: © {year} Phi TK. All rights reserved.
+    copyright: © {year} Phi TKC. All rights reserved.
 zh-CN:
-  app: Phi TK
+  app: Phi TKC
   license: 基于 GPLv3 协议授权
   footer:
-    copyright: © {year} Phi TK. 保留所有权利。
+    copyright: © {year} Phi TKC. 保留所有权利。
 </i18n>
 
 <style scoped>

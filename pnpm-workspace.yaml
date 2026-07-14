@@ -1,3 +1,10 @@
 allowBuilds:
   '@parcel/watcher': false
   esbuild: false
+  optipng-bin: set this to true or false
+  pngquant-bin: set this to true or false
+  sharp: set this to true or false
+  swiper: false
+  tauri: set this to true or false
+  vue-demi: false
+  zopflipng-bin: set this to true or false
