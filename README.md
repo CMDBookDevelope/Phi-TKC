@@ -1,7 +1,7 @@
 # Phi TKC
 ![Winamin最強! Winamin最高!](arts/phi-tk-logo.png) 
 
-Phi-TKC 是一个基于 Tauri + Vue 3 的谱面渲染工具。Fork 自[素 ink 的 Phi-TK](https://github.com/Winamin/Phi-TK)
+Phi-TKC 是一个基于 Tauri + Vue 3 的谱面渲染工具。Fork 自: [素 ink 的 Phi-TK](https://github.com/Winamin/Phi-TK)
 <!---Rust小螃蟹好可爱wwwwwwww Tauri何意味神秘图标--->
 
 <img src="arts/logos.svg" width="120" height="60"></img>
