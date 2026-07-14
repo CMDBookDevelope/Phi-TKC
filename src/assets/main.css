@@ -25,6 +25,14 @@ html, body, #app {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
+.static_glass {
+  background: rgba(255,255,255,0.2);
+  transition: box-shadow .2s ease-in-out;
+  transition: -webkit-backdrop-filter .2s ease-in-out,box-shadow .2s ease-in-out;
+  box-shadow: 0 8px 24px rgba(255,255,255,0.1);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
 /* 滚动条美化 */
 ::-webkit-scrollbar {
   width: 6px;

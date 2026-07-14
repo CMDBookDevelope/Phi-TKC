@@ -21,19 +21,27 @@
   
   <div class="app-root">
 	  <aside class="sidebar fluent-glass">
-			<div class="brand-text">Phi TKC</div>
+	  	<div class="poslogo">
+			<img src="/phi-tklogo.png" alt="Phi TK" class="tklogo" />
+		</div>
 			<div class="nav-list">
 				<div class="nav-spacer"></div>
 				<div class="nav-items-wrap">
 					<div
-						v-for="item in navItems"
-						:key="item.key"
-						class="nav-item"
-						:class="{ selected: route.name === item.key }"
-						@click="navigateTo(item.key)"
+					  v-for="item in navItems"
+					  :key="item.key"
+					  class="nav-item"
+					  :class="{ selected: route.name === item.key }"
+					  @click="navigateTo(item.key)"
 					>
-					    <span class="nav-label">{{ t(item.key) }}</span>
-					</div>
+					  <fv-animated-icon 
+						:modelValue="item.anim"
+						fontSize="20" 
+						theme=global
+						:icon="route.name === item.key ? item.activeIcon : item.icon"
+					  />
+				  <span class="nav-label" style="margin-left: 6px;">{{ t(item.key) }}</span>
+				</div>
 				</div>
 				<div class="nav-spacer"></div>
 			</div>
@@ -74,12 +82,12 @@ window.useOnLoaded = useOnLoaded
 
 // 导航菜单图标使用VFluent内置图标名
 const navItems = [
-  { key: 'render', icon: 'Play', activeIcon: 'PlaySolid' },
-  { key: 'rpe', icon: 'BookOpenOutline', activeIcon: 'BookOpenFilled' },
-  { key: 'tasks', icon: 'ServerOutline', activeIcon: 'ServerFilled' },
-  { key: 'batch-render', icon: 'TimelineClockOutline', activeIcon: 'TimelineClockFilled' },
-  { key: 'setting', icon: 'SettingsOutline', activeIcon: 'SettingsFilled' },
-  { key: 'about', icon: 'InfoOutline', activeIcon: 'InfoFilled' },
+  { key: 'render', icon: 'Play', activeIcon: 'PlaySolid', anim: 'scaleDown' },
+  { key: 'rpe', icon: 'Page', activeIcon: 'PageSolid', anim: 'scaleYDown' },
+  { key: 'tasks', icon: 'Work', activeIcon: 'WorkSolid', anim: 'scaleXDown' },
+  { key: 'batch-render', icon: 'Set', activeIcon: 'SetSolid', anim: 'scaleDown' },
+  { key: 'setting', icon: 'Settings', activeIcon: 'SettingsSolid', anim: 'bounceRotate' },
+  { key: 'about', icon: 'Info', activeIcon: 'InfoSolid', anim: 'bounceRotate' },
 ]
 const navigateTo = (name: string) => router.push({ name })
 window.goto = navigateTo
@@ -235,8 +243,6 @@ function dismissToast(id: string) {
   position: relative;
   display: flex;
   align-items: center;
-  /* 移除自定义 transition，使用全局 .fluent-glass 的 all .2s ease-in-out 即可（父级已包含） */
-  /* 但父级的 transition 不会作用于子元素的背景或伪元素，所以需要显式设置，但统一参数 */
   transition: background 0.2s ease-in-out; /* 只对背景做过渡，与 .fluent-glass 保持一致 */
 }
 
@@ -264,6 +270,17 @@ function dismissToast(id: string) {
 .nav-item::before {
   opacity: 0;
   transition: opacity 0.2s ease-in-out; /* 保持统一 */
+}
+
+/* PhiTKCLogo */
+.tklogo{
+	position: relative;
+}
+.poslogo{
+	position: absolute;
+	left: 50%;
+	top: 14%;
+	transform: translate(-50%, -50%);
 }
 
 /* ===== 自定义背景 ===== */

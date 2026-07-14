@@ -1,15 +1,15 @@
 <template>
-  <div class="about-container">
+  <div class="static_glass about-container" ref="containerRef">
+    <!-- Canvas 雪花层 -->
+    <canvas ref="canvasRef" class="snow-canvas"></canvas>
+
     <!-- 极简的时间线背景线 -->
-    <div class="timeline-bg"></div>
+    <div class="static_glass background"></div>
     <div class="about-content">
       <!-- Logo 和版本号，带进入动画 -->
       <div class="app-header">
-        <img src="/phi-tklogo.png" alt="Phi TK" class="app-logo-img" />
-        <div class="version-badge">
-          <v-icon size="16" icon="mdi-tag-outline" class="version-icon" />
-          <span class="version-text">v{{ appVersion }}</span>
-        </div>
+        <img src="/phi-tklogo.png" alt="Phi TKC" class="app-logo-img" />
+          <fv-Tag fontSize=19 border-radius=12 :modelValue="[{text: 'v' + appVersion, type: 'default', background: 'rgba(255, 255, 255, 1)' }]"></fv-Tag>
       </div>
       <!-- 信息卡片，纵向排列，依次滑入 -->
       <div class="info-cards">
@@ -59,20 +59,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-shell';
 
 const { t } = useI18n();
-// 动态当前年份
 const currentYear = ref(new Date().getFullYear());
-// 兜底默认版本
 const appVersion = ref('1.0.0');
+
+// Canvas 引用
+const containerRef = ref<HTMLElement | null>(null);
+const canvasRef = ref<HTMLCanvasElement | null>(null);
+
+let animationFrameId: number | null = null;
+let particles: Particle[] = [];
+let ctx: CanvasRenderingContext2D | null = null;
+
+interface Particle {
+  x: number;
+  y: number;
+  radius: number;
+  speedY: number;
+  speedX: number;
+}
 
 const fetchVersion = async () => {
   try {
-    // 从 Tauri 配置文件读取真实应用版本
     appVersion.value = await getVersion();
   } catch (e) {
     console.error('Failed to get version:', e);
@@ -85,8 +98,105 @@ const openGitHub = () => {
   });
 };
 
-onMounted(() => {
-  fetchVersion();
+// 初始化 Canvas 和粒子
+const initCanvas = () => {
+  const container = containerRef.value;
+  const canvas = canvasRef.value;
+  if (!container || !canvas) return;
+
+  const rect = container.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+
+  // 设置实际尺寸（物理像素）
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  // 设置样式尺寸（CSS 像素）
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+
+  ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  // 缩放绘图上下文以匹配设备像素比
+  ctx.scale(dpr, dpr);
+
+  // 粒子数量：根据容器面积动态调整（但固定为 40 个，足够视觉丰富且性能良好）
+  const count = Math.min(40, Math.floor((rect.width * rect.height) / 15000) + 20);
+  particles = [];
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x: Math.random() * rect.width,
+      y: Math.random() * rect.height,
+      radius: 2 + Math.random() * 2, // 2~5px
+      speedY: 0.5 + Math.random() * 1.5,
+      speedX: -0.3 + Math.random() * 0.6, // 轻微水平飘动
+    });
+  }
+
+  // 开始动画
+  if (animationFrameId) cancelAnimationFrame(animationFrameId);
+  animate();
+};
+
+// 动画循环
+const animate = () => {
+  if (!ctx || !canvasRef.value) return;
+  const canvas = canvasRef.value;
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width;
+  const height = rect.height;
+
+  // 清空画布（透明背景，让下层内容显示）
+  ctx.clearRect(0, 0, width, height);
+
+  // 绘制所有雪花（无透明度，纯色）
+  ctx.fillStyle = '#AFDAEF';
+  for (const p of particles) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 更新位置
+  for (const p of particles) {
+    p.y += p.speedY;
+    p.x += p.speedX;
+
+    // 边界重置（到底部或左右溢出）
+    if (p.y > height + 20) {
+      p.y = -10;
+      p.x = Math.random() * width;
+      p.radius = 2 + Math.random() * 6;
+      p.speedY = 0.5 + Math.random() * 1.5;
+      p.speedX = -0.3 + Math.random() * 0.6;
+    }
+    if (p.x < -20) p.x = width + 10;
+    if (p.x > width + 20) p.x = -10;
+  }
+
+  animationFrameId = requestAnimationFrame(animate);
+};
+
+// 窗口尺寸变化时重置 Canvas
+const handleResize = () => {
+  initCanvas();
+};
+
+onMounted(async () => {
+  await fetchVersion();
+  // 等待 DOM 渲染完成，确保容器尺寸已定
+  await nextTick();
+  initCanvas();
+  window.addEventListener('resize', handleResize);
+});
+
+onUnmounted(() => {
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+  window.removeEventListener('resize', handleResize);
+  particles = [];
+  ctx = null;
 });
 </script>
 
@@ -117,34 +227,29 @@ zh-CN:
   position: relative;
   overflow: hidden;
   padding: 24px;
-  background-color: #121212;
+  background-color: #ffffff00;
 }
-/* 隐形的时间线背景：一条从左到右快速扫过的极细线，仅作氛围 */
-.timeline-bg {
+
+/* Canvas 雪花层：覆盖容器，不干扰交互 */
+.snow-canvas {
   position: absolute;
-  top: 50%;
-  left: -50%;
-  width: 200%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
-  animation: scanLine 4s linear infinite;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
+  z-index: 0; /* 放在内容后面，但若想雪花浮在内容上可改为 z-index: 2，但不影响点击 */
+  display: block;
 }
-@keyframes scanLine {
-  0% {
-    transform: translateX(-50%);
-  }
-  100% {
-    transform: translateX(0%);
-  }
-}
-/* 主要内容区域 */
+
+/* 确保内容在雪花之上，且可点击 */
 .about-content {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 40px;
-  z-index: 1;
   width: 100%;
   max-width: 450px;
 }
@@ -314,4 +419,3 @@ zh-CN:
   }
 }
 </style>
-
