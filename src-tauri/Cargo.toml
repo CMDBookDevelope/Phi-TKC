@@ -6,7 +6,7 @@ authors = ["Mivik", "Link", "CNMDBook"]
 license = "GPL-v3"
 repository = "https://github.com/CMDBookDevelope/Phi-TKC"
 default-run = "Phi-TKC"
-edition = "2024"
+edition = "2021"
 rust-version = "1.60"
 
 [build-dependencies]
