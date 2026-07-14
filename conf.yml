@@ -10,13 +10,13 @@
 aggressive: true
 
 # 玩家名字
-playerName: Beks
+playerName: awmc
 # 玩家 RKS
-playerRks: 15.00
+playerRks: 16.78
 # 课题模式颜色；可选有：white(白色)、green(绿色)、blue(蓝色)、red(红色)、golden(金色)、rainbow(彩色)
 challengeColor: rainbow
 # 课题模式等级
-challengeRank: 3
+challengeRank: 13
 
 # 是否开启多押提示
 multipleHint: true
