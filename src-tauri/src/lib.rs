@@ -33,6 +33,7 @@ use std::{
 use task::{TaskQueue, TaskView};
 use tauri::{ipc::InvokeError, Manager, State, WindowEvent};
 use tokio::{io::AsyncWriteExt, process::Command};
+use clap::Parser;
 
 static ASSET_PATH: OnceLock<PathBuf> = OnceLock::new();
 static LOCK_FILE: OnceLock<tokio::fs::File> = OnceLock::new();
@@ -69,7 +70,16 @@ pub async fn run() -> Result<()> {
     if std::env::args().len() > 1 {
         match std::env::args().skip(1).next().as_deref() {
             Some("render") => {
-                run_wrapped(render::main()).await;
+                let remaining_args: Vec<String> = std::env::args().skip(2).collect();
+                match render::CliArgs::try_parse_from(remaining_args) {
+                    Ok(cli_args) => {
+                        run_wrapped(render::render_cli(cli_args)).await;
+                    }
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        std::process::exit(1);
+                    }
+                }
             }
             Some("preview") => {
                 run_wrapped(preview::main()).await;
