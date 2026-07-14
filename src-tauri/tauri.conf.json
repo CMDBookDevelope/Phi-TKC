@@ -42,19 +42,19 @@
       }
     }
   },
-  "productName": "Phi-TK",
-  "mainBinaryName": "Phi-TK",
-  "version": "2.0.1",
-  "identifier": "com.sc.phi.tk",
+  "productName": "Phi-TKC",
+  "mainBinaryName": "Phi-TKC",
+  "version": "1.0.0",
+  "identifier": "com.cnmdbook.phi.tkc",
   "plugins": {},
   "app": {
     "windows": [
       {
         "fullscreen": false,
-        "height": 660,
+        "height": 720,
         "resizable": true,
-        "title": "Phi-Tk",
-        "width": 920,
+        "title": "Phi-TKC",
+        "width": 1280,
         "dragDropEnabled": true,
         "useHttpsScheme": true
       }

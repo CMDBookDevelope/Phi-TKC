@@ -1,16 +1,62 @@
-<i18n>
-en:
-  app: Phi TK
-  license: Licensed by GPLv3
-  footer:
-    copyright: © 2025 Phi TK. All rights reserved.
-
-zh-CN:
-  app: Phi TK
-  license: 基于 GPLv3 协议授权
-  footer:
-    copyright: © 2025 Phi TK. 保留所有权利。
-</i18n>
+<template>
+  <div class="about-container">
+    <!-- 极简的时间线背景线 -->
+    <div class="timeline-bg"></div>
+    <div class="about-content">
+      <!-- Logo 和版本号，带进入动画 -->
+      <div class="app-header">
+        <img src="/phi-tklogo.png" alt="Phi TK" class="app-logo-img" />
+        <div class="version-badge">
+          <v-icon size="16" icon="mdi-tag-outline" class="version-icon" />
+          <span class="version-text">v{{ appVersion }}</span>
+        </div>
+      </div>
+      <!-- 信息卡片，纵向排列，依次滑入 -->
+      <div class="info-cards">
+        <v-card class="info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
+          <div class="card-content">
+            <div class="card-icon">
+              <v-icon size="28" icon="mdi-github" />
+            </div>
+            <div class="card-text">
+              <h3 class="card-title">GitHub</h3>
+              <p class="card-subtitle">View source code</p>
+            </div>
+            <div class="card-arrow">
+              <v-icon size="20" icon="mdi-open-in-new" />
+            </div>
+          </div>
+        </v-card>
+        <v-card class="info-card" :style="{ '--i': 1 }">
+          <div class="card-content">
+            <div class="card-icon">
+              <v-icon size="28" icon="mdi-license" />
+            </div>
+            <div class="card-text">
+              <h3 class="card-title">License</h3>
+              <p class="card-subtitle">{{ t('license') }}</p>
+            </div>
+          </div>
+        </v-card>
+        <v-card class="info-card" :style="{ '--i': 2 }">
+          <div class="card-content">
+            <div class="card-icon">
+              <v-icon size="28" icon="mdi-information-outline" />
+            </div>
+            <div class="card-text">
+              <h3 class="card-title">Version</h3>
+              <p class="card-subtitle">v{{ appVersion }}</p>
+            </div>
+          </div>
+        </v-card>
+      </div>
+      <!-- 底部版权（传入动态年份） -->
+      <div class="about-footer">
+        <p class="footer-copyright">{{ t('footer.copyright', { year: currentYear }) }}</p>
+      </div>
+    </div>
+  </div>
+</template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
@@ -19,10 +65,14 @@ import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-shell';
 
 const { t } = useI18n();
+// 动态当前年份
+const currentYear = ref(new Date().getFullYear());
+// 兜底默认版本
+const appVersion = ref('1.0.0');
 
-const appVersion = ref('0.1.63');
 const fetchVersion = async () => {
   try {
+    // 从 Tauri 配置文件读取真实应用版本
     appVersion.value = await getVersion();
   } catch (e) {
     console.error('Failed to get version:', e);
@@ -40,70 +90,18 @@ onMounted(() => {
 });
 </script>
 
-<template>
-  <div class="about-container">
-    <!-- 极简的时间线背景线 -->
-    <div class="timeline-bg"></div>
-
-    <div class="about-content">
-      <!-- Logo 和版本号，带进入动画 -->
-      <div class="app-header">
-        <img src="/phi-tklogo.png" alt="Phi TK" class="app-logo-img" />
-        <div class="version-badge">
-          <v-icon size="16" icon="mdi-tag-outline" class="version-icon" />
-          <span class="version-text">v{{ appVersion }}</span>
-        </div>
-      </div>
-
-      <!-- 信息卡片，纵向排列，依次滑入 -->
-      <div class="info-cards">
-        <v-card class="info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
-          <div class="card-content">
-            <div class="card-icon">
-              <v-icon size="28" icon="mdi-github" />
-            </div>
-            <div class="card-text">
-              <h3 class="card-title">GitHub</h3>
-              <p class="card-subtitle">View source code</p>
-            </div>
-            <div class="card-arrow">
-              <v-icon size="20" icon="mdi-open-in-new" />
-            </div>
-          </div>
-        </v-card>
-
-        <v-card class="info-card" :style="{ '--i': 1 }">
-          <div class="card-content">
-            <div class="card-icon">
-              <v-icon size="28" icon="mdi-license" />
-            </div>
-            <div class="card-text">
-              <h3 class="card-title">License</h3>
-              <p class="card-subtitle">{{ t('license') }}</p>
-            </div>
-          </div>
-        </v-card>
-
-        <v-card class="info-card" :style="{ '--i': 2 }">
-          <div class="card-content">
-            <div class="card-icon">
-              <v-icon size="28" icon="mdi-information-outline" />
-            </div>
-            <div class="card-text">
-              <h3 class="card-title">Version</h3>
-              <p class="card-subtitle">v{{ appVersion }}</p>
-            </div>
-          </div>
-        </v-card>
-      </div>
-
-      <!-- 底部版权 -->
-      <div class="about-footer">
-        <p class="footer-copyright">{{ t('footer.copyright') }}</p>
-      </div>
-    </div>
-  </div>
-</template>
+<i18n>
+en:
+  app: Phi TK
+  license: Licensed by GPLv3
+  footer:
+    copyright: © {year} Phi TK. All rights reserved.
+zh-CN:
+  app: Phi TK
+  license: 基于 GPLv3 协议授权
+  footer:
+    copyright: © {year} Phi TK. 保留所有权利。
+</i18n>
 
 <style scoped>
 /* 容器：居中布局，暗色背景 */
@@ -121,7 +119,6 @@ onMounted(() => {
   padding: 24px;
   background-color: #121212;
 }
-
 /* 隐形的时间线背景：一条从左到右快速扫过的极细线，仅作氛围 */
 .timeline-bg {
   position: absolute;
@@ -133,7 +130,6 @@ onMounted(() => {
   animation: scanLine 4s linear infinite;
   pointer-events: none;
 }
-
 @keyframes scanLine {
   0% {
     transform: translateX(-50%);
@@ -142,7 +138,6 @@ onMounted(() => {
     transform: translateX(0%);
   }
 }
-
 /* 主要内容区域 */
 .about-content {
   display: flex;
@@ -153,7 +148,6 @@ onMounted(() => {
   width: 100%;
   max-width: 450px;
 }
-
 /* 应用头部：Logo 和版本标签 */
 .app-header {
   display: flex;
@@ -165,14 +159,12 @@ onMounted(() => {
   animation: headerAppear 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
   animation-delay: 0.2s;
 }
-
 @keyframes headerAppear {
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
-
 .app-logo-img {
   width: 120px;
   max-width: 70vw;
@@ -183,12 +175,10 @@ onMounted(() => {
     transform 0.3s ease,
     filter 0.3s ease;
 }
-
 .app-logo-img:hover {
   transform: translateY(-4px) scale(1.03);
   filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.7));
 }
-
 .version-badge {
   display: flex;
   align-items: center;
@@ -201,7 +191,6 @@ onMounted(() => {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.85);
 }
-
 /* 信息卡片容器：纵向排列 */
 .info-cards {
   display: flex;
@@ -209,7 +198,6 @@ onMounted(() => {
   gap: 14px;
   width: 100%;
 }
-
 /* 卡片基础样式与进入动画 */
 .info-card {
   background: rgba(30, 30, 30, 0.85);
@@ -227,25 +215,21 @@ onMounted(() => {
     box-shadow 0.25s ease,
     border-color 0.25s ease;
 }
-
 /* 偶数卡片从右侧滑入，增加节奏变化 */
 .info-card:nth-child(even) {
   transform: translateX(30px);
 }
-
 @keyframes cardSlideIn {
   to {
     opacity: 1;
     transform: translateX(0);
   }
 }
-
 .info-card:hover {
   transform: translateY(-3px) scale(1.02);
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
   border-color: rgba(255, 255, 255, 0.2);
 }
-
 /* 卡片内部布局 */
 .card-content {
   display: flex;
@@ -253,7 +237,6 @@ onMounted(() => {
   padding: 18px 20px;
   gap: 16px;
 }
-
 .card-icon {
   width: 50px;
   height: 50px;
@@ -264,19 +247,16 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
 }
-
 .card-text {
   flex: 1;
   min-width: 0;
 }
-
 .card-title {
   font-size: 1.05rem;
   font-weight: 600;
   color: white;
   margin: 0 0 4px 0;
 }
-
 .card-subtitle {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.65);
@@ -285,19 +265,16 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .card-arrow {
   color: rgba(255, 255, 255, 0.4);
   transition:
     transform 0.2s ease,
     color 0.2s ease;
 }
-
 .info-card:hover .card-arrow {
   transform: translateX(4px);
   color: rgba(255, 255, 255, 0.85);
 }
-
 /* 底部版权 */
 .about-footer {
   margin-top: 8px;
@@ -305,20 +282,17 @@ onMounted(() => {
   animation: fadeIn 0.5s ease forwards;
   animation-delay: 1.4s;
 }
-
 @keyframes fadeIn {
   to {
     opacity: 1;
   }
 }
-
 .footer-copyright {
   font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.45);
   margin: 0;
   text-align: center;
 }
-
 /* 响应式微调 */
 @media (max-width: 768px) {
   .about-container {
@@ -331,7 +305,6 @@ onMounted(() => {
     padding: 14px 16px;
   }
 }
-
 @media (max-width: 480px) {
   .about-content {
     gap: 28px;
@@ -341,3 +314,4 @@ onMounted(() => {
   }
 }
 </style>
+
