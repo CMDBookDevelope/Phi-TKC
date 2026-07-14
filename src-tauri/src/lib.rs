@@ -178,7 +178,7 @@ pub async fn run() -> Result<()> {
 
     #[cfg(target_os = "linux")]
     let asset_dir = {
-        PathBuf::from("/usr/lib/Phi-TK/assets")
+        PathBuf::from("/usr/lib/ptkc-assets")
         // exe_dir.parent().unwrap().join("assets")
     };
 
