@@ -1,5 +1,5 @@
 <template>
-  <div class="static_glass about-container" ref="containerRef">
+  <div class="about-container" ref="containerRef">
     <!-- Canvas 雪花层 -->
     <canvas ref="canvasRef" class="snow-canvas"></canvas>
 
@@ -8,40 +8,43 @@
     <div class="about-content">
       <!-- Logo 和版本号，带进入动画 -->
       <div class="app-header">
-        <img src="/phi-tklogo.png" alt="Phi TKC" class="app-logo-img" />
-          <fv-Tag fontSize=19 border-radius=12 :modelValue="[{text: 'v' + appVersion, type: 'default', background: 'rgba(255, 255, 255, 1)' }]"></fv-Tag>
+        <img src="/phi-tklogo.png" alt="Phi TKC" class="fluent-glass app-logo-img" />
+		<p class="fluent-glass version-badge">v{{appVersion}}</p>
       </div>
       <!-- 信息卡片，纵向排列，依次滑入 -->
       <div class="info-cards">
-        <v-card class="info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
+        <v-card class="fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
           <div class="card-content">
             <div class="card-icon">
-              <v-icon size="28" icon="mdi-github" />
+              <fv-AnimatedIcon fontSize="28" icon="Globe" />
             </div>
             <div class="card-text">
               <h3 class="card-title">GitHub</h3>
               <p class="card-subtitle">View source code</p>
             </div>
             <div class="card-arrow">
-              <v-icon size="20" icon="mdi-open-in-new" />
+              <fv-AnimatedIcon fontSize="20" icon="Link" />
             </div>
           </div>
         </v-card>
-        <v-card class="info-card" :style="{ '--i': 1 }">
+        <v-card class="fluent-glass info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
           <div class="card-content">
             <div class="card-icon">
-              <v-icon size="28" icon="mdi-license" />
+              <fv-AnimatedIcon fontSize="28" icon="PrintAllPages" />
             </div>
             <div class="card-text">
               <h3 class="card-title">License</h3>
               <p class="card-subtitle">{{ t('license') }}</p>
             </div>
+            <div class="card-arrow">
+              <fv-AnimatedIcon fontSize="20" icon="Link" />
+            </div>
           </div>
         </v-card>
-        <v-card class="info-card" :style="{ '--i': 2 }">
+        <v-card class="fluent-glass info-card" :style="{ '--i': 2 }">
           <div class="card-content">
             <div class="card-icon">
-              <v-icon size="28" icon="mdi-information-outline" />
+              <fv-AnimatedIcon fontSize="28" icon="Package" />
             </div>
             <div class="card-text">
               <h3 class="card-title">Version</h3>
@@ -93,7 +96,13 @@ const fetchVersion = async () => {
 };
 
 const openGitHub = () => {
-  open('https://github.com/CMDBookDevelope/Phi-TKC.git').catch((e) => {
+  open('https://github.com/CMDBookDevelope/Phi-TKC').catch((e) => {
+    console.error('Failed to open GitHub:', e);
+  });
+};
+
+const openLicense = () => {
+  open('https://github.com/CMDBookDevelope/Phi-TKC/blob/main/LICENSE').catch((e) => {
     console.error('Failed to open GitHub:', e);
   });
 };
@@ -275,26 +284,23 @@ zh-CN:
   max-width: 70vw;
   height: auto;
   object-fit: contain;
-  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.6));
-  transition:
-    transform 0.3s ease,
-    filter 0.3s ease;
+  border-radius: 16px;
 }
 .app-logo-img:hover {
-  transform: translateY(-4px) scale(1.03);
-  filter: drop-shadow(0 10px 25px rgba(0, 0, 0, 0.7));
+  border-radius: 16px;
 }
 .version-badge {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px 14px;
-  background: rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 20px;
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.85);
+}
+.fluent-glass :deep(.tag) {
+	:fluent-glass.border-radius:20px;
 }
 /* 信息卡片容器：纵向排列 */
 .info-cards {
@@ -305,7 +311,6 @@ zh-CN:
 }
 /* 卡片基础样式与进入动画 */
 .info-card {
-  background: rgba(30, 30, 30, 0.85);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
@@ -316,9 +321,9 @@ zh-CN:
   animation: cardSlideIn 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
   animation-delay: calc(0.15s * var(--i) + 0.6s);
   transition:
-    transform 0.25s ease,
-    box-shadow 0.25s ease,
-    border-color 0.25s ease;
+    transform 0.25s ease-in-out,
+    box-shadow 0.25s ease-in-out,
+    border-color 0.25s ease-in-out;
 }
 /* 偶数卡片从右侧滑入，增加节奏变化 */
 .info-card:nth-child(even) {
@@ -329,11 +334,6 @@ zh-CN:
     opacity: 1;
     transform: translateX(0);
   }
-}
-.info-card:hover {
-  transform: translateY(-3px) scale(1.02);
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
-  border-color: rgba(255, 255, 255, 0.2);
 }
 /* 卡片内部布局 */
 .card-content {
@@ -365,16 +365,13 @@ zh-CN:
 .card-subtitle {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.65);
-  margin: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .card-arrow {
   color: rgba(255, 255, 255, 0.4);
   transition:
-    transform 0.2s ease,
-    color 0.2s ease;
+    transform 0.2s ease-in-out,
+    color 0.2s ease-in-out;
 }
 .info-card:hover .card-arrow {
   transform: translateX(4px);

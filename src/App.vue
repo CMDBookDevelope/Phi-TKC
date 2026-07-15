@@ -274,7 +274,12 @@ function dismissToast(id: string) {
 
 /* PhiTKCLogo */
 .tklogo{
+    transition: all .2s ease-in-out;
 	position: relative;
+}
+.tklogo:hover {
+  transition: all .2s ease-in-out;
+  transform: translateY(-3px) scale(1.02) rotate(-3deg);
 }
 .poslogo{
 	position: absolute;

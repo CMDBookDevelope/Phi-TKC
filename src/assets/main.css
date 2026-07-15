@@ -13,19 +13,21 @@ html, body, #app {
 /* VFluent 亚克力玻璃卡片通用类 */
 .fluent-glass {
   background: rgba(255,255,255,0.2);
-  transition: box-shadow .2s ease-in-out;
-  transition: -webkit-backdrop-filter .2s ease-in-out,box-shadow .2s ease-in-out;
+  transition: box-shadow .2s ease-in-out,
+              -webkit-backdrop-filter .2s ease-in-out,box-shadow .2s ease-in-out;
   box-shadow: 0 8px 24px rgba(255,255,255,0.1);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
+  border-radius: 16px
 }
 .fluent-glass:hover {
   border-color: rgba(255, 255, 255, 0.8);
   box-shadow: 0 8px 24px rgba(255,255,255,0.35);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  border-radius: 16px
 }
-.static_glass {
+.static-glass {
   background: rgba(255,255,255,0.2);
   transition: box-shadow .2s ease-in-out;
   transition: -webkit-backdrop-filter .2s ease-in-out,box-shadow .2s ease-in-out;
