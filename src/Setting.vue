@@ -146,7 +146,7 @@ function clearBackground() {
   <div class="settings-container">
     <div class="settings-scroll">
       <!-- Output Path -->
-      <div class="md3-card">
+      <div class="fluent-glass md3-card">
         <div class="card-label">{{ t('settings.outputPath.label') }}</div>
         <v-text-field
           v-model="outputPath"
@@ -181,7 +181,7 @@ function clearBackground() {
       </div>
 
       <!-- Background -->
-      <div class="md3-card">
+      <div class="fluent-glass md3-card">
         <div class="card-label">{{ t('settings.background.label') }}</div>
         <v-text-field
           v-model="backgroundPath"
@@ -251,7 +251,6 @@ function clearBackground() {
 
 /* ===== MD3 Card ===== */
 .md3-card {
-  background: rgba(30, 30, 30, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 20px;
   padding: 20px;
@@ -262,9 +261,9 @@ function clearBackground() {
 }
 
 .card-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
-  color: rgba(130, 177, 255, 0.8);
+  color: rgba(255,255,255,1);
   text-transform: uppercase;
   letter-spacing: 1px;
 }

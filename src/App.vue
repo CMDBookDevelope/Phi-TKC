@@ -1,51 +1,51 @@
 <template>
   <!-- 全局Toast -->
-	<fv-dialog v-model:open="toastOpen" modal persistent class="toast-wrap">
-		<div class="toast-container" v-for="item in toastList" :key="item">
-		  <div class="toast-item" :class="item.type">
-		    <span class="toast-icon">
-		      <template v-if="item.type === 'success'">✅</template>
-		      <template v-if="item.type === 'error'">❌</template>
-		      <template v-if="item.type === 'warning'">⚠️</template>
-		      <template v-if="item.type === 'info'">ℹ️</template>
-		    </span>
-		    <span class="toast-text">{{ item.msg }}</span>
-		    <fv-button appearance="text" @click="dismissToast(item.id)">×</fv-button>
-		  </div>
-		</div>
-	 </fv-dialog>
+  <fv-dialog v-model:open="toastOpen" modal persistent class="toast-wrap">
+    <div class="toast-container" v-for="item in toastList" :key="item">
+      <div class="toast-item" :class="item.type">
+        <span class="toast-icon">
+          <template v-if="item.type === 'success'">✅</template>
+          <template v-if="item.type === 'error'">❌</template>
+          <template v-if="item.type === 'warning'">⚠️</template>
+          <template v-if="item.type === 'info'">ℹ️</template>
+        </span>
+        <span class="toast-text">{{ item.msg }}</span>
+        <fv-button appearance="text" @click="dismissToast(item.id)">×</fv-button>
+      </div>
+    </div>
+  </fv-dialog>
 
-  <!-- 自定义背景 -->
   <div class="custom-bg-layer" :style="backgroundStyle"></div>
   <div class="custom-bg-overlay"></div>
-  
+
   <div class="app-root">
-	  <aside class="sidebar fluent-glass">
-	  	<div class="poslogo">
-			<img src="/phi-tklogo.png" alt="Phi TK" class="tklogo" />
-		</div>
-			<div class="nav-list">
-				<div class="nav-spacer"></div>
-				<div class="nav-items-wrap">
-					<div
-					  v-for="item in navItems"
-					  :key="item.key"
-					  class="nav-item"
-					  :class="{ selected: route.name === item.key }"
-					  @click="navigateTo(item.key)"
-					>
-					  <fv-animated-icon 
-						:modelValue="item.anim"
-						fontSize="20" 
-						theme=global
-						:icon="route.name === item.key ? item.activeIcon : item.icon"
-					  />
-				  <span class="nav-label" style="margin-left: 6px;">{{ t(item.key) }}</span>
-				</div>
-				</div>
-				<div class="nav-spacer"></div>
-			</div>
-	  </aside>
+    <fv-navigation-view
+    :options="navOptions"
+    :expand="true"
+    expand-mode="relative"
+    :expand-width="250"
+    :compact-width="64"
+    :show-search="false"
+    :show-setting="true"
+    :show-back="false"
+    :full-size-display="500"
+    mobileControlAcrylic="true"
+    :mobile-control-acrylic="true"
+    theme="dark"
+    :fontSize=18
+    title=Phi-TKC
+    :background="'transparent'"
+    :setting-title="t('setting')"
+    class="fluent-glass nav-view"
+    @item-click="onNavItemClick"
+    @setting-click="goToSetting"
+  >
+        <template v-slot:navIcon>
+            <div class="poslogo">
+                  <fv-img src="/phi-tklogo.png" alt="Phi TKC" class="tklogo" />
+        		</div>
+		</template>
+    </fv-navigation-view>
 
     <main class="main-content">
       <router-view v-slot="{ Component }">
@@ -65,40 +65,90 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { convertFileSrc } from '@tauri-apps/api/core'
+
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const component = ref()
+const selectedKey = ref(route.name as string)
+const sliderIndex = ref(-1)
+window.useOnLoaded = () => component
 
-// 删掉 export，改为挂载window全局
-function useOnLoaded() {
-  return component
-}
-window.useOnLoaded = useOnLoaded
-
-// 导航菜单图标使用VFluent内置图标名
-const navItems = [
-  { key: 'render', icon: 'Play', activeIcon: 'PlaySolid', anim: 'scaleDown' },
-  { key: 'rpe', icon: 'Page', activeIcon: 'PageSolid', anim: 'scaleYDown' },
-  { key: 'tasks', icon: 'Work', activeIcon: 'WorkSolid', anim: 'scaleXDown' },
-  { key: 'batch-render', icon: 'Set', activeIcon: 'SetSolid', anim: 'scaleDown' },
-  { key: 'setting', icon: 'Settings', activeIcon: 'SettingsSolid', anim: 'bounceRotate' },
-  { key: 'about', icon: 'Info', activeIcon: 'InfoSolid', anim: 'bounceRotate' },
+// ===== NavigationView 导航项（符合 VFluent3 文档规范） =====
+// 数据格式参考 ListView 的 items 结构：
+// { key: string, name: string, icon: string, type?: string, disabled?: boolean }
+const navOptions = [
+  { key: 'render', name: t('render'), icon: 'Play'},
+  { key: 'rpe', name: t('rpe'), icon: 'Page' },
+  { key: 'tasks', name: t('tasks'), icon: 'Work' },
+  { key: 'batch-render', name: t('batch-render'), icon: 'Set' },
+  { key: 'about', name: t('about'), icon: 'Info' },
 ]
-const navigateTo = (name: string) => router.push({ name })
-window.goto = navigateTo
 
-// 自定义背景路径（null 表示未设置）
+watch(
+  () => route.name,
+  (newName) => {
+    if (newName && typeof newName === 'string' && newName !== 'setting') {
+      selectedKey.value = newName
+    }
+  },
+  { immediate: true }
+)
+
+// 统一更新函数
+function updateNavigation(routeName: string) {
+  if (routeName && typeof routeName === 'string' && routeName !== 'setting') {
+    selectedKey.value = routeName
+    const index = navOptions.findIndex(item => item.key === routeName)
+    if (index !== -1) {
+      sliderIndex.value = index
+    }
+  }
+}
+
+// 路由变化时同步
+watch(
+  () => route.name,
+  (newName) => {
+    updateNavigation(newName as string)
+  },
+  { immediate: true } // 立即执行一次，保证初始状态正确
+)
+
+// 点击导航项只跳转路由
+function onNavItemClick(item: { key: string }) {
+  if (item.key === route.name) return
+  router.push({ name: item.key })
+}
+
+// 设置页按钮
+function goToSetting() {
+  if (route.name === 'setting') return
+  router.push({ name: 'setting' })
+}
+
+// 路由变化时同步索引（保证浏览器前进后退也生效）
+watch(
+  () => route.name,
+  (newName) => {
+    if (newName && typeof newName === 'string' && newName !== 'setting') {
+      selectedKey.value = newName
+      const index = navOptions.findIndex(item => item.key === newName)
+      if (index !== -1) sliderIndex.value = index
+    }
+  },
+  { immediate: true }
+)
+// ===== 自定义背景 =====
 const customBackground = ref<string | null>(null)
 window.addEventListener('customBackgroundChanged', ((e: CustomEvent) => {
   customBackground.value = e.detail
 }) as EventListener)
 
-// 背景样式计算
 const backgroundStyle = computed(() => {
   if (customBackground.value) {
     try {
@@ -111,7 +161,6 @@ const backgroundStyle = computed(() => {
         backgroundAttachment: 'fixed',
       }
     } catch {
-      // 转换失败则回退至默认 API
       return defaultBgStyle()
     }
   } else {
@@ -119,7 +168,6 @@ const backgroundStyle = computed(() => {
   }
 })
 
-// 默认背景样式（使用 API）
 function defaultBgStyle() {
   return {
     backgroundImage: `url("https://api.yppp.net/api.php")`,
@@ -130,7 +178,7 @@ function defaultBgStyle() {
   }
 }
 
-// 手动封装Toast状态（VFluent无useToastController）
+// ===== Toast =====
 type ToastType = 'success' | 'info' | 'warning'
 interface ToastItem {
   id: string
@@ -140,18 +188,10 @@ interface ToastItem {
 }
 const toastList = ref<ToastItem[]>([])
 const toastOpen = computed({
-  get() {
-    return toastList.value.length > 0
-  },
-  set(val) {
-    // 关闭弹窗时清空所有toast
-    if (!val) toastList.value = []
-  }
+  get() { return toastList.value.length > 0 },
+  set(val) { if (!val) toastList.value = [] },
 })
-function genId() {
-  return Math.random().toString(36).slice(2)
-}
-// 全局挂载toast方法供common.ts调用
+function genId() { return Math.random().toString(36).slice(2) }
 window.$toast = (msg: string, type: ToastType = 'info') => {
   const id = genId()
   const item: ToastItem = { id, msg, type }
@@ -162,37 +202,54 @@ window.$toast = (msg: string, type: ToastType = 'info') => {
 }
 function dismissToast(id: string) {
   const target = toastList.value.find(i => i.id === id)
-  if (target) {
-    clearTimeout(target.timer)
-    toastList.value = toastList.value.filter(i => i.id !== id)
-  }
+  if (target) { clearTimeout(target.timer); toastList.value = toastList.value.filter(i => i.id !== id) }
 }
+
+onMounted(() => {
+  document.addEventListener('contextmenu', (e) => e.preventDefault())
+  const currentKey = route.name as string
+  if (currentKey) {
+    const index = navOptions.findIndex(item => item.key === currentKey)
+    if (index !== -1) sliderIndex.value = index
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('contextmenu', (e) => e.preventDefault())
+})
 </script>
 
 <style scoped>
-/* 整体布局 */
+/* ===== 全局布局 ===== */
 .app-root {
   display: flex;
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  background: transparent !important; /* 确保根容器透明 */
+  background: transparent !important;
 }
-.sidebar {
-  width: 235px;
+
+/* ===== NavigationView 容器 ===== */
+.nav-view {
   flex-shrink: 0;
+  --fv-navigation-background: transparent !important;
+  color: #fff;
+}
+
+/* ===== Logo 标题区域 ===== */
+.poslogo {
   display: flex;
-  flex-direction: column;
-  padding: 12px 0;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 8px 16px;
+  width: 100%;
 }
-.brand-text {
-  padding: 6px;
-  font-size: 18px;
-  font-weight: 700;
-  color: #39c8bbff;
-  text-align: center;
-  margin-bottom: 16px;
+.tklogo {
+  transition: all 0.2s ease-in-out;
+  width: 28px;
+  height: auto;
 }
+/* ===== 主内容区 ===== */
 .main-content {
   flex: 1;
   min-height: 100vh;
@@ -215,80 +272,7 @@ function dismissToast(id: string) {
   place-items: center;
 }
 
-/* ===== 侧边栏导航项（纯 div 实现） ===== */
-.nav-list {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  flex: 1;
-  padding: 0 8px;
-}
-
-.nav-spacer {
-  flex: 1; /* 上下各占 1/6，使中间区域占 2/3 */
-}
-
-.nav-items-wrap {
-  flex: 2; /* 占 2/3 高度 */
-  display: flex;
-  flex-direction: column;
-  justify-content: space-evenly;
-  gap: 4px;
-}
-
-.nav-item {
-  padding: 8px 16px;
-  border-radius: 6px;
-  cursor: pointer;
-  position: relative;
-  display: flex;
-  align-items: center;
-  transition: background 0.2s ease-in-out; /* 只对背景做过渡，与 .fluent-glass 保持一致 */
-}
-
-.nav-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.nav-item.selected {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.nav-item.selected::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: #39c8bb;
-  opacity: 1;
-  transition: opacity 0.2s ease-in-out; /* 与 .fluent-glass 一致 */
-}
-
-.nav-item::before {
-  opacity: 0;
-  transition: opacity 0.2s ease-in-out; /* 保持统一 */
-}
-
-/* PhiTKCLogo */
-.tklogo{
-    transition: all .2s ease-in-out;
-	position: relative;
-}
-.tklogo:hover {
-  transition: all .2s ease-in-out;
-  transform: translateY(-3px) scale(1.02) rotate(-3deg);
-}
-.poslogo{
-	position: absolute;
-	left: 50%;
-	top: 14%;
-	transform: translate(-50%, -50%);
-}
-
-/* ===== 自定义背景 ===== */
+/* ===== 背景层 ===== */
 .custom-bg-layer {
   position: fixed;
   inset: 0;
@@ -298,12 +282,12 @@ function dismissToast(id: string) {
 .custom-bg-overlay {
   position: fixed;
   inset: 0;
-  background: radial-gradient(ellipse at center, transparent 0%, rgba(13,13,13,0.4) 40%, rgba(13,13,13,0.92) 100%);
+  background: radial-gradient(ellipse at center, transparent 0%, rgba(13, 13, 13, 0.4) 40%, rgba(13, 13, 13, 0.92) 100%);
   pointer-events: none;
   z-index: 0;
 }
 
-/* ===== Toast 弹窗 ===== */
+/* ===== Toast ===== */
 .toast-wrap {
   --fv-dialog-surface: transparent !important;
   position: fixed;
@@ -325,7 +309,7 @@ function dismissToast(id: string) {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(30,30,30,0.95);
+  background: rgba(30, 30, 30, 0.95);
   backdrop-filter: blur(16px);
   border-radius: 12px;
   border-left: 4px #82b1ff;
@@ -338,6 +322,7 @@ function dismissToast(id: string) {
 
 /* ===== 响应式 ===== */
 @media (max-width: 600px) {
-  .sidebar { width: 64px; }
+  .tklogo { width: 28px; }
+  .poslogo { padding: -5px -5px; }
 }
 </style>

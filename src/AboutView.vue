@@ -4,17 +4,17 @@
     <canvas ref="canvasRef" class="snow-canvas"></canvas>
 
     <!-- 极简的时间线背景线 -->
-    <div class="static_glass background"></div>
+    <div class="static-glass background"></div>
     <div class="about-content">
       <!-- Logo 和版本号，带进入动画 -->
       <div class="app-header">
-        <img src="/phi-tklogo.png" alt="Phi TKC" class="fluent-glass app-logo-img" />
+        <fv-img src="/phi-tklogo.png" alt="Phi TKC" class="fluent-glass app-logo-img" />
 		<p class="fluent-glass version-badge">v{{appVersion}}</p>
       </div>
       <!-- 信息卡片，纵向排列，依次滑入 -->
       <div class="info-cards">
-        <v-card class="fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
-          <div class="card-content">
+        <v-card class="info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
+          <div class="fluent-glass card-content">
             <div class="card-icon">
               <fv-AnimatedIcon fontSize="28" icon="Globe" />
             </div>
@@ -22,13 +22,13 @@
               <h3 class="card-title">GitHub</h3>
               <p class="card-subtitle">View source code</p>
             </div>
-            <div class="card-arrow">
+            <div class="card-link">
               <fv-AnimatedIcon fontSize="20" icon="Link" />
             </div>
           </div>
         </v-card>
-        <v-card class="fluent-glass info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
-          <div class="card-content">
+        <v-card class="info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
+          <div class="fluent-glass card-content">
             <div class="card-icon">
               <fv-AnimatedIcon fontSize="28" icon="PrintAllPages" />
             </div>
@@ -36,13 +36,13 @@
               <h3 class="card-title">License</h3>
               <p class="card-subtitle">{{ t('license') }}</p>
             </div>
-            <div class="card-arrow">
+            <div class="card-link">
               <fv-AnimatedIcon fontSize="20" icon="Link" />
             </div>
           </div>
         </v-card>
-        <v-card class="fluent-glass info-card" :style="{ '--i': 2 }">
-          <div class="card-content">
+        <v-card class="info-card" :style="{ '--i': 2 }">
+          <div class="fluent-glass card-content">
             <div class="card-icon">
               <fv-AnimatedIcon fontSize="28" icon="Package" />
             </div>
@@ -54,8 +54,8 @@
         </v-card>
       </div>
       <!-- 底部版权（传入动态年份） -->
-      <div class="about-footer">
-        <p class="footer-copyright">{{ t('footer.copyright', { year: currentYear }) }}</p>
+      <div class="fluent-glass about-footer">
+        		<p class="footer-sec">{{ t('footer.copyright', { year: currentYear }) }}</p>
       </div>
     </div>
   </div>
@@ -257,7 +257,7 @@ zh-CN:
   z-index: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: left;
   gap: 40px;
   width: 100%;
   max-width: 450px;
@@ -266,7 +266,7 @@ zh-CN:
 .app-header {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: left;
   gap: 16px;
   opacity: 0;
   transform: translateY(-20px);
@@ -294,13 +294,10 @@ zh-CN:
   align-items: center;
   gap: 6px;
   padding: 4px 14px;
+  width: 66px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 20px;
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.85);
-}
-.fluent-glass :deep(.tag) {
-	:fluent-glass.border-radius:20px;
 }
 /* 信息卡片容器：纵向排列 */
 .info-cards {
@@ -311,22 +308,21 @@ zh-CN:
 }
 /* 卡片基础样式与进入动画 */
 .info-card {
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(3px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
   overflow: hidden;
   cursor: pointer;
   opacity: 0;
   transform: translateX(-30px);
   animation: cardSlideIn 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  animation-delay: calc(0.15s * var(--i) + 0.6s);
+  animation-delay: .2s;
   transition:
     transform 0.25s ease-in-out,
     box-shadow 0.25s ease-in-out,
     border-color 0.25s ease-in-out;
 }
 /* 偶数卡片从右侧滑入，增加节奏变化 */
-.info-card:nth-child(even) {
+.info-card:nth-child(none) {
   transform: translateX(30px);
 }
 @keyframes cardSlideIn {
@@ -367,32 +363,37 @@ zh-CN:
   color: rgba(255, 255, 255, 0.65);
   overflow: hidden;
 }
-.card-arrow {
+.card-link {
   color: rgba(255, 255, 255, 0.4);
   transition:
     transform 0.2s ease-in-out,
     color 0.2s ease-in-out;
 }
-.info-card:hover .card-arrow {
+.info-card:hover .card-link {
   transform: translateX(4px);
   color: rgba(255, 255, 255, 0.85);
 }
 /* 底部版权 */
 .about-footer {
   margin-top: 8px;
-  opacity: 0;
   animation: fadeIn 0.5s ease forwards;
   animation-delay: 1.4s;
+  align-items: center;
+  padding: 4px 0px;
+  width: 200px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
 }
 @keyframes fadeIn {
   to {
     opacity: 1;
   }
 }
-.footer-copyright {
+.footer-sec {
   font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.45);
-  margin: 0;
+  margin:0;
   text-align: center;
 }
 /* 响应式微调 */

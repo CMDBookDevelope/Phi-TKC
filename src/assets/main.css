@@ -2,13 +2,24 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  user-select: none; /* ban选中 */
+  -webkit-user-select: none; /* Safari */
+  -moz-user-select: none;    /* Firefox */
+  -ms-user-select: none;     /* IE/Edge */
 }
 html, body, #app {
   height: 100%;
   overflow: hidden;
   font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
-  background: #36363650;
-  color: #e3e2e6;
+  background: #00000000;
+  color: #fff;
+}
+/* 选中白名单 */
+input, textarea, [contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
 }
 /* VFluent 亚克力玻璃卡片通用类 */
 .fluent-glass {
@@ -18,7 +29,7 @@ html, body, #app {
   box-shadow: 0 8px 24px rgba(255,255,255,0.1);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
-  border-radius: 16px
+  border-radius: 16px;
 }
 .fluent-glass:hover {
   border-color: rgba(255, 255, 255, 0.8);

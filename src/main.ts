@@ -80,3 +80,22 @@ app.mount('#app')
 
 export { i18n }
 
+// 禁用 WebView 默认右键菜单（原生）
+appWindow.onMenuEvent((event) => {
+  // 可完全忽略或自定义
+});
+
+// 或通过监听 contextmenu 事件（JS 层面）
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// 禁用 F12 / Ctrl+Shift+I / Ctrl+Shift+J / Ctrl+U / Ctrl+R
+document.addEventListener('keydown', (e) => {
+  const ctrl = e.ctrlKey || e.metaKey;
+  const shift = e.shiftKey;
+  const key = e.key.toUpperCase();
+
+  if (e.key === 'F12') e.preventDefault();
+  if (ctrl && shift && (key === 'I' || key === 'J')) e.preventDefault();
+  if (ctrl && (key === 'U' || key === 'R')) e.preventDefault();
+});
+

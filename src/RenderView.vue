@@ -1,6 +1,6 @@
 <i18n>
   en:
-    already-running: Phi TK is already running
+    already-running: Phi TKC is already running
 
     prev-step: Previous
     next-step: Next
@@ -50,7 +50,7 @@
     ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and set Path correctly.
 
   zh-CN:
-    already-running: Phi TK 已经在运行
+    already-running: Phi TKC 已经在运行
 
     prev-step: 上一步
     next-step: 下一步
@@ -93,7 +93,7 @@
 
     ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并设置 Path。
 
-  </i18n>
+</i18n>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
