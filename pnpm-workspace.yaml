@@ -1,5 +1,6 @@
 allowBuilds:
   '@parcel/watcher': false
+  canvas: false
   esbuild: false
   optipng-bin: set this to true or false
   pngquant-bin: set this to true or false

@@ -6,7 +6,15 @@
     "main"
   ],
   "permissions": [
-    "core:default",
+	"core:default",
+    {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "https://api.yppp.net/**"
+        }
+      ]
+    },
     "fs:allow-read-file",
     "fs:allow-write-file",
     {
@@ -41,6 +49,19 @@
     "os:default",
     "shell:default",
     "dialog:default",
-    "http:default"
+    "http:default",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        "$HOME/**",
+        "$DESKTOP/**",
+        "$DOCUMENT/**",
+        "$DOWNLOAD/**",
+        "$APP/**",
+        "$APP_DATA/**",
+        "$CACHE/**",
+        "/**"
+        ]
+    }
   ]
 }

@@ -7,12 +7,18 @@
   -moz-user-select: none;    /* Firefox */
   -ms-user-select: none;     /* IE/Edge */
 }
+:root{
+  --main-color: #ffffff;
+  --bg-color: #222222;
+  --sub-color: #888888;
+}
+
 html, body, #app {
   height: 100%;
   overflow: hidden;
   font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   background: #00000000;
-  color: #fff;
+  color: var(--main-color);
 }
 /* 选中白名单 */
 input, textarea, [contenteditable="true"] {
