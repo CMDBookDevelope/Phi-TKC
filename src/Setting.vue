@@ -78,7 +78,7 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
-import { ref, computed, inject, watch, onMounted } from 'vue';
+import { ref, computed, inject, watch, onMounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { open } from '@tauri-apps/plugin-dialog';
 import { appConfigDir, appDataDir, homeDir } from '@tauri-apps/api/path';
@@ -91,65 +91,73 @@ defineOptions({ name: 'SettingsPanel' });
 
 const { t } = useI18n();
 
-const hasCustomMain = computed(() => !!localStorage.getItem('mainColor'))
-const hasCustomBg = computed(() => !!localStorage.getItem('bgColor'))
-const hasCustomSub = computed(() => !!localStorage.getItem('subColor'))
-const useCustomColors = computed(() => hasCustomMain.value || hasCustomBg.value || hasCustomSub.value)
+// ---- 主题颜色注入 ----
+const themeColors = inject<{ mainColor: Ref<string>; bgColor: Ref<string>; subColor: Ref<string> }>('themeColors');
+if (!themeColors) throw new Error('themeColors not provided');
+const { mainColor, bgColor, subColor } = themeColors;
 
-const themeColors = inject<{ mainColor: Ref<string>; bgColor: Ref<string>; subColor: Ref<string> }>('themeColors')
-if (!themeColors) throw new Error('themeColors not provided')
-const { mainColor, bgColor, subColor } = themeColors
-
-// 从 App 注入主题颜色
-const hasMainColor = computed(() => !!localStorage.getItem('mainColor'))
-const hasBgColor = computed(() => !!localStorage.getItem('bgColor'))
-const hasSubColor = computed(() => !!localStorage.getItem('subColor'))
-const hasAnyCustomColor = computed(() => hasMainColor.value || hasBgColor.value || hasSubColor.value)
-
-// 本地状态（用于控制UI显示）
+// 本地显示颜色
 const localMain = ref(mainColor.value);
 const localBg = ref(bgColor.value);
 const localSub = ref(subColor.value);
 
-// 监听外部颜色变化
 watch([mainColor, bgColor, subColor], ([m, b, s]) => {
   localMain.value = m;
   localBg.value = b;
   localSub.value = s;
 });
 
-// 输出路径
-const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
-const saved = ref(false);
-const warning = ref('');
-const selectedInfo = ref<string | null>(null);
+// 是否有自定义颜色（用于显示重置按钮）
+const hasMainColor = computed(() => !!localStorage.getItem('mainColor'));
+const hasBgColor = computed(() => !!localStorage.getItem('bgColor'));
+const hasSubColor = computed(() => !!localStorage.getItem('subColor'));
+const useCustomColors = computed(() => hasMainColor.value || hasBgColor.value || hasSubColor.value);
 
-// 自定义背景
-const backgroundPath = ref<string>(localStorage.getItem('customBackground') || '');
-const backgroundSaved = ref(false);
+// ---- 颜色选择器弹出状态 ----
+const mainColorPickerOpen = ref(false);
+const bgColorPickerOpen = ref(false);
+const subColorPickerOpen = ref(false);
+const tempMainColor = ref(localMain.value);
+const tempBgColor = ref(localBg.value);
+const tempSubColor = ref(localSub.value);
 
-// 颜色自定义状态
-const customMain = ref(localStorage.getItem('mainColor') || '');
-const customBg = ref(localStorage.getItem('bgColor') || '');
-const customSub = ref(localStorage.getItem('subColor') || '');
-const colorSaved = ref(false);
+// 颜色按钮的 ref
+const mainColorBtn = ref<HTMLElement | null>(null);
+const bgColorBtn = ref<HTMLElement | null>(null);
+const subColorBtn = ref<HTMLElement | null>(null);
 
-// 背景预览 URL
-const backgroundPreviewUrl = computed(() => {
-  if (backgroundPath.value) {
-    try { return convertFileSrc(backgroundPath.value); } catch { return backgroundPath.value; }
+// ---- 颜色操作方法 ----
+function openColorPicker(type: 'main' | 'bg' | 'sub') {
+  if (type === 'main') {
+    tempMainColor.value = localMain.value;
+    mainColorPickerOpen.value = true;
+  } else if (type === 'bg') {
+    tempBgColor.value = localBg.value;
+    bgColorPickerOpen.value = true;
+  } else {
+    tempSubColor.value = localSub.value;
+    subColorPickerOpen.value = true;
   }
-  return '';
-});
+}
 
-// -------- 颜色操作 --------
+function confirmColor(type: 'main' | 'bg' | 'sub') {
+  if (type === 'main') {
+    saveColor('mainColor', tempMainColor.value);
+    mainColorPickerOpen.value = false;
+  } else if (type === 'bg') {
+    saveColor('bgColor', tempBgColor.value);
+    bgColorPickerOpen.value = false;
+  } else {
+    saveColor('subColor', tempSubColor.value);
+    subColorPickerOpen.value = false;
+  }
+}
+
 function saveColor(colorKey: string, value: string) {
   localStorage.setItem(colorKey, value);
-  // 更新 inject 的 ref
   if (colorKey === 'mainColor') mainColor.value = value;
   else if (colorKey === 'bgColor') bgColor.value = value;
   else if (colorKey === 'subColor') subColor.value = value;
-  // 触发全局颜色更新事件（可选）
   window.dispatchEvent(new CustomEvent('themeColorChanged', { detail: { key: colorKey, value } }));
   colorSaved.value = true;
   setTimeout(() => (colorSaved.value = false), 1500);
@@ -157,12 +165,10 @@ function saveColor(colorKey: string, value: string) {
 
 function resetColor(colorKey: string) {
   localStorage.removeItem(colorKey);
-  // 重新从图片提取（需要调用 App 的方法）
-  if (window.extractColorsFromBackground) {
-    window.extractColorsFromBackground();
+  // 重新从当前背景提取颜色（需要 App 提供方法）
+  if (window.extractColorsFromCurrentBackground) {
+    window.extractColorsFromCurrentBackground();
   }
-  // 同时更新本地显示（但自动提取会异步修改 mainColor 等，我们等待）
-  // 简单处理：清空自定义后，自动提取会触发 watch 更新 local 值
   colorSaved.value = true;
   setTimeout(() => (colorSaved.value = false), 1500);
 }
@@ -171,14 +177,21 @@ function resetAllColors() {
   localStorage.removeItem('mainColor');
   localStorage.removeItem('bgColor');
   localStorage.removeItem('subColor');
-  if (window.extractColorsFromBackground) {
-    window.extractColorsFromBackground();
+  if (window.extractColorsFromCurrentBackground) {
+    window.extractColorsFromCurrentBackground();
   }
   colorSaved.value = true;
   setTimeout(() => (colorSaved.value = false), 1500);
 }
 
-// -------- 路径操作 --------
+const colorSaved = ref(false);
+
+// ---- 输出路径 ----
+const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
+const saved = ref(false);
+const warning = ref('');
+const selectedInfo = ref<string | null>(null);
+
 async function selectFolder() {
   warning.value = '';
   selectedInfo.value = null;
@@ -213,14 +226,23 @@ function clearPath() {
   localStorage.removeItem('outputPath');
 }
 
-// -------- 背景操作 --------
+// ---- 背景操作 ----
+const backgroundPath = ref<string>(localStorage.getItem('customBackground') || '');
+const backgroundSaved = ref(false);
+
+const backgroundPreviewUrl = computed(() => {
+  if (backgroundPath.value) {
+    try { return convertFileSrc(backgroundPath.value); } catch { return backgroundPath.value; }
+  }
+  return '';
+});
+
 async function selectBackground() {
   try {
     const selected = await open({ multiple: false, filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }], defaultPath: await appConfigDir() });
     if (selected === null) return;
     const path = Array.isArray(selected) ? selected[0] : selected;
     backgroundPath.value = path as string;
-    // 保存并通知 App
     if (window.saveCustomBackground) {
       window.saveCustomBackground(path as string);
     } else {
@@ -232,61 +254,70 @@ async function selectBackground() {
   } catch (err: any) { console.error('Failed to select background:', err); }
 }
 
-// 刷新背景（从API获取新图片，清除自定义）
-function refreshBackground() {
-  if (window.refreshApiBackground) {
-    window.refreshApiBackground();
-    // 更新本地 backgroundPath 为空
-    backgroundPath.value = '';
-    this.$barInfo('Background refreshed');
+// 固定当前背景（调用 App 的方法）
+async function fixCurrentBackground() {
+  if (window.fixCurrentBackground) {
+    await window.fixCurrentBackground();
+    // 更新本地显示
+    const stored = localStorage.getItem('customBackground');
+    if (stored) {
+      backgroundPath.value = stored;
+    }
+    backgroundSaved.value = true;
+    setTimeout(() => (backgroundSaved.value = false), 1500);
   } else {
-    // fallback
-    localStorage.removeItem('customBackground');
-    backgroundPath.value = '';
-    window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: null }));
-    this.$barInfo('Background refreshed');
+    console.warn('fixCurrentBackground not available');
   }
 }
 
-// 清除自定义背景并立即获取API
+// 刷新背景（从API获取新图片）
+function refreshBackground() {
+  if (window.refreshApiBackground) {
+    window.refreshApiBackground();
+    backgroundPath.value = '';
+    // 提示刷新成功（可通过状态显示）
+    backgroundSaved.value = true;
+    setTimeout(() => (backgroundSaved.value = false), 1500);
+  } else {
+    console.warn('refreshApiBackground not available');
+  }
+}
+
+// 清除自定义背景并刷新API
 function clearAndRefreshBackground() {
-  if (!backgroundPath.value) {
-    this.$barWarning(t('settings.background.noCustom'));
-    return;
+  if (backgroundPath.value) {
+    // 清除自定义
+    if (window.saveCustomBackground) {
+      window.saveCustomBackground(null);
+    } else {
+      localStorage.removeItem('customBackground');
+    }
+    backgroundPath.value = '';
   }
   refreshBackground();
 }
 
-// -------- TreeView 文件选择（尝试实现） --------
-
+// ---- TreeView 文件选择（保留但简化，未改动） ----
 const treeDialogOpen = ref(false);
 const treeData = ref<any[]>([]);
 const treeLoading = ref(false);
 const treeError = ref('');
 
-// 构建树节点
 async function buildTree(path: string): Promise<any[]> {
   try {
     const entries = await readDir(path, { recursive: false });
     const children = [];
     for (const entry of entries) {
-      const isDir = entry.children !== undefined; // 实际上没有 children 属性，需判断类型
-      // 使用 stat 判断是否为目录
-      // 但 readDir 返回的 DirEntry 有 isDirectory 方法（在 Tauri v2 中）
-      // 由于版本不确定，用 try-catch
       let isDirectory = false;
       try {
-        const stat = await readDir(path + '/' + entry.name, { recursive: false });
+        await readDir(path + '/' + entry.name, { recursive: false });
         isDirectory = true;
-      } catch {
-        isDirectory = false;
-      }
-      // 简化：只显示目录
+      } catch { /* ignore */ }
       if (isDirectory) {
         children.push({
           label: entry.name,
           path: path + '/' + entry.name,
-          children: [], // 懒加载
+          children: [],
           isLeaf: false,
         });
       }
@@ -297,38 +328,32 @@ async function buildTree(path: string): Promise<any[]> {
   }
 }
 
-// 打开 TreeView 对话框并初始化根目录
 async function openTreeDialog() {
   treeDialogOpen.value = true;
   treeLoading.value = true;
   treeError.value = '';
   try {
-    const root = await homeDir(); // 用户主目录
+    const root = await homeDir();
     const children = await buildTree(root);
     treeData.value = [{ label: 'Home', path: root, children, isLeaf: false }];
   } catch (err: any) {
     treeError.value = err.message;
-    // 若失败，提示用户使用传统选择
-    this.$barWarning('TreeView failed, please use "Select folder" button');
   } finally {
     treeLoading.value = false;
   }
 }
 
-// 点击树节点加载子节点
 async function loadChildren(node: any) {
-  if (node.children && node.children.length > 0) return; // 已加载
+  if (node.children && node.children.length > 0) return;
   try {
     const children = await buildTree(node.path);
     node.children = children;
   } catch (err: any) {
-    this.$barError(`Cannot load ${node.path}: ${err.message}`);
+    console.error(err);
   }
 }
 
-// 选择树节点
 function selectTreeNode(node: any) {
-  // 只选择目录
   if (node.isLeaf) return;
   outputPath.value = node.path;
   const rootName = node.path.split(/[\\/]/).pop() || node.path;
@@ -336,7 +361,20 @@ function selectTreeNode(node: any) {
   treeDialogOpen.value = false;
 }
 
-// 监听输出路径变化，更新selectedInfo（若通过树选择）
+function onTreeItemClick(item: any) {
+  if (!item.isLeaf && (!item.children || item.children.length === 0)) {
+    loadChildren(item);
+  }
+  selectTreeNode(item);
+}
+
+function onTreeExpand(item: any) {
+  if (!item.isLeaf && (!item.children || item.children.length === 0)) {
+    loadChildren(item);
+  }
+}
+
+// ---- 监听输出路径变化 ----
 watch(outputPath, (newPath) => {
   if (newPath && !selectedInfo.value) {
     const name = newPath.split(/[\\/]/).pop() || newPath;
@@ -344,30 +382,8 @@ watch(outputPath, (newPath) => {
   }
 });
 
-// 处理树节点的点击（展开/选择）
-function onTreeItemClick(item: any) {
-  // 如果是目录且未加载子节点，则加载
-  if (!item.isLeaf && (!item.children || item.children.length === 0)) {
-    loadChildren(item);
-  }
-  // 允许选择目录（点击选择）
-  // 但我们希望点击节点本身进行选择，而不是展开
-  // 所以直接用 selectTreeNode(item)
-  selectTreeNode(item);
-}
-
-// 树节点的展开事件（用于懒加载）
-function onTreeExpand(item: any) {
-  if (!item.isLeaf && (!item.children || item.children.length === 0)) {
-    loadChildren(item);
-  }
-}
-
-// 暴露方法给全局（颜色提取）
-window.extractColorsFromBackground = window.extractColorsFromBackground || (() => {});
-
+// ---- 监听外部主题颜色变化 ----
 onMounted(() => {
-  // 如果 App 提供了颜色更新事件，监听
   window.addEventListener('themeColorChanged', ((e: CustomEvent) => {
     const { key, value } = e.detail;
     if (key === 'mainColor') localMain.value = value;
@@ -376,6 +392,8 @@ onMounted(() => {
   }) as EventListener);
 });
 
+// ---- 暴露全局方法（供App调用） ----
+// 这些方法已在 App.vue 中实现，这里不需要额外暴露
 </script>
 
 <template>
@@ -384,14 +402,9 @@ onMounted(() => {
       <!-- 输出路径卡片 -->
       <fv-card class="md3-card fluent-glass">
         <div class="card-label">{{ t('settings.outputPath.label') }}</div>
-        <!-- 使用 Breadcrumb 显示路径 -->
         <fv-breadcrumb
           v-if="outputPath"
-          :items="outputPath.split(/[\\/]/).filter(Boolean).map((seg, idx, arr) => ({
-            text: seg,
-            to: '#',
-            // 可以添加点击跳转，但这里仅显示
-          }))"
+          :items="outputPath.split(/[\\/]/).filter(Boolean).map((seg) => ({ text: seg, to: '#' }))"
           separator="/"
           class="path-breadcrumb"
         />
@@ -417,9 +430,11 @@ onMounted(() => {
             <fv-icon name="close" size="18" />
           </fv-button>
         </div>
-        <!-- 警告信息 -->
         <fv-message-bar v-if="warning" type="warning" class="mt-2">
           {{ warning }}
+        </fv-message-bar>
+        <fv-message-bar v-if="saved" type="success" class="mt-2">
+          {{ t('settings.saved') }}
         </fv-message-bar>
       </fv-card>
 
@@ -456,43 +471,109 @@ onMounted(() => {
       <fv-card class="md3-card fluent-glass">
         <div class="card-label">Theme Colors</div>
         <div class="color-row">
+          <!-- 主色 -->
           <div class="color-item">
             <span class="color-label">{{ t('settings.colors.main') }}</span>
-            <fv-callout :color="localMain" class="color-callout">
-              <span>{{ localMain }}</span>
-                <div class="color-actions">
-		          <fv-color-picker v-model="customMain" @change="saveColor('mainColor', customMain)" />
-		          <fv-button :disabled="!hasMainColor" @click="resetColor('mainColor')">
-  				{{ t('settings.colors.reset') }}
-			  </fv-button>
-            </div>
+            <fv-button
+              ref="mainColorBtn"
+              class="color-swatch"
+              :style="{ backgroundColor: localMain }"
+              @click="openColorPicker('main')"
+            >
+              {{ localMain }}
+            </fv-button>
+            <fv-callout
+              v-model:open="mainColorPickerOpen"
+              :target="mainColorBtn"
+              position="below"
+              class="color-picker-callout"
+            >
+              <div class="picker-content">
+                <fv-color-picker v-model="tempMainColor" />
+                <div class="picker-actions">
+                  <fv-button appearance="filled" @click="confirmColor('main')">确定</fv-button>
+                  <fv-button appearance="text" @click="mainColorPickerOpen = false">取消</fv-button>
+                </div>
+              </div>
             </fv-callout>
+            <fv-button
+              appearance="text"
+              @click="resetColor('mainColor')"
+              :disabled="!hasMainColor"
+            >
+              {{ t('settings.colors.reset') }}
+            </fv-button>
           </div>
+
+          <!-- 背景色 -->
           <div class="color-item">
             <span class="color-label">{{ t('settings.colors.bg') }}</span>
-            <fv-callout :color="localBg" class="color-callout">
-              <span>{{ localBg }}</span>
+            <fv-button
+              ref="bgColorBtn"
+              class="color-swatch"
+              :style="{ backgroundColor: localBg }"
+              @click="openColorPicker('bg')"
+            >
+              {{ localBg }}
+            </fv-button>
+            <fv-callout
+              v-model:open="bgColorPickerOpen"
+              :target="bgColorBtn"
+              position="below"
+              class="color-picker-callout"
+            >
+              <div class="picker-content">
+                <fv-color-picker v-model="tempBgColor" />
+                <div class="picker-actions">
+                  <fv-button appearance="filled" @click="confirmColor('bg')">确定</fv-button>
+                  <fv-button appearance="text" @click="bgColorPickerOpen = false">取消</fv-button>
+                </div>
+              </div>
             </fv-callout>
-            <div class="color-actions">
-              <fv-color-picker v-model="customBg" @change="saveColor('bgColor', customBg)" />
-              <fv-button appearance="text" @click="resetColor('bgColor')" :disabled="!hasBgColor">
-                {{ t('settings.colors.reset') }}
-              </fv-button>
-            </div>
+            <fv-button
+              appearance="text"
+              @click="resetColor('bgColor')"
+              :disabled="!hasBgColor"
+            >
+              {{ t('settings.colors.reset') }}
+            </fv-button>
           </div>
+
+          <!-- 辅色 -->
           <div class="color-item">
             <span class="color-label">{{ t('settings.colors.sub') }}</span>
-            <fv-callout :color="localSub" class="color-callout">
-              <span>{{ localSub }}</span>
+            <fv-button
+              ref="subColorBtn"
+              class="color-swatch"
+              :style="{ backgroundColor: localSub }"
+              @click="openColorPicker('sub')"
+            >
+              {{ localSub }}
+            </fv-button>
+            <fv-callout
+              v-model:open="subColorPickerOpen"
+              :target="subColorBtn"
+              position="below"
+              class="color-picker-callout"
+            >
+              <div class="picker-content">
+                <fv-color-picker v-model="tempSubColor" />
+                <div class="picker-actions">
+                  <fv-button appearance="filled" @click="confirmColor('sub')">确定</fv-button>
+                  <fv-button appearance="text" @click="subColorPickerOpen = false">取消</fv-button>
+                </div>
+              </div>
             </fv-callout>
-            <div class="color-actions">
-              <fv-color-picker v-model="customSub" @change="saveColor('subColor', customSub)" />
-              <fv-button appearance="text" @click="resetColor('subColor')" :disabled="!hasSubColor">
-                {{ t('settings.colors.reset') }}
-              </fv-button>
-            </div>
+            <fv-button
+              appearance="text"
+              @click="resetColor('subColor')"
+              :disabled="!hasSubColor"
+            >
+              {{ t('settings.colors.reset') }}
+            </fv-button>
           </div>
         </div>
+
         <div class="card-actions">
           <fv-button appearance="tonal" @click="resetAllColors" :disabled="!useCustomColors">
             {{ t('settings.colors.reset') }} All
@@ -504,7 +585,7 @@ onMounted(() => {
       </fv-card>
     </div>
 
-    <!-- TreeView 选择对话框 -->
+    <!-- TreeView 对话框（保持不变） -->
     <fv-dialog v-model:open="treeDialogOpen" modal class="tree-dialog">
       <fv-card class="tree-card">
         <h3>Select Folder</h3>
@@ -547,7 +628,6 @@ onMounted(() => {
   gap: 24px;
 }
 
-/* MD3 Card style (玻璃效果) */
 .md3-card {
   background: rgba(30, 30, 30, 0.6);
   backdrop-filter: blur(16px);
@@ -593,7 +673,6 @@ onMounted(() => {
   font-style: italic;
 }
 
-/* 背景预览 */
 .bg-preview {
   width: 100%;
   max-width: 480px;
@@ -615,7 +694,6 @@ onMounted(() => {
   object-fit: cover;
 }
 
-/* 颜色行 */
 .color-row {
   display: flex;
   flex-direction: column;
@@ -632,19 +710,32 @@ onMounted(() => {
   color: rgba(255, 255, 255, 0.7);
   font-weight: 500;
 }
-.color-callout {
+.color-swatch {
+  min-width: 80px;
   padding: 4px 12px;
   border-radius: 8px;
   font-weight: 600;
   font-size: 14px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
-.color-actions {
+.color-picker-callout {
+  --fv-callout-background: rgba(30, 30, 30, 0.95);
+  backdrop-filter: blur(20px);
+  border-radius: 16px;
+  padding: 16px;
+}
+.picker-content {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+}
+.picker-actions {
+  display: flex;
+  justify-content: flex-end;
   gap: 8px;
 }
 
-/* TreeView 对话框 */
 .tree-dialog {
   --fv-dialog-surface: transparent;
 }
@@ -676,10 +767,10 @@ onMounted(() => {
   gap: 8px;
 }
 
-/* 响应式 */
 @media (max-width: 600px) {
   .settings-container { padding: 16px; }
   .md3-card { padding: 16px; }
   .color-item { flex-direction: column; align-items: stretch; gap: 8px; }
+  .color-swatch { width: 100%; }
 }
 </style>

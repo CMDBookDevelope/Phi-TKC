@@ -240,6 +240,31 @@ async function refreshApiBackground() {
 // 暴露刷新方法给全局
 window.refreshApiBackground = refreshApiBackground
 
+// 从当前背景（base64）重新提取颜色，忽略用户自定义
+async function extractColorsFromCurrentBackground() {
+  if (!currentBgBase64.value) return;
+  // 强制提取，即使有自定义颜色也覆盖
+  try {
+    const v = new Vibrant(currentBgBase64.value, {});
+    const palette = await v.getPalette();
+    const colors = [
+      palette.Vibrant?.hex,
+      palette.Muted?.hex,
+      palette.DarkVibrant?.hex
+    ].filter(Boolean);
+    if (colors.length >= 3) {
+      mainColor.value = colors[0];
+      bgColor.value = colors[1];
+      subColor.value = colors[2];
+      // 不保存到 localStorage，仅作为临时显示
+    }
+  } catch (err) {
+    console.warn('颜色提取失败', err);
+  }
+}
+// 暴露到 window
+window.extractColorsFromCurrentBackground = extractColorsFromCurrentBackground;
+
 // 读取用户自定义颜色
 function loadCustomColors() {
   const m = localStorage.getItem('mainColor')
