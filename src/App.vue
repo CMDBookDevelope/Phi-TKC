@@ -13,14 +13,12 @@
       :show-setting="true"
       :show-back="false"
       :full-size-display="500"
-      mobileControlAcrylic="true"
-      :mobile-control-acrylic="true"
       theme="dark"
-      :fontSize="18"
+      :foreground="subColor"
       title="Phi-TKC"
-      :background="'transparent'"
+      background="#00000000"
       :setting-title="t('setting')"
-      class="fluent-glass nav-view"
+      class="nav-view"
       @item-click="onNavItemClick"
       @setting-click="goToSetting"
     >
@@ -111,6 +109,14 @@ watch(
   { immediate: true }
 )
 
+watch(
+  [mainColor, bgColor, subColor],
+  () => {
+    updateCssVariables();
+  },
+  { immediate: true }
+);
+
 function onNavItemClick(item: { key: string }) {
   if (item.key === route.name) return
   router.push({ name: item.key })
@@ -121,18 +127,7 @@ function goToSetting() {
   router.push({ name: 'setting' })
 }
 
-// 保存背景到 localStorage 并触发事件
-function saveCustomBackground(path: string | null) {
-  if (path) {
-    localStorage.setItem('customBackground', path)
-  } else {
-    localStorage.removeItem('customBackground')
-  }
-  customBackground.value = path
-  window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: path }))
-}
-
-// 监听外部事件（来自 Setting）
+// ---- 监听外部事件（来自 Setting） ----
 window.addEventListener('customBackgroundChanged', ((e: CustomEvent) => {
   const detail = e.detail
   if (detail === null || detail === '') {
@@ -142,15 +137,14 @@ window.addEventListener('customBackgroundChanged', ((e: CustomEvent) => {
     customBackground.value = detail
     localStorage.setItem('customBackground', detail)
   }
-  // 背景变化后重新提取颜色
+  // 背景变化后重新提取颜色（但保留用户自定义颜色）
   nextTick(() => extractColorsFromBackground())
 }) as EventListener)
 
-// 背景样式
+// ---- 背景样式 ----
 const backgroundImageUrl = ref<string>('') // 用于强制刷新
 
 const backgroundStyle = computed(() => {
-  // 优先使用自定义背景（本地文件）
   if (customBackground.value) {
     try {
       const imgUrl = convertFileSrc(customBackground.value)
@@ -165,7 +159,6 @@ const backgroundStyle = computed(() => {
       return defaultBgStyle()
     }
   } else if (currentBgBase64.value) {
-    // 使用缓存的 base64（API 图片）
     return {
       backgroundImage: `url(${currentBgBase64.value})`,
       backgroundSize: 'cover',
@@ -174,7 +167,6 @@ const backgroundStyle = computed(() => {
       backgroundAttachment: 'fixed',
     }
   } else {
-    // fallback: 直接请求 API（但不会缓存，仅当缓存为空时）
     return defaultBgStyle()
   }
 })
@@ -189,7 +181,7 @@ function defaultBgStyle() {
   }
 }
 
-// 加载 API 背景
+// ---- 加载 API 背景 ----
 async function loadApiBackground() {
   try {
     const res = await fetch('https://api.yppp.net/api.php')
@@ -207,7 +199,7 @@ async function loadApiBackground() {
   }
 }
 
-// 加载自定义背景
+// ---- 加载自定义背景 ----
 async function loadCustomBackground(path: string) {
   try {
     const data = await readFile(path)
@@ -220,7 +212,7 @@ async function loadCustomBackground(path: string) {
   }
 }
 
-// 辅助函数
+// ---- 辅助：ArrayBuffer to base64 ----
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = ''
   const bytes = new Uint8Array(buffer)
@@ -230,20 +222,18 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return window.btoa(binary)
 }
 
-// 强制刷新 API 背景（清除自定义）
+// ---- 强制刷新 API 背景（清除自定义） ----
 async function refreshApiBackground() {
   await loadApiBackground()
-  // 同时清除自定义背景存储
   localStorage.removeItem('customBackground')
+  customBackground.value = null
   window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: null }))
 }
-// 暴露刷新方法给全局
 window.refreshApiBackground = refreshApiBackground
 
-// 从当前背景（base64）重新提取颜色，忽略用户自定义
+// ---- 从当前背景重新提取颜色（供 Setting 重置使用） ----
 async function extractColorsFromCurrentBackground() {
   if (!currentBgBase64.value) return;
-  // 强制提取，即使有自定义颜色也覆盖
   try {
     const v = new Vibrant(currentBgBase64.value, {});
     const palette = await v.getPalette();
@@ -253,19 +243,30 @@ async function extractColorsFromCurrentBackground() {
       palette.DarkVibrant?.hex
     ].filter(Boolean);
     if (colors.length >= 3) {
-      mainColor.value = colors[0];
-      bgColor.value = colors[1];
-      subColor.value = colors[2];
-      // 不保存到 localStorage，仅作为临时显示
+      // 强制提取后，只保存那些没有自定义 localStorage 项的颜色
+      const mainStored = localStorage.getItem('mainColor');
+      const bgStored = localStorage.getItem('bgColor');
+      const subStored = localStorage.getItem('subColor');
+      if (!mainStored) {
+        mainColor.value = colors[0];
+        localStorage.setItem('mainColor', colors[0]);
+      }
+      if (!bgStored) {
+        bgColor.value = colors[1];
+        localStorage.setItem('bgColor', colors[1]);
+      }
+      if (!subStored) {
+        subColor.value = colors[2];
+        localStorage.setItem('subColor', colors[2]);
+      }
     }
   } catch (err) {
     console.warn('颜色提取失败', err);
   }
 }
-// 暴露到 window
 window.extractColorsFromCurrentBackground = extractColorsFromCurrentBackground;
 
-// 读取用户自定义颜色
+// ---- 读取用户自定义颜色 ----
 function loadCustomColors() {
   const m = localStorage.getItem('mainColor')
   const b = localStorage.getItem('bgColor')
@@ -275,10 +276,10 @@ function loadCustomColors() {
   if (s) subColor.value = s
 }
 
-// 颜色提取（使用 @vibrant/core）
+// ---- 颜色提取（使用 @vibrant/core），并保存到 localStorage（若未自定义） ----
 async function extractColorsFromBase64(base64: string) {
-  // 如果用户已自定义颜色则跳过
-  if (localStorage.getItem('mainColor') || localStorage.getItem('bgColor') || localStorage.getItem('subColor')) {
+  // 如果用户已经自定义了所有颜色，则不自动提取
+  if (localStorage.getItem('mainColor') && localStorage.getItem('bgColor') && localStorage.getItem('subColor')) {
     return
   }
   try {
@@ -290,26 +291,35 @@ async function extractColorsFromBase64(base64: string) {
       palette.DarkVibrant?.hex
     ].filter(Boolean)
     if (colors.length >= 3) {
-      mainColor.value = colors[0]
-      bgColor.value = colors[1]
-      subColor.value = colors[2]
+      // 仅对未自定义的颜色进行赋值并保存
+      if (!localStorage.getItem('mainColor')) {
+        mainColor.value = colors[0]
+        localStorage.setItem('mainColor', colors[0])
+      }
+      if (!localStorage.getItem('bgColor')) {
+        bgColor.value = colors[1]
+        localStorage.setItem('bgColor', colors[1])
+      }
+      if (!localStorage.getItem('subColor')) {
+        subColor.value = colors[2]
+        localStorage.setItem('subColor', colors[2])
+      }
     }
   } catch (err) {
     console.warn('颜色提取失败', err)
   }
 }
 
-// 将颜色注入到全局
+// ---- 将颜色注入到全局 ----
 provide('themeColors', {
   mainColor,
   bgColor,
   subColor,
 })
 
-// 也暴露到 window 方便其他组件
 window.themeColors = { mainColor, bgColor, subColor }
 
-// 固定背景（保存到本地）
+// ---- 固定背景（保存到本地文件） ----
 window.fixCurrentBackground = async () => {
   if (!currentBgBase64.value || customBackground.value) return
   try {
@@ -321,38 +331,71 @@ window.fixCurrentBackground = async () => {
     await writeFile(filePath, bytes, { dir: BaseDirectory.AppData })
     customBackground.value = filePath
     localStorage.setItem('customBackground', filePath)
+    // 触发事件通知 Setting
+    window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: filePath }))
   } catch (err) {
     console.error('固定背景失败', err)
   }
 }
 
-// 更新 CSS 变量的函数
-function updateCssVariables() {
-  const root = document.documentElement
-  root.style.setProperty('--main-color', mainColor.value)
-  root.style.setProperty('--bg-color', bgColor.value)
-  root.style.setProperty('--sub-color', subColor.value)
+// ---- 新增：保存自定义背景（由 Setting 调用） ----
+window.saveCustomBackground = async (path: string) => {
+  try {
+    // 直接加载自定义背景
+    await loadCustomBackground(path)
+    localStorage.setItem('customBackground', path)
+    window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: path }))
+  } catch (err) {
+    console.error('保存自定义背景失败', err)
+  }
 }
 
-// 暴露一些方法给全局（供 Setting 使用）
+// ---- CSS 变量更新 ----
+function hexToRgb(hex: string): string {
+  let clean = hex.replace(/^#/, '').trim();
+  if (!clean) return '255, 255, 255';
+  if (clean.length === 3) {
+    clean = clean.split('').map(c => c + c).join('');
+  }
+  if (clean.length >= 6) {
+    clean = clean.slice(0, 6);
+  }
+  const r = parseInt(clean.substring(0, 2), 16);
+  const g = parseInt(clean.substring(2, 4), 16);
+  const b = parseInt(clean.substring(4, 6), 16);
+  if ([r, g, b].some(v => isNaN(v))) {
+    return '255, 255, 255';
+  }
+  return `${r}, ${g}, ${b}`;
+}
+
+function updateCssVariables() {
+  const root = document.documentElement;
+  root.style.setProperty('--main-color', mainColor.value);
+  root.style.setProperty('--bg-color', bgColor.value);
+  root.style.setProperty('--sub-color', subColor.value);
+  root.style.setProperty('--main-color-rgb', hexToRgb(mainColor.value));
+  root.style.setProperty('--bg-color-rgb', hexToRgb(bgColor.value));
+  root.style.setProperty('--sub-color-rgb', hexToRgb(subColor.value));
+}
+
+// ---- 暴露方法给全局 ----
 window.loadApiBackground = loadApiBackground
-window.refreshApiBackground = refreshApiBackground
-window.fixCurrentBackground = fixCurrentBackground
 window.loadCustomBackground = loadCustomBackground
+// 注意：refreshApiBackground 和 fixCurrentBackground 已在上方赋值
 
 // ===== 生命周期 =====
 onMounted(async () => {
   document.addEventListener('contextmenu', (e) => e.preventDefault())
-	const stored = localStorage.getItem('customBackground')
-	if (stored && stored !== 'null') {
-	await loadCustomBackground(stored)
-	} else {
-	// 无自定义，加载 API 背景
-	await loadApiBackground()
-	}
+  const stored = localStorage.getItem('customBackground')
+  if (stored && stored !== 'null') {
+    await loadCustomBackground(stored)
+  } else {
+    await loadApiBackground()
+  }
 
-	// 恢复用户自定义颜色
-	loadCustomColors()
+  // 恢复用户自定义颜色（若存在则覆盖提取的颜色）
+  loadCustomColors()
   // 同步导航索引
   const currentKey = route.name as string
   if (currentKey) {
@@ -366,6 +409,7 @@ onBeforeUnmount(() => {
 })
 </script>
 
+
 <style scoped>
 /* ===== 全局布局 ===== */
 .app-root {
@@ -373,14 +417,6 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  background: transparent !important;
-}
-
-/* ===== NavigationView 容器 ===== */
-.nav-view {
-  flex-shrink: 0;
-  --fv-navigation-background: transparent !important;
-  color: #fff;
 }
 
 /* ===== Logo 标题区域 ===== */

@@ -1,835 +1,558 @@
 <i18n>
-en:
-  settings:
-    outputPath:
-      label: "Output Path"
-      placeholder: "Click to select folder"
-      hint: "Prefer Browser FS API; use Electron for absolute path"
-      aria: "Output path"
-    selectFolder: "Select folder"
-    save: "Save"
-    copy: "Copy path"
-    clear: "Clear"
-    saved: "Saved"
-    selected:
-      picked: "Selected folder: {name}"
-      fallback: "Fallback selection: {count} files (root: {root})"
-    warning:
-      empty: "Path must not be empty"
-      select_error: "Failed to select folder: {msg}"
-      copy_error: "Copy failed: please copy manually"
-    background:
-      label: "Custom Background"
-      placeholder: "Click to select image"
-      hint: "Supports JPG, PNG, WEBP format"
-      selectFile: "Select image"
-      clear: "Clear background"
-      saved: "Background saved!"
-      fixed: "Fix current background"
-      refresh: "Refresh background"
-      clearAndRefresh: "Clear custom & use API"
-      noCustom: "No custom background to clear"
-    colors:
-      main: "Main Color"
-      bg: "Background Color"
-      sub: "Sub Color"
-      custom: "Customize"
-      auto: "Auto (from image)"
-      reset: "Reset to auto"
-      saved: "Color saved!"
-zh-CN:
-  settings:
-    outputPath:
-      label: "自定义输出路径"
-      placeholder: "点击选择文件夹"
-      hint: "请输入正确路径"
-      aria: "自定义输出路径"
-    selectFolder: "选择文件夹"
-    save: "保存路径"
-    copy: "复制路径"
-    clear: "清除"
-    saved: "保存成功！"
-    selected:
-      picked: "已选择文件夹：{name}"
-      fallback: "回退选择：{count} 个文件（根：{root})"
-    warning:
-      empty: "路径不能为空"
-      select_error: "选择文件夹时出错：{msg}"
-      copy_error: "复制失败：请手动复制"
-    background:
-      label: "自定义背景"
-      placeholder: "点击选择图片文件"
-      hint: "支持 JPG、PNG、WEBP 格式"
-      selectFile: "选择图片"
-      clear: "清除背景"
-      saved: "背景已保存！"
-      fixed: "固定当前背景"
-      refresh: "刷新背景"
-      clearAndRefresh: "清除自定义并使用API"
-      noCustom: "当前没有自定义背景"
-    colors:
-      main: "主色"
-      bg: "背景色"
-      sub: "辅色"
-      custom: "自定义"
-      auto: "自动 (来自图片)"
-      reset: "重置为自动"
-      saved: "颜色已保存！"
-</i18n>
-
-<template>
-  <div class="settings-container">
-    <div class="settings-scroll">
-      <!-- 输出路径卡片 -->
-      <fv-card class="md3-card fluent-glass">
-        <div class="card-label">{{ t('settings.outputPath.label') }}</div>
-        <fv-breadcrumb
-          v-if="outputPath"
-          :items="outputPath.split(/[\\/]/).filter(Boolean).map((seg) => ({ text: seg, to: '#' }))"
-          separator="/"
-          class="path-breadcrumb"
-        />
-        <div v-else class="path-empty">{{ t('settings.outputPath.placeholder') }}</div>
-        <div v-if="selectedInfo" class="hint-text">{{ selectedInfo }}</div>
-        <div class="card-actions">
-          <fv-button appearance="tonal" @click="selectFolder">
-            <fv-icon name="folder-open" size="18" />
-            <span>{{ t('settings.selectFolder') }}</span>
-          </fv-button>
-          <fv-button appearance="tonal" @click="openTreeDialog">
-            <fv-icon name="tree-view" size="18" />
-            <span>Tree</span>
-          </fv-button>
-          <fv-button appearance="filled" @click="saveOutputPath">
-            <fv-icon name="save" size="18" />
-            <span>{{ t('settings.save') }}</span>
-          </fv-button>
-          <fv-button appearance="text" @click="copyPath" :disabled="!outputPath" :title="t('settings.copy')">
-            <fv-icon name="copy" size="18" />
-          </fv-button>
-          <fv-button appearance="text" @click="clearPath" :disabled="!outputPath" :title="t('settings.clear')">
-            <fv-icon name="close" size="18" />
-          </fv-button>
-        </div>
-      </fv-card>
-
-      <!-- 自定义背景卡片 -->
-      <fv-card class="md3-card fluent-glass">
-        <div class="card-label">{{ t('settings.background.label') }}</div>
-        <div class="bg-preview" v-if="backgroundPreviewUrl">
-          <img :src="backgroundPreviewUrl" alt="Background preview" class="preview-img" />
-        </div>
-        <div v-else class="bg-preview empty">No background</div>
-        <div class="card-actions">
-          <fv-button appearance="tonal" @click="selectBackground">
-            <fv-icon name="image" size="18" />
-            <span>{{ t('settings.background.selectFile') }}</span>
-          </fv-button>
-          <fv-button appearance="filled" @click="fixCurrentBackground">
-            <fv-icon name="pin" size="18" />
-            <span>{{ t('settings.background.fixed') }}</span>
-          </fv-button>
-          <fv-button appearance="tonal" @click="refreshBackground">
-            <fv-icon name="refresh" size="18" />
-            <span>{{ t('settings.background.refresh') }}</span>
-          </fv-button>
-          <fv-button appearance="text" @click="clearAndRefreshBackground" :disabled="!backgroundPath" :title="t('settings.background.clearAndRefresh')">
-            <fv-icon name="delete" size="18" />
-          </fv-button>
-        </div>
-      </fv-card>
-
-      <!-- 自定义主题色卡片 -->
-      <fv-card class="md3-card fluent-glass">
-        <div class="card-label">Theme Colors</div>
-        <div class="color-row">
-          <!-- 主色 -->
-          <div class="color-item">
-            <span class="color-label">{{ t('settings.colors.main') }}</span>
-            <fv-button
-              ref="mainColorBtn"
-              class="color-swatch"
-              :style="{ backgroundColor: localMain }"
-              @click="openColorPicker('main')"
-            >
-              {{ localMain }}
+  en:
+    settings:
+      outputPath:
+        warning:
+          empty: "Path must not be empty"
+        label: "Output Path"
+        placeholder: "Click to select folder"
+        hint: "Prefer Browser FS API; use Electron for absolute path"
+        aria: "Output path"
+      selectFolder: "Browse"
+      save: "Save Path"
+      saved: "Saved"
+      selected:
+        picked: "Selected folder: {name}"
+        fallback: "Fallback selection: {count} files (root: {root})"
+      background:
+        label: "Custom Background"
+        placeholder: "Click to select image"
+        hint: "Supports JPG, PNG, WEBP format"
+        selectFile: "Select"
+        clear: "Clear background"
+        saved: "Background Refreshed"
+        fixed: "Fix"
+        refresh: "Refresh"
+        noCustom: "No custom background to clear"
+      colors:
+        main: "Main Color"
+        bg: "Background Color"
+        sub: "Sub Color"
+        custom: "Customize"
+        auto: "Auto (from image)"
+        reset: "Auto"
+        saved: "Color saved!"
+        label: "Theme Color"
+  zh-CN:
+    settings:
+      outputPath:
+        warning:
+          empty: "不能选择棍母"
+        label: "自定义输出路径"
+        placeholder: "点击选择文件夹"
+        hint: "请输入正确路径"
+        aria: "自定义输出路径"
+      selectFolder: "选择"
+      save: "保存路径"
+      copy: "复制路径"
+      selected:
+        picked: "已选择文件夹：{name}"
+        fallback: "回退选择：{count} 个文件（根：{root})"
+      background:
+        label: "自定义背景"
+        placeholder: "点击选择图片文件"
+        hint: "支持 JPG、PNG、WEBP 格式"
+        selectFile: "选择图片"
+        clear: "清除背景"
+        saved: "背景已刷新!"
+        fixed: "固定背景"
+        refresh: "刷新背景"
+        noCustom: "当前没有自定义背景"
+      colors:
+        main: "主色"
+        bg: "背景色"
+        sub: "辅色"
+        custom: "自定义"
+        auto: "自动 (来自图片)"
+        reset: "自动选择"
+        saved: "颜色已保存！"
+        label: "主题色"
+  </i18n>
+  
+  <template>
+    <div class="settings-container">
+      <div class="settings-scroll">
+        <!-- 输出路径卡片 -->
+        <fv-card class="md3-card fluent-glass">
+          <div class="card-label">{{ t('settings.outputPath.label') }}</div>
+          <div v-if="outputPath"></div>
+          <div v-else class="path-empty">{{ t('settings.outputPath.placeholder') }}</div>
+          <div v-if="selectedInfo" class="hint-text">{{ selectedInfo }}</div>
+          <div class="card-actions">
+            <fv-button icon="FolderOpen" :background="mainColor" @click="selectFolder">
+              <span>{{ t('settings.selectFolder') }}</span>
             </fv-button>
-            <fv-callout
-              v-model:open="mainColorPickerOpen"
-              :target="mainColorBtn"
-              position="bottom-start"
-              class="color-picker-callout"
-              close-on-outside-click
-            >
-              <div class="picker-content">
-                <fv-color-picker v-model="tempMainColor" />
-                <div class="picker-actions">
-                  <fv-button appearance="filled" @click="confirmColor('main')">确定</fv-button>
-                  <fv-button appearance="text" @click="mainColorPickerOpen = false">取消</fv-button>
-                </div>
-              </div>
-            </fv-callout>
-            <fv-button
-              appearance="text"
-              @click="resetColor('mainColor')"
-              :disabled="!hasMainColor"
-            >
+            <fv-button icon="Save" :background="mainColor" @click="saveOutputPath">
+              <span>{{ t('settings.save') }}</span>
+            </fv-button>
+          </div>
+        </fv-card>
+  
+        <!-- 自定义背景卡片 -->
+        <fv-card class="md3-card fluent-glass">
+          <div class="card-label">{{ t('settings.background.label') }}</div>
+          <div class="bg-preview" v-if="backgroundPreviewUrl">
+            <img :src="backgroundPreviewUrl" alt="Background preview" class="preview-img" />
+          </div>
+          <div v-else class="blur-glass bg-preview empty">未选择背景</div>
+          <div class="card-actions">
+            <fv-button icon="CalculatorAddition" :background="mainColor" @click="selectBackground">
+              <span>{{ t('settings.background.selectFile') }}</span>
+            </fv-button>
+            <fv-button icon="Pin" :background="mainColor" @click="fixCurrentBackground">
+              <span>{{ t('settings.background.fixed') }}</span>
+            </fv-button>
+            <fv-button icon="Refresh" :background="mainColor" @click="refreshBackground">
+              <span>{{ t('settings.background.refresh') }}</span>
+            </fv-button>
+          </div>
+        </fv-card>
+  
+        <!-- 自定义主题色卡片 -->
+        <fv-card class="md3-card fluent-glass">
+          <div class="card-label">{{ t('settings.colors.label') }}</div>
+          <div class="color-row">
+            <!-- 主色 -->
+            <div class="color-item">
+              <a>{{ t('settings.colors.main') }}</a>
+              <fv-callout
+                border-radius="16px"
+                :callout-bg="tempMainColor"
+                position="rightTop"
+              >
+              <ColorSwatch :color="tempMainColor" :size="28" />
+                <template v-slot:main>
+                  <div class="picker-content">
+                    <fv-color-picker hideFields v-model="tempMainColor" />
+                  </div>
+                </template>
+              </fv-callout>
+              <fv-button @click="confirmColor('main')">确定</fv-button>
+              <fv-button
+                @click="resetColor('mainColor')"
+                icon="Refresh"
+              >
+                {{ t('settings.colors.reset') }}
+              </fv-button>
+            </div>
+  
+            <!-- 背景色 -->
+            <div class="color-item">
+              <a>{{ t('settings.colors.bg') }}</a>
+              <fv-callout
+                border-radius="16px"
+                :callout-bg="tempBgColor"
+                position="rightTop"
+              >
+              <ColorSwatch :color="tempBgColor" :size="28" />
+                <template v-slot:main>
+                  <div class="picker-content">
+                    <fv-color-picker hideFields v-model="tempBgColor" />
+                  </div>
+                </template>
+              </fv-callout>
+              <fv-button @click="confirmColor('bg')">确定</fv-button>
+              <fv-button
+                @click="resetColor('bgColor')"
+                icon="Refresh"
+              >
+                {{ t('settings.colors.reset') }}
+              </fv-button>
+            </div>
+  
+            <!-- 辅色 -->
+            <div class="color-item">
+              <a>{{ t('settings.colors.sub') }}</a>
+              <fv-callout
+                position="rightTop"
+                border-radius="16px"
+                :callout-bg="tempSubColor"
+              >
+              <ColorSwatch :color="tempSubColor" :size="28" />
+                <template v-slot:main>
+                  <div class="picker-content">
+                    <fv-color-picker hideFields v-model="tempSubColor" />
+                  </div>
+                </template>
+              </fv-callout>
+              <fv-button @click="confirmColor('sub')">确定</fv-button>
+              <fv-button
+                @click="resetColor('subColor')"
+                icon="Refresh"
+              >
+                {{ t('settings.colors.reset') }}
+              </fv-button>
+          </div>
+        </div>
+  
+          <div class="card-actions">
+            <fv-button icon="Refresh" @click="resetAllColors">
               {{ t('settings.colors.reset') }}
             </fv-button>
           </div>
-
-          <!-- 背景色 -->
-          <div class="color-item">
-            <span class="color-label">{{ t('settings.colors.bg') }}</span>
-            <fv-button
-              ref="bgColorBtn"
-              class="color-swatch"
-              :style="{ backgroundColor: localBg }"
-              @click="openColorPicker('bg')"
-            >
-              {{ localBg }}
-            </fv-button>
-            <fv-callout
-              v-model:open="bgColorPickerOpen"
-              :target="bgColorBtn"
-              position="bottom-start"
-              class="color-picker-callout"
-              close-on-outside-click
-            >
-              <div class="picker-content">
-                <fv-color-picker v-model="tempBgColor" />
-                <div class="picker-actions">
-                  <fv-button appearance="filled" @click="confirmColor('bg')">确定</fv-button>
-                  <fv-button appearance="text" @click="bgColorPickerOpen = false">取消</fv-button>
-                </div>
-              </div>
-            </fv-callout>
-            <fv-button
-              appearance="text"
-              @click="resetColor('bgColor')"
-              :disabled="!hasBgColor"
-            >
-              {{ t('settings.colors.reset') }}
-            </fv-button>
-          </div>
-
-          <!-- 辅色 -->
-          <div class="color-item">
-            <span class="color-label">{{ t('settings.colors.sub') }}</span>
-            <fv-button
-              ref="subColorBtn"
-              class="color-swatch"
-              :style="{ backgroundColor: localSub }"
-              @click="openColorPicker('sub')"
-            >
-              {{ localSub }}
-            </fv-button>
-            <fv-callout
-              v-model:open="subColorPickerOpen"
-              :target="subColorBtn"
-              position="bottom-start"
-              class="color-picker-callout"
-              close-on-outside-click
-            >
-              <div class="picker-content">
-                <fv-color-picker v-model="tempSubColor" />
-                <div class="picker-actions">
-                  <fv-button appearance="filled" @click="confirmColor('sub')">确定</fv-button>
-                  <fv-button appearance="text" @click="subColorPickerOpen = false">取消</fv-button>
-                </div>
-              </div>
-            </fv-callout>
-            <fv-button
-              appearance="text"
-              @click="resetColor('subColor')"
-              :disabled="!hasSubColor"
-            >
-              {{ t('settings.colors.reset') }}
-            </fv-button>
-          </div>
+        </fv-card>
+      </div>
+  
+      <!-- Toast 容器 -->
+      <div class="toast-container">
+        <div
+          v-for="msg in toastMessages"
+          :key="msg.id"
+          class="toast-item"
+          :class="msg.type"
+        >
+          {{ msg.text }}
         </div>
-
-        <div class="card-actions">
-          <fv-button appearance="tonal" @click="resetAllColors" :disabled="!useCustomColors">
-            {{ t('settings.colors.reset') }} All
-          </fv-button>
-        </div>
-      </fv-card>
-    </div>
-
-    <!-- TreeView 对话框 -->
-    <fv-tree-view v-model:open="treeDialogOpen" modal class="tree-dialog">
-      <fv-card class="tree-card">
-        <h3>Select Folder</h3>
-        <fv-tree-view
-          v-if="!treeLoading && !treeError"
-          :items="treeData"
-          @item-click="onTreeItemClick"
-          @item-expand="onTreeExpand"
-          expand-on-click
-          class="tree-view"
-        />
-        <div v-if="treeLoading" class="loading-box"><fv-spinner size="large" /></div>
-        <div v-if="treeError" class="error-box">
-          <!-- 使用 showToast 代替，不再显示内联消息 -->
-        </div>
-        <div class="dialog-actions">
-          <fv-button appearance="text" @click="treeDialogOpen = false">Cancel</fv-button>
-        </div>
-      </fv-card>
-    </fv-tree-view>
-
-    <!-- Toast 容器 -->
-    <div class="toast-container">
-      <div
-        v-for="msg in toastMessages"
-        :key="msg.id"
-        class="toast-item"
-        :class="msg.type"
-      >
-        {{ msg.text }}
       </div>
     </div>
-  </div>
-</template>
-
-<script setup lang="ts">
-import { ref, computed, inject, watch, onMounted, nextTick } from 'vue';
-import { useI18n } from 'vue-i18n';
-import { open } from '@tauri-apps/plugin-dialog';
-import { appConfigDir, appDataDir, homeDir } from '@tauri-apps/api/path';
-import { convertFileSrc } from '@tauri-apps/api/core';
-import { writeText } from '@tauri-apps/plugin-clipboard-manager';
-import { writeFile, BaseDirectory, readDir } from "@tauri-apps/plugin-fs";
-import { fetch } from "@tauri-apps/plugin-http";
-
-defineOptions({ name: 'SettingsPanel' });
-
-const { t } = useI18n();
-
-// ---- Toast 系统 ----
-interface ToastMessage {
-  id: number;
-  text: string;
-  type: 'success' | 'warning' | 'error';
-}
-const toastMessages = ref<ToastMessage[]>([]);
-let toastId = 0;
-
-function showToast(text: string, type: 'success' | 'warning' | 'error' = 'success') {
-  const id = toastId++;
-  toastMessages.value.push({ id, text, type });
-  setTimeout(() => {
-    toastMessages.value = toastMessages.value.filter(msg => msg.id !== id);
-  }, 3000);
-}
-
-// ---- 主题颜色注入 ----
-const themeColors = inject<{ mainColor: Ref<string>; bgColor: Ref<string>; subColor: Ref<string> }>('themeColors');
-if (!themeColors) throw new Error('themeColors not provided');
-const { mainColor, bgColor, subColor } = themeColors;
-
-// 本地显示颜色
-const localMain = ref(mainColor.value);
-const localBg = ref(bgColor.value);
-const localSub = ref(subColor.value);
-
-watch([mainColor, bgColor, subColor], ([m, b, s]) => {
-  localMain.value = m;
-  localBg.value = b;
-  localSub.value = s;
-});
-
-// 是否有自定义颜色（用于显示重置按钮）
-const hasMainColor = computed(() => !!localStorage.getItem('mainColor'));
-const hasBgColor = computed(() => !!localStorage.getItem('bgColor'));
-const hasSubColor = computed(() => !!localStorage.getItem('subColor'));
-const useCustomColors = computed(() => hasMainColor.value || hasBgColor.value || hasSubColor.value);
-
-// ---- 颜色选择器弹出状态 ----
-const mainColorPickerOpen = ref(false);
-const bgColorPickerOpen = ref(false);
-const subColorPickerOpen = ref(false);
-const tempMainColor = ref(localMain.value);
-const tempBgColor = ref(localBg.value);
-const tempSubColor = ref(localSub.value);
-
-// 颜色按钮的 ref
-const mainColorBtn = ref<HTMLElement | null>(null);
-const bgColorBtn = ref<HTMLElement | null>(null);
-const subColorBtn = ref<HTMLElement | null>(null);
-
-// ---- 颜色操作方法 ----
-function openColorPicker(type: 'main' | 'bg' | 'sub') {
-  if (type === 'main') {
-    tempMainColor.value = localMain.value;
-    mainColorPickerOpen.value = true;
-  } else if (type === 'bg') {
-    tempBgColor.value = localBg.value;
-    bgColorPickerOpen.value = true;
-  } else {
-    tempSubColor.value = localSub.value;
-    subColorPickerOpen.value = true;
+  </template>
+  
+  <script setup lang="ts">
+  import { ref, computed, inject, watch, onMounted } from 'vue';
+  import { useI18n } from 'vue-i18n';
+  import { open } from '@tauri-apps/plugin-dialog';
+  import { appConfigDir, appDataDir } from '@tauri-apps/api/path';
+  import { convertFileSrc } from '@tauri-apps/api/core';
+  
+  defineOptions({ name: 'SettingsPanel' });
+  
+  const { t } = useI18n();
+  
+  // ---- Toast 系统 ----
+  interface ToastMessage {
+    id: number;
+    text: string;
+    type: 'success' | 'warning' | 'error';
   }
-}
-
-function confirmColor(type: 'main' | 'bg' | 'sub') {
-  if (type === 'main') {
-    saveColor('mainColor', tempMainColor.value);
-    mainColorPickerOpen.value = false;
-  } else if (type === 'bg') {
-    saveColor('bgColor', tempBgColor.value);
-    bgColorPickerOpen.value = false;
-  } else {
-    saveColor('subColor', tempSubColor.value);
-    subColorPickerOpen.value = false;
+  const toastMessages = ref<ToastMessage[]>([]);
+  let toastId = 0;
+  
+  function showToast(text: string, type: 'success' | 'warning' | 'error' = 'success') {
+    const id = toastId++;
+    toastMessages.value.push({ id, text, type });
+    setTimeout(() => {
+      toastMessages.value = toastMessages.value.filter(msg => msg.id !== id);
+    }, 3000);
   }
-}
-
-function saveColor(colorKey: string, value: string) {
-  localStorage.setItem(colorKey, value);
-  if (colorKey === 'mainColor') mainColor.value = value;
-  else if (colorKey === 'bgColor') bgColor.value = value;
-  else if (colorKey === 'subColor') subColor.value = value;
-  window.dispatchEvent(new CustomEvent('themeColorChanged', { detail: { key: colorKey, value } }));
-  showToast(t('settings.colors.saved'), 'success');
-}
-
-function resetColor(colorKey: string) {
-  localStorage.removeItem(colorKey);
-  // 重新从当前背景提取颜色（需要 App 提供方法）
-  if (window.extractColorsFromCurrentBackground) {
-    window.extractColorsFromCurrentBackground();
+  
+  // ---- 主题颜色注入 ----
+  const themeColors = inject<{ mainColor: Ref<string>; bgColor: Ref<string>; subColor: Ref<string> }>('themeColors');
+  if (!themeColors) throw new Error('themeColors not provided');
+  const { mainColor, bgColor, subColor } = themeColors;
+  
+  // 本地显示颜色
+  const localMain = ref(mainColor.value);
+  const localBg = ref(bgColor.value);
+  const localSub = ref(subColor.value);
+  
+  watch([mainColor, bgColor, subColor], ([m, b, s]) => {
+    localMain.value = m;
+    localBg.value = b;
+    localSub.value = s;
+  });
+  
+  // 是否有自定义颜色（用于显示重置按钮）
+  const hasMainColor = computed(() => !!localStorage.getItem('mainColor'));
+  const hasBgColor = computed(() => !!localStorage.getItem('bgColor'));
+  const hasSubColor = computed(() => !!localStorage.getItem('subColor'));
+  const useCustomColors = computed(() => hasMainColor.value || hasBgColor.value || hasSubColor.value);
+  
+  // ---- 颜色选择器弹出状态 ----
+  const tempMainColor = ref(localMain.value);
+  const tempBgColor = ref(localBg.value);
+  const tempSubColor = ref(localSub.value);
+  
+  function confirmColor(type: 'main' | 'bg' | 'sub') {
+    if (type === 'main') {
+      saveColor('mainColor', tempMainColor.value);
+    } else if (type === 'bg') {
+      saveColor('bgColor', tempBgColor.value);
+    } else {
+      saveColor('subColor', tempSubColor.value);
+    }
   }
-  showToast(t('settings.colors.saved'), 'success');
-}
-
-function resetAllColors() {
-  localStorage.removeItem('mainColor');
-  localStorage.removeItem('bgColor');
-  localStorage.removeItem('subColor');
-  if (window.extractColorsFromCurrentBackground) {
-    window.extractColorsFromCurrentBackground();
+  
+  function saveColor(colorKey: string, value: string) {
+    localStorage.setItem(colorKey, value);
+    if (colorKey === 'mainColor') mainColor.value = value;
+    else if (colorKey === 'bgColor') bgColor.value = value;
+    else if (colorKey === 'subColor') subColor.value = value;
+    window.dispatchEvent(new CustomEvent('themeColorChanged', { detail: { key: colorKey, value } }));
+    showToast(t('settings.colors.saved'), 'success');
   }
-  showToast(t('settings.colors.saved'), 'success');
-}
-
-// ---- 输出路径 ----
-const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
-const selectedInfo = ref<string | null>(null);
-
-async function selectFolder() {
-  selectedInfo.value = null;
-  try {
-    const selected = await open({ directory: true, multiple: false, defaultPath: await appConfigDir() });
-    if (selected === null) return;
-    const path = Array.isArray(selected) ? selected[0] : selected;
-    outputPath.value = path;
-    const rootName = path.split(/[\\/]/).pop() || path;
-    selectedInfo.value = t('settings.selected.picked', { name: rootName });
-  } catch (err: any) {
-    showToast(t('settings.outputPath.warning.select_error', { msg: err.message || String(err) }), 'error');
+  
+  // 重置单个颜色（移除 localStorage，调用外部提取）
+  function resetColor(colorKey: string) {
+    localStorage.removeItem(colorKey);
+    if (window.extractColorsFromCurrentBackground) {
+      window.extractColorsFromCurrentBackground();
+    }
+    showToast(t('settings.colors.saved'), 'success');
   }
-}
-
-function saveOutputPath() {
-  if (!outputPath.value) {
-    showToast(t('settings.outputPath.warning.empty'), 'warning');
-    return;
+  
+  function resetAllColors() {
+    localStorage.removeItem('mainColor');
+    localStorage.removeItem('bgColor');
+    localStorage.removeItem('subColor');
+    if (window.extractColorsFromCurrentBackground) {
+      window.extractColorsFromCurrentBackground();
+    }
+    showToast(t('settings.colors.saved'), 'success');
   }
-  localStorage.setItem('outputPath', outputPath.value);
-  showToast(t('settings.saved'), 'success');
-}
-
-async function copyPath() {
-  if (!outputPath.value) return;
-  try {
-    await writeText(outputPath.value);
+  
+  // ---- 输出路径 ----
+  const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
+  const selectedInfo = ref<string | null>(null);
+  
+  async function selectFolder() {
+    selectedInfo.value = null;
+    try {
+      const selected = await open({ directory: true, multiple: false, defaultPath: await appConfigDir() });
+      if (selected === null) return;
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      outputPath.value = path;
+      const rootName = path.split(/[\\/]/).pop() || path;
+      selectedInfo.value = t('settings.selected.picked', { name: rootName });
+    } catch (err: any) {
+      showToast(t('settings.outputPath.warning.select_error', { msg: err.message || String(err) }), 'error');
+    }
+  }
+  
+  function saveOutputPath() {
+    if (!outputPath.value) {
+      showToast(t('settings.outputPath.warning.empty'), 'warning');
+      return;
+    }
+    localStorage.setItem('outputPath', outputPath.value);
     showToast(t('settings.saved'), 'success');
-  } catch {
-    showToast(t('settings.outputPath.warning.copy_error'), 'error');
   }
-}
-
-function clearPath() {
-  outputPath.value = '';
-  selectedInfo.value = null;
-  localStorage.removeItem('outputPath');
-}
-
-// ---- 背景操作 ----
-const backgroundPath = ref<string>(localStorage.getItem('customBackground') || '');
-
-const backgroundPreviewUrl = computed(() => {
-  if (backgroundPath.value) {
-    try { return convertFileSrc(backgroundPath.value); } catch { return backgroundPath.value; }
-  }
-  return '';
-});
-
-async function selectBackground() {
-  try {
-    const selected = await open({ multiple: false, filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }], defaultPath: await appConfigDir() });
-    if (selected === null) return;
-    const path = Array.isArray(selected) ? selected[0] : selected;
-    backgroundPath.value = path as string;
-    if (window.saveCustomBackground) {
-      window.saveCustomBackground(path as string);
-    } else {
-      localStorage.setItem('customBackground', path as string);
-      window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: path }));
+  
+  // ---- 背景操作 ----
+  const backgroundPath = ref<string>(localStorage.getItem('customBackground') || '');
+  
+  const backgroundPreviewUrl = computed(() => {
+    if (backgroundPath.value) {
+      try { return convertFileSrc(backgroundPath.value); } catch { return backgroundPath.value; }
     }
-    showToast(t('settings.background.saved'), 'success');
-  } catch (err: any) {
-    console.error('Failed to select background:', err);
-    showToast('Failed to select background', 'error');
-  }
-}
-
-async function fixCurrentBackground() {
-  if (window.fixCurrentBackground) {
-    await window.fixCurrentBackground();
-    const stored = localStorage.getItem('customBackground');
-    if (stored) {
-      backgroundPath.value = stored;
-    }
-    showToast(t('settings.background.saved'), 'success');
-  } else {
-    showToast('fixCurrentBackground not available', 'warning');
-  }
-}
-
-function refreshBackground() {
-  if (window.refreshApiBackground) {
-    window.refreshApiBackground();
-    backgroundPath.value = '';
-    showToast(t('settings.background.saved'), 'success');
-  } else {
-    showToast('refreshApiBackground not available', 'warning');
-  }
-}
-
-function clearAndRefreshBackground() {
-  if (backgroundPath.value) {
-    if (window.saveCustomBackground) {
-      window.saveCustomBackground(null);
-    } else {
-      localStorage.removeItem('customBackground');
-    }
-    backgroundPath.value = '';
-  }
-  refreshBackground();
-}
-
-// ---- TreeView 文件选择 ----
-const treeDialogOpen = ref(false);
-const treeData = ref<any[]>([]);
-const treeLoading = ref(false);
-const treeError = ref('');
-
-async function buildTree(path: string): Promise<any[]> {
-  try {
-    const entries = await readDir(path, { recursive: false });
-    const children = [];
-    for (const entry of entries) {
-      let isDirectory = false;
-      try {
-        await readDir(path + '/' + entry.name, { recursive: false });
-        isDirectory = true;
-      } catch { /* ignore */ }
-      if (isDirectory) {
-        children.push({
-          label: entry.name,
-          path: path + '/' + entry.name,
-          children: [],
-          isLeaf: false,
-        });
+    return '';
+  });
+  
+  async function selectBackground() {
+    try {
+      const selected = await open({ multiple: false, filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }], defaultPath: await appConfigDir() });
+      if (selected === null) return;
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      backgroundPath.value = path as string;
+      if (window.saveCustomBackground) {
+        window.saveCustomBackground(path as string);
+      } else {
+        localStorage.setItem('customBackground', path as string);
+        window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: path }));
       }
+      showToast(t('settings.background.saved'), 'success');
+    } catch (err: any) {
+      console.error('Failed to select background:', err);
+      showToast('Failed to select background', 'error');
     }
-    return children;
-  } catch (err: any) {
-    throw new Error(`Failed to read ${path}: ${err.message}`);
   }
-}
-
-async function openTreeDialog() {
-  treeDialogOpen.value = true;
-  treeLoading.value = true;
-  treeError.value = '';
-  try {
-    const root = await homeDir();
-    const children = await buildTree(root);
-    treeData.value = [{ label: 'Home', path: root, children, isLeaf: false }];
-  } catch (err: any) {
-    treeError.value = err.message;
-    showToast(treeError.value, 'error');
-  } finally {
-    treeLoading.value = false;
+  
+  async function fixCurrentBackground() {
+    if (window.fixCurrentBackground) {
+      await window.fixCurrentBackground();
+      const stored = localStorage.getItem('customBackground');
+      if (stored) {
+        backgroundPath.value = stored;
+      }
+      showToast(t('settings.background.saved'), 'success');
+    } else {
+      showToast('fixCurrentBackground not available', 'warning');
+    }
   }
-}
 
-async function loadChildren(node: any) {
-  if (node.children && node.children.length > 0) return;
-  try {
-    const children = await buildTree(node.path);
-    node.children = children;
-  } catch (err: any) {
-    console.error(err);
-    showToast('Failed to load children', 'error');
+  function refreshBackground() {
+    if (window.refreshApiBackground) {
+      window.refreshApiBackground();
+      backgroundPath.value = '';
+      showToast(t('settings.background.saved'), 'success');
+    } else {
+      showToast('refreshApiBackground not available', 'warning');
+    }
   }
-}
-
-function selectTreeNode(node: any) {
-  if (node.isLeaf) return;
-  outputPath.value = node.path;
-  const rootName = node.path.split(/[\\/]/).pop() || node.path;
-  selectedInfo.value = t('settings.selected.picked', { name: rootName });
-  treeDialogOpen.value = false;
-}
-
-function onTreeItemClick(item: any) {
-  if (!item.isLeaf && (!item.children || item.children.length === 0)) {
-    loadChildren(item);
+  
+  // ---- 监听输出路径变化 ----
+  watch(outputPath, (newPath) => {
+    if (newPath && !selectedInfo.value) {
+      const name = newPath.split(/[\\/]/).pop() || newPath;
+      selectedInfo.value = t('settings.selected.picked', { name });
+    }
+  });
+  
+  // ---- 监听外部主题颜色变化 ----
+  onMounted(() => {
+    window.addEventListener('themeColorChanged', ((e: CustomEvent) => {
+      const { key, value } = e.detail;
+      if (key === 'mainColor') localMain.value = value;
+      else if (key === 'bgColor') localBg.value = value;
+      else if (key === 'subColor') localSub.value = value;
+    }) as EventListener);
+  });
+  </script>
+  
+  <style scoped>
+  .settings-container {
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    position: relative;
   }
-  selectTreeNode(item);
-}
-
-function onTreeExpand(item: any) {
-  if (!item.isLeaf && (!item.children || item.children.length === 0)) {
-    loadChildren(item);
+  
+  .settings-scroll {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
   }
-}
-
-// ---- 监听输出路径变化 ----
-watch(outputPath, (newPath) => {
-  if (newPath && !selectedInfo.value) {
-    const name = newPath.split(/[\\/]/).pop() || newPath;
-    selectedInfo.value = t('settings.selected.picked', { name });
+  
+  .md3-card {
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   }
-});
-
-// ---- 监听外部主题颜色变化 ----
-onMounted(() => {
-  window.addEventListener('themeColorChanged', ((e: CustomEvent) => {
-    const { key, value } = e.detail;
-    if (key === 'mainColor') localMain.value = value;
-    else if (key === 'bgColor') localBg.value = value;
-    else if (key === 'subColor') localSub.value = value;
-  }) as EventListener);
-});
-</script>
-
-<style scoped>
-.settings-container {
-  width: 100%;
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 24px;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  position: relative;
-}
-
-.settings-scroll {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.md3-card {
-  background: rgba(30, 30, 30, 0.6);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-}
-
-.card-label {
-  font-size: 14px;
-  font-weight: 700;
-  color: #fff;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.card-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.hint-text {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.path-breadcrumb {
-  background: rgba(255, 255, 255, 0.05);
-  padding: 8px 12px;
-  border-radius: 8px;
-  color: #fff;
-  font-size: 13px;
-  word-break: break-all;
-}
-
-.path-empty {
-  color: rgba(255, 255, 255, 0.3);
-  font-style: italic;
-}
-
-.bg-preview {
-  width: 100%;
-  max-width: 480px;
-  height: 160px;
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.3);
-}
-.bg-preview.empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(255, 255, 255, 0.3);
-}
-.preview-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.color-row {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.color-item {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.color-label {
-  min-width: 100px;
-  color: rgba(255, 255, 255, 0.7);
-  font-weight: 500;
-}
-.color-swatch {
-  min-width: 80px;
-  padding: 4px 12px;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-}
-.color-picker-callout {
-  --fv-callout-background: rgba(30, 30, 30, 0.95);
-  backdrop-filter: blur(20px);
-  border-radius: 16px;
-  padding: 16px;
-  z-index: 1000;
-}
-.picker-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.picker-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.tree-dialog {
-  --fv-dialog-surface: transparent;
-}
-.tree-card {
-  background: rgba(30, 30, 30, 0.95);
-  backdrop-filter: blur(20px);
-  border-radius: 20px;
-  padding: 24px;
-  min-width: 400px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.tree-view {
-  flex: 1;
-  overflow-y: auto;
-  max-height: 50vh;
-  color: #fff;
-}
-.loading-box, .error-box {
-  display: flex;
-  justify-content: center;
-  padding: 20px;
-}
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-/* Toast 样式 */
-.toast-container {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 360px;
-  pointer-events: none;
-}
-.toast-item {
-  padding: 12px 20px;
-  border-radius: 12px;
-  background: rgba(30, 30, 30, 0.9);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 500;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  pointer-events: auto;
-  animation: slideIn 0.3s ease;
-}
-.toast-item.success {
-  border-left: 4px solid #4caf50;
-}
-.toast-item.warning {
-  border-left: 4px solid #ff9800;
-}
-.toast-item.error {
-  border-left: 4px solid #f44336;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(20px);
+  
+  .card-label {
+    color: var(--main-color);
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
   }
-  to {
-    opacity: 1;
-    transform: translateX(0);
+  
+  .card-actions {
+    color: var(--bg-color);
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
   }
-}
-
-@media (max-width: 600px) {
-  .settings-container { padding: 16px; }
-  .md3-card { padding: 16px; }
-  .color-item { flex-direction: column; align-items: stretch; gap: 8px; }
-  .color-swatch { width: 100%; }
-  .toast-container { top: 10px; right: 10px; max-width: 280px; }
-}
-</style>
+  
+  .hint-text {
+    font-weight: 600;
+    color: var(--sub-color);
+  }
+  
+  .path-empty {
+    color: var(--sub-color);
+    font-style: italic;
+  }
+  
+  .bg-preview {
+    width: 100%;
+    max-width: 480px;
+    height: 160px;
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .bg-preview.empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: large;
+    color: rgba(var(--main-color-rgb), 0.3);
+  }
+  .preview-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  
+  .color-row {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .color-item {
+    font-size: 13.3px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .color-label {
+    min-width: 100px;
+    color: var(--main-color);
+    font-weight: 500;
+  }
+  .color-picker-callout {
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    padding: 16px;
+    z-index: 1000;
+  }
+  .picker-content {
+    display: flex;
+    flex-direction: column;
+  }
+  .picker-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  
+  /* Toast 样式 */
+  .toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 360px;
+    pointer-events: none;
+  }
+  .toast-item {
+    padding: 12px 20px;
+    border-radius: 12px;
+    background: rgba(30, 30, 30, 0.9);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    pointer-events: auto;
+    animation: slideIn 0.3s ease;
+  }
+  .toast-item.success {
+    border-left: 4px solid #4caf50;
+  }
+  .toast-item.warning {
+    border-left: 4px solid #ff9800;
+  }
+  .toast-item.error {
+    border-left: 4px solid #f44336;
+  }
+  
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  
+  @media (max-width: 600px) {
+    .settings-container { padding: 16px; }
+    .md3-card { padding: 16px; }
+    .color-item { flex-direction: column; align-items: stretch; gap: 8px; }
+    .toast-container { top: 10px; right: 10px; max-width: 280px; }
+  }
+  </style>

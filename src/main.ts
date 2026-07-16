@@ -8,6 +8,7 @@ import VueFluent from '@creatorsn/vfluent3'
 // 必须引入全局样式
 import '@creatorsn/vfluent3/style.css'
 import App from "./App.vue"
+import ColorSwatch from './components/ColorSwatch.vue'
 
 export const SUPPORTED_LOCALES = ['en', 'zh-CN', 'zh-TW']
 let locale = localStorage.getItem('locale')
@@ -72,6 +73,7 @@ if (!locale) {
 changeLocale(locale)
 
 const app = createApp(App)
+app.component('ColorSwatch', ColorSwatch)
 // 全局安装VFluent
 app.use(VueFluent)
 app.use(i18n)

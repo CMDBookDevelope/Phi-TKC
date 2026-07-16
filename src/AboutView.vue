@@ -13,9 +13,9 @@
       </div>
       <!-- 信息卡片，纵向排列，依次滑入 -->
       <div class="info-cards">
-        <v-card class="info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
-          <div class="fluent-glass card-content">
-            <div class="card-icon">
+        <v-card class="fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
+          <div class="card-content">
+            <div class="static-glass card-icon">
               <fv-AnimatedIcon fontSize="28" icon="Globe" />
             </div>
             <div class="card-text">
@@ -27,9 +27,9 @@
             </div>
           </div>
         </v-card>
-        <v-card class="info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
-          <div class="fluent-glass card-content">
-            <div class="card-icon">
+        <v-card class="fluent-glass info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
+          <div class="card-content">
+            <div class="static-glass card-icon">
               <fv-AnimatedIcon fontSize="28" icon="PrintAllPages" />
             </div>
             <div class="card-text">
@@ -41,9 +41,9 @@
             </div>
           </div>
         </v-card>
-        <v-card class="info-card" :style="{ '--i': 2 }">
-          <div class="fluent-glass card-content">
-            <div class="card-icon">
+        <v-card class="fluent-glass info-card" :style="{ '--i': 2 }">
+          <div class="card-content">
+            <div class="static-glass card-icon">
               <fv-AnimatedIcon fontSize="28" icon="Package" />
             </div>
             <div class="card-text">
@@ -284,7 +284,6 @@ zh-CN:
   max-width: 70vw;
   height: auto;
   object-fit: contain;
-  border-radius: 16px;
 }
 .app-logo-img:hover {
   border-radius: 16px;
@@ -297,7 +296,8 @@ zh-CN:
   width: 66px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.85);
+  opacity: 0.85;
+  color: var(--main-color)
 }
 /* 信息卡片容器：纵向排列 */
 .info-cards {
@@ -308,7 +308,6 @@ zh-CN:
 }
 /* 卡片基础样式与进入动画 */
 .info-card {
-  backdrop-filter: blur(3px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
   cursor: pointer;
@@ -341,12 +340,11 @@ zh-CN:
 .card-icon {
   width: 50px;
   height: 50px;
-  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
+  border-radius: 16px;
 }
 .card-text {
   flex: 1;
@@ -355,16 +353,18 @@ zh-CN:
 .card-title {
   font-size: 1.05rem;
   font-weight: 600;
-  color: white;
+  color: var(--main-color);
   margin: 0 0 4px 0;
 }
 .card-subtitle {
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--main-color);
+  opacity: 0.65;
   overflow: hidden;
 }
 .card-link {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--main-color);
+  opacity: 0.65;
   transition:
     transform 0.2s ease-in-out,
     color 0.2s ease-in-out;
@@ -392,7 +392,8 @@ zh-CN:
 }
 .footer-sec {
   font-size: 0.8rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--main-color);
+  opacity: 0.45;
   margin:0;
   text-align: center;
 }
