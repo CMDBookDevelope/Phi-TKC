@@ -22,7 +22,7 @@ Phi-TKC 是一个基于 Tauri + Vue 3 的谱面渲染工具。Fork 自: [素 ink
 - CRF码率控制
 - 铺面揭秘功能
 - 跨平台支持（Windows、Linux、macOS）
-- 现代化的用户界面，基于 Vue 3 + Vuetify
+- 现代化的用户界面，基于 Vue 3 + VFluent3
 - 支持Vulkan加速渲染
 - 手序分配AI引擎
 - 支持纯无头渲染，CLI支持完善
