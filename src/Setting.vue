@@ -77,6 +77,222 @@ zh-CN:
       saved: "颜色已保存！"
 </i18n>
 
+<template>
+  <div class="settings-container">
+    <div class="settings-scroll">
+      <!-- 输出路径卡片 -->
+      <fv-card class="md3-card fluent-glass">
+        <div class="card-label">{{ t('settings.outputPath.label') }}</div>
+        <fv-breadcrumb
+          v-if="outputPath"
+          :items="outputPath.split(/[\\/]/).filter(Boolean).map((seg) => ({ text: seg, to: '#' }))"
+          separator="/"
+          class="path-breadcrumb"
+        />
+        <div v-else class="path-empty">{{ t('settings.outputPath.placeholder') }}</div>
+        <div v-if="selectedInfo" class="hint-text">{{ selectedInfo }}</div>
+        <div class="card-actions">
+          <fv-button appearance="tonal" @click="selectFolder">
+            <fv-icon name="folder-open" size="18" />
+            <span>{{ t('settings.selectFolder') }}</span>
+          </fv-button>
+          <fv-button appearance="tonal" @click="openTreeDialog">
+            <fv-icon name="tree-view" size="18" />
+            <span>Tree</span>
+          </fv-button>
+          <fv-button appearance="filled" @click="saveOutputPath">
+            <fv-icon name="save" size="18" />
+            <span>{{ t('settings.save') }}</span>
+          </fv-button>
+          <fv-button appearance="text" @click="copyPath" :disabled="!outputPath" :title="t('settings.copy')">
+            <fv-icon name="copy" size="18" />
+          </fv-button>
+          <fv-button appearance="text" @click="clearPath" :disabled="!outputPath" :title="t('settings.clear')">
+            <fv-icon name="close" size="18" />
+          </fv-button>
+        </div>
+      </fv-card>
+
+      <!-- 自定义背景卡片 -->
+      <fv-card class="md3-card fluent-glass">
+        <div class="card-label">{{ t('settings.background.label') }}</div>
+        <div class="bg-preview" v-if="backgroundPreviewUrl">
+          <img :src="backgroundPreviewUrl" alt="Background preview" class="preview-img" />
+        </div>
+        <div v-else class="bg-preview empty">No background</div>
+        <div class="card-actions">
+          <fv-button appearance="tonal" @click="selectBackground">
+            <fv-icon name="image" size="18" />
+            <span>{{ t('settings.background.selectFile') }}</span>
+          </fv-button>
+          <fv-button appearance="filled" @click="fixCurrentBackground">
+            <fv-icon name="pin" size="18" />
+            <span>{{ t('settings.background.fixed') }}</span>
+          </fv-button>
+          <fv-button appearance="tonal" @click="refreshBackground">
+            <fv-icon name="refresh" size="18" />
+            <span>{{ t('settings.background.refresh') }}</span>
+          </fv-button>
+          <fv-button appearance="text" @click="clearAndRefreshBackground" :disabled="!backgroundPath" :title="t('settings.background.clearAndRefresh')">
+            <fv-icon name="delete" size="18" />
+          </fv-button>
+        </div>
+      </fv-card>
+
+      <!-- 自定义主题色卡片 -->
+      <fv-card class="md3-card fluent-glass">
+        <div class="card-label">Theme Colors</div>
+        <div class="color-row">
+          <!-- 主色 -->
+          <div class="color-item">
+            <span class="color-label">{{ t('settings.colors.main') }}</span>
+            <fv-button
+              ref="mainColorBtn"
+              class="color-swatch"
+              :style="{ backgroundColor: localMain }"
+              @click="openColorPicker('main')"
+            >
+              {{ localMain }}
+            </fv-button>
+            <fv-callout
+              v-model:open="mainColorPickerOpen"
+              :target="mainColorBtn"
+              position="bottom-start"
+              class="color-picker-callout"
+              close-on-outside-click
+            >
+              <div class="picker-content">
+                <fv-color-picker v-model="tempMainColor" />
+                <div class="picker-actions">
+                  <fv-button appearance="filled" @click="confirmColor('main')">确定</fv-button>
+                  <fv-button appearance="text" @click="mainColorPickerOpen = false">取消</fv-button>
+                </div>
+              </div>
+            </fv-callout>
+            <fv-button
+              appearance="text"
+              @click="resetColor('mainColor')"
+              :disabled="!hasMainColor"
+            >
+              {{ t('settings.colors.reset') }}
+            </fv-button>
+          </div>
+
+          <!-- 背景色 -->
+          <div class="color-item">
+            <span class="color-label">{{ t('settings.colors.bg') }}</span>
+            <fv-button
+              ref="bgColorBtn"
+              class="color-swatch"
+              :style="{ backgroundColor: localBg }"
+              @click="openColorPicker('bg')"
+            >
+              {{ localBg }}
+            </fv-button>
+            <fv-callout
+              v-model:open="bgColorPickerOpen"
+              :target="bgColorBtn"
+              position="bottom-start"
+              class="color-picker-callout"
+              close-on-outside-click
+            >
+              <div class="picker-content">
+                <fv-color-picker v-model="tempBgColor" />
+                <div class="picker-actions">
+                  <fv-button appearance="filled" @click="confirmColor('bg')">确定</fv-button>
+                  <fv-button appearance="text" @click="bgColorPickerOpen = false">取消</fv-button>
+                </div>
+              </div>
+            </fv-callout>
+            <fv-button
+              appearance="text"
+              @click="resetColor('bgColor')"
+              :disabled="!hasBgColor"
+            >
+              {{ t('settings.colors.reset') }}
+            </fv-button>
+          </div>
+
+          <!-- 辅色 -->
+          <div class="color-item">
+            <span class="color-label">{{ t('settings.colors.sub') }}</span>
+            <fv-button
+              ref="subColorBtn"
+              class="color-swatch"
+              :style="{ backgroundColor: localSub }"
+              @click="openColorPicker('sub')"
+            >
+              {{ localSub }}
+            </fv-button>
+            <fv-callout
+              v-model:open="subColorPickerOpen"
+              :target="subColorBtn"
+              position="bottom-start"
+              class="color-picker-callout"
+              close-on-outside-click
+            >
+              <div class="picker-content">
+                <fv-color-picker v-model="tempSubColor" />
+                <div class="picker-actions">
+                  <fv-button appearance="filled" @click="confirmColor('sub')">确定</fv-button>
+                  <fv-button appearance="text" @click="subColorPickerOpen = false">取消</fv-button>
+                </div>
+              </div>
+            </fv-callout>
+            <fv-button
+              appearance="text"
+              @click="resetColor('subColor')"
+              :disabled="!hasSubColor"
+            >
+              {{ t('settings.colors.reset') }}
+            </fv-button>
+          </div>
+        </div>
+
+        <div class="card-actions">
+          <fv-button appearance="tonal" @click="resetAllColors" :disabled="!useCustomColors">
+            {{ t('settings.colors.reset') }} All
+          </fv-button>
+        </div>
+      </fv-card>
+    </div>
+
+    <!-- TreeView 对话框 -->
+    <fv-tree-view v-model:open="treeDialogOpen" modal class="tree-dialog">
+      <fv-card class="tree-card">
+        <h3>Select Folder</h3>
+        <fv-tree-view
+          v-if="!treeLoading && !treeError"
+          :items="treeData"
+          @item-click="onTreeItemClick"
+          @item-expand="onTreeExpand"
+          expand-on-click
+          class="tree-view"
+        />
+        <div v-if="treeLoading" class="loading-box"><fv-spinner size="large" /></div>
+        <div v-if="treeError" class="error-box">
+          <!-- 使用 showToast 代替，不再显示内联消息 -->
+        </div>
+        <div class="dialog-actions">
+          <fv-button appearance="text" @click="treeDialogOpen = false">Cancel</fv-button>
+        </div>
+      </fv-card>
+    </fv-tree-view>
+
+    <!-- Toast 容器 -->
+    <div class="toast-container">
+      <div
+        v-for="msg in toastMessages"
+        :key="msg.id"
+        class="toast-item"
+        :class="msg.type"
+      >
+        {{ msg.text }}
+      </div>
+    </div>
+  </div>
+</template>
+
 <script setup lang="ts">
 import { ref, computed, inject, watch, onMounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -90,6 +306,23 @@ import { fetch } from "@tauri-apps/plugin-http";
 defineOptions({ name: 'SettingsPanel' });
 
 const { t } = useI18n();
+
+// ---- Toast 系统 ----
+interface ToastMessage {
+  id: number;
+  text: string;
+  type: 'success' | 'warning' | 'error';
+}
+const toastMessages = ref<ToastMessage[]>([]);
+let toastId = 0;
+
+function showToast(text: string, type: 'success' | 'warning' | 'error' = 'success') {
+  const id = toastId++;
+  toastMessages.value.push({ id, text, type });
+  setTimeout(() => {
+    toastMessages.value = toastMessages.value.filter(msg => msg.id !== id);
+  }, 3000);
+}
 
 // ---- 主题颜色注入 ----
 const themeColors = inject<{ mainColor: Ref<string>; bgColor: Ref<string>; subColor: Ref<string> }>('themeColors');
@@ -159,8 +392,7 @@ function saveColor(colorKey: string, value: string) {
   else if (colorKey === 'bgColor') bgColor.value = value;
   else if (colorKey === 'subColor') subColor.value = value;
   window.dispatchEvent(new CustomEvent('themeColorChanged', { detail: { key: colorKey, value } }));
-  colorSaved.value = true;
-  setTimeout(() => (colorSaved.value = false), 1500);
+  showToast(t('settings.colors.saved'), 'success');
 }
 
 function resetColor(colorKey: string) {
@@ -169,8 +401,7 @@ function resetColor(colorKey: string) {
   if (window.extractColorsFromCurrentBackground) {
     window.extractColorsFromCurrentBackground();
   }
-  colorSaved.value = true;
-  setTimeout(() => (colorSaved.value = false), 1500);
+  showToast(t('settings.colors.saved'), 'success');
 }
 
 function resetAllColors() {
@@ -180,20 +411,14 @@ function resetAllColors() {
   if (window.extractColorsFromCurrentBackground) {
     window.extractColorsFromCurrentBackground();
   }
-  colorSaved.value = true;
-  setTimeout(() => (colorSaved.value = false), 1500);
+  showToast(t('settings.colors.saved'), 'success');
 }
-
-const colorSaved = ref(false);
 
 // ---- 输出路径 ----
 const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
-const saved = ref(false);
-const warning = ref('');
 const selectedInfo = ref<string | null>(null);
 
 async function selectFolder() {
-  warning.value = '';
   selectedInfo.value = null;
   try {
     const selected = await open({ directory: true, multiple: false, defaultPath: await appConfigDir() });
@@ -203,21 +428,27 @@ async function selectFolder() {
     const rootName = path.split(/[\\/]/).pop() || path;
     selectedInfo.value = t('settings.selected.picked', { name: rootName });
   } catch (err: any) {
-    warning.value = t('settings.outputPath.warning.select_error', { msg: err.message || String(err) });
+    showToast(t('settings.outputPath.warning.select_error', { msg: err.message || String(err) }), 'error');
   }
 }
 
 function saveOutputPath() {
-  if (!outputPath.value) { warning.value = t('settings.outputPath.warning.empty'); return; }
+  if (!outputPath.value) {
+    showToast(t('settings.outputPath.warning.empty'), 'warning');
+    return;
+  }
   localStorage.setItem('outputPath', outputPath.value);
-  saved.value = true;
-  setTimeout(() => (saved.value = false), 1500);
+  showToast(t('settings.saved'), 'success');
 }
 
 async function copyPath() {
   if (!outputPath.value) return;
-  try { await writeText(outputPath.value); saved.value = true; setTimeout(() => (saved.value = false), 1500); }
-  catch { warning.value = t('settings.outputPath.warning.copy_error'); }
+  try {
+    await writeText(outputPath.value);
+    showToast(t('settings.saved'), 'success');
+  } catch {
+    showToast(t('settings.outputPath.warning.copy_error'), 'error');
+  }
 }
 
 function clearPath() {
@@ -228,7 +459,6 @@ function clearPath() {
 
 // ---- 背景操作 ----
 const backgroundPath = ref<string>(localStorage.getItem('customBackground') || '');
-const backgroundSaved = ref(false);
 
 const backgroundPreviewUrl = computed(() => {
   if (backgroundPath.value) {
@@ -249,44 +479,38 @@ async function selectBackground() {
       localStorage.setItem('customBackground', path as string);
       window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: path }));
     }
-    backgroundSaved.value = true;
-    setTimeout(() => (backgroundSaved.value = false), 1500);
-  } catch (err: any) { console.error('Failed to select background:', err); }
+    showToast(t('settings.background.saved'), 'success');
+  } catch (err: any) {
+    console.error('Failed to select background:', err);
+    showToast('Failed to select background', 'error');
+  }
 }
 
-// 固定当前背景（调用 App 的方法）
 async function fixCurrentBackground() {
   if (window.fixCurrentBackground) {
     await window.fixCurrentBackground();
-    // 更新本地显示
     const stored = localStorage.getItem('customBackground');
     if (stored) {
       backgroundPath.value = stored;
     }
-    backgroundSaved.value = true;
-    setTimeout(() => (backgroundSaved.value = false), 1500);
+    showToast(t('settings.background.saved'), 'success');
   } else {
-    console.warn('fixCurrentBackground not available');
+    showToast('fixCurrentBackground not available', 'warning');
   }
 }
 
-// 刷新背景（从API获取新图片）
 function refreshBackground() {
   if (window.refreshApiBackground) {
     window.refreshApiBackground();
     backgroundPath.value = '';
-    // 提示刷新成功（可通过状态显示）
-    backgroundSaved.value = true;
-    setTimeout(() => (backgroundSaved.value = false), 1500);
+    showToast(t('settings.background.saved'), 'success');
   } else {
-    console.warn('refreshApiBackground not available');
+    showToast('refreshApiBackground not available', 'warning');
   }
 }
 
-// 清除自定义背景并刷新API
 function clearAndRefreshBackground() {
   if (backgroundPath.value) {
-    // 清除自定义
     if (window.saveCustomBackground) {
       window.saveCustomBackground(null);
     } else {
@@ -297,7 +521,7 @@ function clearAndRefreshBackground() {
   refreshBackground();
 }
 
-// ---- TreeView 文件选择（保留但简化，未改动） ----
+// ---- TreeView 文件选择 ----
 const treeDialogOpen = ref(false);
 const treeData = ref<any[]>([]);
 const treeLoading = ref(false);
@@ -338,6 +562,7 @@ async function openTreeDialog() {
     treeData.value = [{ label: 'Home', path: root, children, isLeaf: false }];
   } catch (err: any) {
     treeError.value = err.message;
+    showToast(treeError.value, 'error');
   } finally {
     treeLoading.value = false;
   }
@@ -350,6 +575,7 @@ async function loadChildren(node: any) {
     node.children = children;
   } catch (err: any) {
     console.error(err);
+    showToast('Failed to load children', 'error');
   }
 }
 
@@ -391,223 +617,7 @@ onMounted(() => {
     else if (key === 'subColor') localSub.value = value;
   }) as EventListener);
 });
-
-// ---- 暴露全局方法（供App调用） ----
-// 这些方法已在 App.vue 中实现，这里不需要额外暴露
 </script>
-
-<template>
-  <div class="settings-container">
-    <div class="settings-scroll">
-      <!-- 输出路径卡片 -->
-      <fv-card class="md3-card fluent-glass">
-        <div class="card-label">{{ t('settings.outputPath.label') }}</div>
-        <fv-breadcrumb
-          v-if="outputPath"
-          :items="outputPath.split(/[\\/]/).filter(Boolean).map((seg) => ({ text: seg, to: '#' }))"
-          separator="/"
-          class="path-breadcrumb"
-        />
-        <div v-else class="path-empty">{{ t('settings.outputPath.placeholder') }}</div>
-        <div v-if="selectedInfo" class="hint-text">{{ selectedInfo }}</div>
-        <div class="card-actions">
-          <fv-button appearance="tonal" @click="selectFolder">
-            <fv-icon name="folder-open" size="18" />
-            <span>{{ t('settings.selectFolder') }}</span>
-          </fv-button>
-          <fv-button appearance="tonal" @click="openTreeDialog">
-            <fv-icon name="tree-view" size="18" />
-            <span>Tree</span>
-          </fv-button>
-          <fv-button appearance="filled" @click="saveOutputPath">
-            <fv-icon name="save" size="18" />
-            <span>{{ t('settings.save') }}</span>
-          </fv-button>
-          <fv-button appearance="text" @click="copyPath" :disabled="!outputPath" :title="t('settings.copy')">
-            <fv-icon name="copy" size="18" />
-          </fv-button>
-          <fv-button appearance="text" @click="clearPath" :disabled="!outputPath" :title="t('settings.clear')">
-            <fv-icon name="close" size="18" />
-          </fv-button>
-        </div>
-        <fv-message-bar v-if="warning" type="warning" class="mt-2">
-          {{ warning }}
-        </fv-message-bar>
-        <fv-message-bar v-if="saved" type="success" class="mt-2">
-          {{ t('settings.saved') }}
-        </fv-message-bar>
-      </fv-card>
-
-      <!-- 自定义背景卡片 -->
-      <fv-card class="md3-card fluent-glass">
-        <div class="card-label">{{ t('settings.background.label') }}</div>
-        <div class="bg-preview" v-if="backgroundPreviewUrl">
-          <img :src="backgroundPreviewUrl" alt="Background preview" class="preview-img" />
-        </div>
-        <div v-else class="bg-preview empty">No background</div>
-        <div class="card-actions">
-          <fv-button appearance="tonal" @click="selectBackground">
-            <fv-icon name="image" size="18" />
-            <span>{{ t('settings.background.selectFile') }}</span>
-          </fv-button>
-          <fv-button appearance="filled" @click="fixCurrentBackground">
-            <fv-icon name="pin" size="18" />
-            <span>{{ t('settings.background.fixed') }}</span>
-          </fv-button>
-          <fv-button appearance="tonal" @click="refreshBackground">
-            <fv-icon name="refresh" size="18" />
-            <span>{{ t('settings.background.refresh') }}</span>
-          </fv-button>
-          <fv-button appearance="text" @click="clearAndRefreshBackground" :disabled="!backgroundPath" :title="t('settings.background.clearAndRefresh')">
-            <fv-icon name="delete" size="18" />
-          </fv-button>
-        </div>
-        <fv-message-bar v-if="backgroundSaved" type="success" class="mt-2">
-          {{ t('settings.background.saved') }}
-        </fv-message-bar>
-      </fv-card>
-
-      <!-- 自定义主题色卡片 -->
-      <fv-card class="md3-card fluent-glass">
-        <div class="card-label">Theme Colors</div>
-        <div class="color-row">
-          <!-- 主色 -->
-          <div class="color-item">
-            <span class="color-label">{{ t('settings.colors.main') }}</span>
-            <fv-button
-              ref="mainColorBtn"
-              class="color-swatch"
-              :style="{ backgroundColor: localMain }"
-              @click="openColorPicker('main')"
-            >
-              {{ localMain }}
-            </fv-button>
-            <fv-callout
-              v-model:open="mainColorPickerOpen"
-              :target="mainColorBtn"
-              position="below"
-              class="color-picker-callout"
-            >
-              <div class="picker-content">
-                <fv-color-picker v-model="tempMainColor" />
-                <div class="picker-actions">
-                  <fv-button appearance="filled" @click="confirmColor('main')">确定</fv-button>
-                  <fv-button appearance="text" @click="mainColorPickerOpen = false">取消</fv-button>
-                </div>
-              </div>
-            </fv-callout>
-            <fv-button
-              appearance="text"
-              @click="resetColor('mainColor')"
-              :disabled="!hasMainColor"
-            >
-              {{ t('settings.colors.reset') }}
-            </fv-button>
-          </div>
-
-          <!-- 背景色 -->
-          <div class="color-item">
-            <span class="color-label">{{ t('settings.colors.bg') }}</span>
-            <fv-button
-              ref="bgColorBtn"
-              class="color-swatch"
-              :style="{ backgroundColor: localBg }"
-              @click="openColorPicker('bg')"
-            >
-              {{ localBg }}
-            </fv-button>
-            <fv-callout
-              v-model:open="bgColorPickerOpen"
-              :target="bgColorBtn"
-              position="below"
-              class="color-picker-callout"
-            >
-              <div class="picker-content">
-                <fv-color-picker v-model="tempBgColor" />
-                <div class="picker-actions">
-                  <fv-button appearance="filled" @click="confirmColor('bg')">确定</fv-button>
-                  <fv-button appearance="text" @click="bgColorPickerOpen = false">取消</fv-button>
-                </div>
-              </div>
-            </fv-callout>
-            <fv-button
-              appearance="text"
-              @click="resetColor('bgColor')"
-              :disabled="!hasBgColor"
-            >
-              {{ t('settings.colors.reset') }}
-            </fv-button>
-          </div>
-
-          <!-- 辅色 -->
-          <div class="color-item">
-            <span class="color-label">{{ t('settings.colors.sub') }}</span>
-            <fv-button
-              ref="subColorBtn"
-              class="color-swatch"
-              :style="{ backgroundColor: localSub }"
-              @click="openColorPicker('sub')"
-            >
-              {{ localSub }}
-            </fv-button>
-            <fv-callout
-              v-model:open="subColorPickerOpen"
-              :target="subColorBtn"
-              position="below"
-              class="color-picker-callout"
-            >
-              <div class="picker-content">
-                <fv-color-picker v-model="tempSubColor" />
-                <div class="picker-actions">
-                  <fv-button appearance="filled" @click="confirmColor('sub')">确定</fv-button>
-                  <fv-button appearance="text" @click="subColorPickerOpen = false">取消</fv-button>
-                </div>
-              </div>
-            </fv-callout>
-            <fv-button
-              appearance="text"
-              @click="resetColor('subColor')"
-              :disabled="!hasSubColor"
-            >
-              {{ t('settings.colors.reset') }}
-            </fv-button>
-          </div>
-        </div>
-
-        <div class="card-actions">
-          <fv-button appearance="tonal" @click="resetAllColors" :disabled="!useCustomColors">
-            {{ t('settings.colors.reset') }} All
-          </fv-button>
-        </div>
-        <fv-message-bar v-if="colorSaved" type="success" class="mt-2">
-          {{ t('settings.colors.saved') }}
-        </fv-message-bar>
-      </fv-card>
-    </div>
-
-    <!-- TreeView 对话框（保持不变） -->
-    <fv-dialog v-model:open="treeDialogOpen" modal class="tree-dialog">
-      <fv-card class="tree-card">
-        <h3>Select Folder</h3>
-        <fv-tree-view
-          v-if="!treeLoading && !treeError"
-          :items="treeData"
-          @item-click="onTreeItemClick"
-          @item-expand="onTreeExpand"
-          expand-on-click
-          class="tree-view"
-        />
-        <div v-if="treeLoading" class="loading-box"><fv-spinner size="large" /></div>
-        <div v-if="treeError" class="error-box">
-          <fv-message-bar type="warning">{{ treeError }}</fv-message-bar>
-        </div>
-        <div class="dialog-actions">
-          <fv-button appearance="text" @click="treeDialogOpen = false">Cancel</fv-button>
-        </div>
-      </fv-card>
-    </fv-dialog>
-  </div>
-</template>
 
 <style scoped>
 .settings-container {
@@ -619,6 +629,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  position: relative;
 }
 
 .settings-scroll {
@@ -724,6 +735,7 @@ onMounted(() => {
   backdrop-filter: blur(20px);
   border-radius: 16px;
   padding: 16px;
+  z-index: 1000;
 }
 .picker-content {
   display: flex;
@@ -767,10 +779,57 @@ onMounted(() => {
   gap: 8px;
 }
 
+/* Toast 样式 */
+.toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 360px;
+  pointer-events: none;
+}
+.toast-item {
+  padding: 12px 20px;
+  border-radius: 12px;
+  background: rgba(30, 30, 30, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  animation: slideIn 0.3s ease;
+}
+.toast-item.success {
+  border-left: 4px solid #4caf50;
+}
+.toast-item.warning {
+  border-left: 4px solid #ff9800;
+}
+.toast-item.error {
+  border-left: 4px solid #f44336;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 @media (max-width: 600px) {
   .settings-container { padding: 16px; }
   .md3-card { padding: 16px; }
   .color-item { flex-direction: column; align-items: stretch; gap: 8px; }
   .color-swatch { width: 100%; }
+  .toast-container { top: 10px; right: 10px; max-width: 280px; }
 }
 </style>
