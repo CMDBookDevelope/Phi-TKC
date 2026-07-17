@@ -21,16 +21,16 @@
         selectFile: "Select"
         clear: "Clear background"
         saved: "Background Refreshed"
-        fixed: "Fix"
+        fix: "Fix"
         refresh: "Refresh"
+        fixed: "Background successfully fixed"
         noCustom: "No custom background to clear"
       colors:
+        submit: "Apply"
         main: "Main Color"
         bg: "Background Color"
         sub: "Sub Color"
         custom: "Customize"
-        auto: "Auto (from image)"
-        reset: "Auto"
         saved: "Color saved!"
         label: "Theme Color"
   zh-CN:
@@ -55,16 +55,16 @@
         selectFile: "选择图片"
         clear: "清除背景"
         saved: "背景已刷新!"
-        fixed: "固定背景"
+        fix: "固定背景"
         refresh: "刷新背景"
+        fixed: "背景成功固定!"
         noCustom: "当前没有自定义背景"
       colors:
+        submit: "应用"
         main: "主色"
         bg: "背景色"
         sub: "辅色"
         custom: "自定义"
-        auto: "自动 (来自图片)"
-        reset: "自动选择"
         saved: "颜色已保存！"
         label: "主题色"
   </i18n>
@@ -73,7 +73,7 @@
     <div class="settings-container">
       <div class="settings-scroll">
         <!-- 输出路径卡片 -->
-        <fv-card class="md3-card fluent-glass">
+        <fv-card class="md3-card glass fluent-glass" v-glass>
           <div class="card-label">{{ t('settings.outputPath.label') }}</div>
           <div v-if="outputPath"></div>
           <div v-else class="path-empty">{{ t('settings.outputPath.placeholder') }}</div>
@@ -89,7 +89,7 @@
         </fv-card>
   
         <!-- 自定义背景卡片 -->
-        <fv-card class="md3-card fluent-glass">
+        <fv-card class="glass md3-card fluent-glass" v-glass>
           <div class="card-label">{{ t('settings.background.label') }}</div>
           <div class="bg-preview" v-if="backgroundPreviewUrl">
             <img :src="backgroundPreviewUrl" alt="Background preview" class="preview-img" />
@@ -100,7 +100,7 @@
               <span>{{ t('settings.background.selectFile') }}</span>
             </fv-button>
             <fv-button icon="Pin" :background="mainColor" @click="fixCurrentBackground">
-              <span>{{ t('settings.background.fixed') }}</span>
+              <span>{{ t('settings.background.fix') }}</span>
             </fv-button>
             <fv-button icon="Refresh" :background="mainColor" @click="refreshBackground">
               <span>{{ t('settings.background.refresh') }}</span>
@@ -109,12 +109,12 @@
         </fv-card>
   
         <!-- 自定义主题色卡片 -->
-        <fv-card class="md3-card fluent-glass">
+        <fv-card class="md3-card fluent-glass glass" v-glass>
           <div class="card-label">{{ t('settings.colors.label') }}</div>
-          <div class="color-row">
+          <div class="color-row" :key="colorPickerKey">
             <!-- 主色 -->
             <div class="color-item">
-              <a>{{ t('settings.colors.main') }}</a>
+              <div class="color-prom"><a>{{ t('settings.colors.main') }}</a></div>
               <fv-callout
                 border-radius="16px"
                 :callout-bg="tempMainColor"
@@ -123,46 +123,34 @@
               <ColorSwatch :color="tempMainColor" :size="28" />
                 <template v-slot:main>
                   <div class="picker-content">
-                    <fv-color-picker hideFields v-model="tempMainColor" />
+                    <fv-color-picker hideFields v-model="tempMainColor"/>
                   </div>
                 </template>
               </fv-callout>
-              <fv-button @click="confirmColor('main')">确定</fv-button>
-              <fv-button
-                @click="resetColor('mainColor')"
-                icon="Refresh"
-              >
-                {{ t('settings.colors.reset') }}
-              </fv-button>
+              <fv-button icon="CheckMark" :background="mainColor" @click="confirmColor('main')">{{ t('settings.colors.submit') }}</fv-button>
             </div>
   
             <!-- 背景色 -->
             <div class="color-item">
-              <a>{{ t('settings.colors.bg') }}</a>
+              <div class="color-prom"><a>{{ t('settings.colors.bg') }}</a></div>
               <fv-callout
                 border-radius="16px"
                 :callout-bg="tempBgColor"
                 position="rightTop"
               >
-              <ColorSwatch :color="tempBgColor" :size="28" />
+              <ColorSwatch :color="tempBgColor":size="28" />
                 <template v-slot:main>
                   <div class="picker-content">
                     <fv-color-picker hideFields v-model="tempBgColor" />
                   </div>
                 </template>
               </fv-callout>
-              <fv-button @click="confirmColor('bg')">确定</fv-button>
-              <fv-button
-                @click="resetColor('bgColor')"
-                icon="Refresh"
-              >
-                {{ t('settings.colors.reset') }}
-              </fv-button>
+              <fv-button icon="CheckMark" :background="mainColor" @click="confirmColor('bg')">{{ t('settings.colors.submit') }}</fv-button>
             </div>
   
             <!-- 辅色 -->
             <div class="color-item">
-              <a>{{ t('settings.colors.sub') }}</a>
+              <div class="color-prom"><a>{{ t('settings.colors.sub') }}</a></div>
               <fv-callout
                 position="rightTop"
                 border-radius="16px"
@@ -175,20 +163,8 @@
                   </div>
                 </template>
               </fv-callout>
-              <fv-button @click="confirmColor('sub')">确定</fv-button>
-              <fv-button
-                @click="resetColor('subColor')"
-                icon="Refresh"
-              >
-                {{ t('settings.colors.reset') }}
-              </fv-button>
-          </div>
-        </div>
-  
-          <div class="card-actions">
-            <fv-button icon="Refresh" @click="resetAllColors">
-              {{ t('settings.colors.reset') }}
-            </fv-button>
+              <fv-button icon="CheckMark" :background="mainColor" @click="confirmColor('sub')">{{ t('settings.colors.submit') }}</fv-button>
+            </div>
           </div>
         </fv-card>
       </div>
@@ -208,15 +184,18 @@
   </template>
   
   <script setup lang="ts">
-  import { ref, computed, inject, watch, onMounted } from 'vue';
+  import { ref, computed, inject, watch, onMounted, nextTick } from 'vue';
   import { useI18n } from 'vue-i18n';
   import { open } from '@tauri-apps/plugin-dialog';
   import { appConfigDir, appDataDir } from '@tauri-apps/api/path';
   import { convertFileSrc } from '@tauri-apps/api/core';
+  import { mainColor, bgColor, subColor } from './stores/colorStore'
   
   defineOptions({ name: 'SettingsPanel' });
   
   const { t } = useI18n();
+
+  const colorPickerKey = ref(0)
   
   // ---- Toast 系统 ----
   interface ToastMessage {
@@ -234,44 +213,26 @@
       toastMessages.value = toastMessages.value.filter(msg => msg.id !== id);
     }, 3000);
   }
-  
-  // ---- 主题颜色注入 ----
-  const themeColors = inject<{ mainColor: Ref<string>; bgColor: Ref<string>; subColor: Ref<string> }>('themeColors');
-  if (!themeColors) throw new Error('themeColors not provided');
-  const { mainColor, bgColor, subColor } = themeColors;
-  
-  // 本地显示颜色
-  const localMain = ref(mainColor.value);
-  const localBg = ref(bgColor.value);
-  const localSub = ref(subColor.value);
-  
-  watch([mainColor, bgColor, subColor], ([m, b, s]) => {
-    localMain.value = m;
-    localBg.value = b;
-    localSub.value = s;
-  });
-  
-  // 是否有自定义颜色（用于显示重置按钮）
-  const hasMainColor = computed(() => !!localStorage.getItem('mainColor'));
-  const hasBgColor = computed(() => !!localStorage.getItem('bgColor'));
-  const hasSubColor = computed(() => !!localStorage.getItem('subColor'));
-  const useCustomColors = computed(() => hasMainColor.value || hasBgColor.value || hasSubColor.value);
-  
+    
   // ---- 颜色选择器弹出状态 ----
-  const tempMainColor = ref(localMain.value);
-  const tempBgColor = ref(localBg.value);
-  const tempSubColor = ref(localSub.value);
+  const tempMainColor = ref(mainColor.value);
+  const tempBgColor = ref(bgColor.value);
+  const tempSubColor = ref(subColor.value);
   
   function confirmColor(type: 'main' | 'bg' | 'sub') {
-    if (type === 'main') {
-      saveColor('mainColor', tempMainColor.value);
-    } else if (type === 'bg') {
-      saveColor('bgColor', tempBgColor.value);
-    } else {
-      saveColor('subColor', tempSubColor.value);
+      if (type === 'main') {
+        saveColor('mainColor', tempMainColor.value);
+      } else if (type === 'bg') {
+        saveColor('bgColor', tempBgColor.value);
+      } else {
+        saveColor('subColor', tempSubColor.value);
+      }
+      
+      // 关键：key +1 触发三个颜色控件全部销毁重建 = 重载
+      nextTick(() => {
+        colorPickerKey.value++
+      })
     }
-  }
-  
   function saveColor(colorKey: string, value: string) {
     localStorage.setItem(colorKey, value);
     if (colorKey === 'mainColor') mainColor.value = value;
@@ -280,26 +241,7 @@
     window.dispatchEvent(new CustomEvent('themeColorChanged', { detail: { key: colorKey, value } }));
     showToast(t('settings.colors.saved'), 'success');
   }
-  
-  // 重置单个颜色（移除 localStorage，调用外部提取）
-  function resetColor(colorKey: string) {
-    localStorage.removeItem(colorKey);
-    if (window.extractColorsFromCurrentBackground) {
-      window.extractColorsFromCurrentBackground();
-    }
-    showToast(t('settings.colors.saved'), 'success');
-  }
-  
-  function resetAllColors() {
-    localStorage.removeItem('mainColor');
-    localStorage.removeItem('bgColor');
-    localStorage.removeItem('subColor');
-    if (window.extractColorsFromCurrentBackground) {
-      window.extractColorsFromCurrentBackground();
-    }
-    showToast(t('settings.colors.saved'), 'success');
-  }
-  
+
   // ---- 输出路径 ----
   const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
   const selectedInfo = ref<string | null>(null);
@@ -363,7 +305,7 @@
       if (stored) {
         backgroundPath.value = stored;
       }
-      showToast(t('settings.background.saved'), 'success');
+      showToast(t('settings.background.fixed'), 'success');
     } else {
       showToast('fixCurrentBackground not available', 'warning');
     }
@@ -476,11 +418,15 @@
     gap: 20px;
   }
   .color-item {
+    color: var(--bg-color);
     font-size: 13.3px;
     display: flex;
     align-items: center;
     gap: 16px;
     flex-wrap: wrap;
+  }
+  .color-prom {
+    color: var(--main-color)
   }
   .color-label {
     min-width: 100px;

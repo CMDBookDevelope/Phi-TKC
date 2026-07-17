@@ -6,7 +6,7 @@
     "main"
   ],
   "permissions": [
-	"core:default",
+    "core:default",
     {
       "identifier": "http:default",
       "allow": [
@@ -15,28 +15,38 @@
         }
       ]
     },
-    "fs:allow-read-file",
-    "fs:allow-write-file",
     {
-      "identifier": "fs:scope",
+      "identifier": "fs:allow-read-file",
       "allow": [
         "$RESOURCE/*",
         "$APP/*",
         "$USER/*",
-        "$APP_DATA/*",
+        "$APPDATA/**",
         "$DOCUMENT/*",
         "$DOWNLOAD/*",
-        "$PICTURES/**/*",
+        "$PICTURE/**/*",
         "$DESKTOP/**/*",
         "$HOME/**/*",
         "**/*.jpg",
-        "**/*.png"
+        "**/*.png",
+        "**/*.webp"
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        "$APPDATA/**"
+      ]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        "$APPDATA/**"
       ]
     },
     "shell:allow-open",
     "dialog:allow-open",
     "dialog:allow-message",
-    "http:default",
     "os:allow-platform",
     "os:allow-version",
     "os:allow-os-type",
@@ -48,20 +58,6 @@
     "fs:default",
     "os:default",
     "shell:default",
-    "dialog:default",
-    "http:default",
-    {
-      "identifier": "fs:scope",
-      "allow": [
-        "$HOME/**",
-        "$DESKTOP/**",
-        "$DOCUMENT/**",
-        "$DOWNLOAD/**",
-        "$APP/**",
-        "$APP_DATA/**",
-        "$CACHE/**",
-        "/**"
-        ]
-    }
+    "dialog:default"
   ]
 }

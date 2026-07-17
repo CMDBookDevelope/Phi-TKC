@@ -16,13 +16,13 @@
 
     chart-file: Chart file
     choose-drop: Drag and drop chart file here
+    parsing: Parsing chart...
 
     chart-name: Chart name
     charter: Charter
     composer: Composer
     illustrator: Illustrator
     level: Level
-    aspect: Aspect ratio
     dim: Background dim
     hold_cover: Hold Head Partial Cover
 
@@ -66,13 +66,13 @@
 
     chart-file: 谱面文件
     choose-drop: 拖拽谱面文件到此处
+    parsing: 解析谱面中...
 
     chart-name: 谱面名
     charter: 谱师
     composer: 曲师
     illustrator: 画师
     level: 难度
-    aspect: 宽高比
     dim: 背景昏暗程度
     hold_cover: Hold 头部遮罩
 
@@ -111,6 +111,7 @@ import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
 import { listen } from '@tauri-apps/api/event';
 import gsap from 'gsap';
+import { bgColor, mainColor, subColor } from './stores/colorStore';
 
 const { t } = useI18n();
 
@@ -126,13 +127,28 @@ const stepIndex = ref(1),
   step = computed(() => steps[stepIndex.value - 1]);
 
 const chartInfo = ref<ChartInfo>();
+const pstBackgroundDim = ref(0)
 let chartPath = '';
 
 const choosingChart = ref(false),
   parsingChart = ref(false);
 
 const flipCardRef = ref<HTMLElement>();
-const bookshelfRef = ref<HTMLElement>();
+
+function handleDimChange(val: number) {
+  // 1. 先更新中间临时变量
+  pstBackgroundDim.value = val
+
+  // 2. 判断chartInfo存在再赋值，避免空报错
+    if (chartInfo.value) {
+      chartInfo.value.backgroundDim = val / 100
+    }
+  }
+
+// 页面初始化时同步初始值（双向同步兜底）
+if (chartInfo.value) {
+pstBackgroundDim.value = chartInfo.value.backgroundDim * 100
+}
 
 async function chooseChart(folder?: boolean) {
   if (choosingChart.value) return;
@@ -208,7 +224,7 @@ function unflipCard() {
 const aspectWidth = ref('0'),
   aspectHeight = ref('0');
 
-const form = ref<VForm>();
+const form = ref();
 
 const configView = ref<typeof ConfigView>();
 async function buildParams() {
@@ -297,6 +313,7 @@ event.listen('render-progress', (msg) => {
   });
   renderProgress.value = payload.progress * 100;
 });
+
 event.listen('render-done', (msg) => {
   stepIndex.value++;
   renderDuration.value = Math.round(msg.payload as number);
@@ -338,11 +355,20 @@ onUnmounted(() => stopCoverPolling());
 
 async function moveNext() {
   if (step.value === 'config') {
-    if ((await form.value!.validate()).valid) {
-      stepIndex.value++;
-    } else {
+    // VFluent3 v-form无validate API，手动校验必填字段
+    if (!chartInfo.value) {
       toast(t('has-error'), 'error');
+      return;
     }
+    const { name, level, charter } = chartInfo.value;
+    // 判断三个必填是否为空/纯空格
+    const isInvalid = !name?.trim() || !level?.trim() || !charter?.trim();
+    if (isInvalid) {
+      toast(t('has-error'), 'error');
+      return;
+    }
+    // 校验通过，切换页面
+    stepIndex.value++;
     return;
   }
   if (step.value === 'options') {
@@ -352,6 +378,7 @@ async function moveNext() {
     return;
   }
 }
+
 
 function goBack() {
   if (step.value === 'config') {
@@ -447,22 +474,20 @@ function resetAndGoChoose() {
     <main class="render-content">
       <!-- Step 1: Choose (Bookshelf) -->
       <div class="step-panel" :class="{ 'is-active': step === 'choose' }">
-        <div class="bookshelf" ref="bookshelfRef">
-          <div class="shelf-label">{{ t('steps.choose') }}</div>
+        <div class="clear-glass bookshelf glass" v-glass>
+          <div class="glass fluent-glass shelf-label" v-glass>{{ t('steps.choose') }}</div>
           <div class="shelf-row">
             <!-- Archive card (book-style) -->
-            <div class="book-card" @click="chooseChart(false)">
-              <div class="book-spine"></div>
-              <div class="book-face">
+            <div class="glass book-card" v-glass @click="chooseChart(false)">
+              <div class="fluent-glass book-face">
                 <v-icon icon="mdi-folder-zip-outline" size="40" class="book-icon" />
                 <span class="book-title">{{ t('choose.archive') }}</span>
                 <span class="book-desc">.zip / .pez</span>
               </div>
             </div>
             <!-- Folder card (book-style) -->
-            <div class="book-card book-card-alt" @click="chooseChart(true)">
-              <div class="book-spine book-spine-alt"></div>
-              <div class="book-face">
+            <div class="book-card glass" v-glass @click="chooseChart(true)">
+              <div class="fluent-glass book-face">
                 <v-icon icon="mdi-folder-outline" size="40" class="book-icon" />
                 <span class="book-title">{{ t('choose.folder') }}</span>
                 <span class="book-desc">{{ t('choose.folder') }}</span>
@@ -475,59 +500,64 @@ function resetAndGoChoose() {
       <!-- Step 2: Config -->
       <div class="step-panel" :class="{ 'is-active': step === 'config' }">
         <div class="config-card-wrapper" ref="flipCardRef">
-          <div class="config-card" v-if="chartInfo">
+          <div class="glass fluent-glass config-card" v-glass v-if="chartInfo">
             <v-form ref="form" class="config-form" @submit.prevent>
                 <h2 class="config-title">{{ t('steps.config') }}</h2>
                 <div class="config-grid">
                   <div class="config-section">
                     <div class="field-group">
                       <label class="field-label">{{ t('chart-name') }} *</label>
-                      <input v-model="chartInfo.name" class="md3-field" :class="{ 'has-value': chartInfo.name }" />
+                      <input v-model="chartInfo.name" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.name }" />
                     </div>
                     <div class="field-group">
                       <label class="field-label">{{ t('level') }} *</label>
-                      <input v-model="chartInfo.level" class="md3-field" :class="{ 'has-value': chartInfo.level }" />
+                      <input v-model="chartInfo.level" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.level }" />
                     </div>
                     <div class="field-group">
                       <label class="field-label">{{ t('charter') }} *</label>
-                      <input v-model="chartInfo.charter" class="md3-field" :class="{ 'has-value': chartInfo.charter }" />
+                      <input v-model="chartInfo.charter" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.charter }" />
                     </div>
                     <div class="field-group">
                       <label class="field-label">{{ t('composer') }}</label>
-                      <input v-model="chartInfo.composer" class="md3-field" :class="{ 'has-value': chartInfo.composer }" />
+                      <input v-model="chartInfo.composer" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.composer }" />
                     </div>
                     <div class="field-group">
                       <label class="field-label">{{ t('illustrator') }}</label>
-                      <input v-model="chartInfo.illustrator" class="md3-field" :class="{ 'has-value': chartInfo.illustrator }" />
+                      <input v-model="chartInfo.illustrator" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.illustrator }" />
                     </div>
                   </div>
                   <div class="config-section">
                     <div class="field-group">
-                      <label class="field-label">{{ t('aspect') }}</label>
-                      <div class="aspect-row">
-                        <input type="number" v-model="aspectWidth" class="md3-field aspect-field" />
-                        <span class="aspect-sep">:</span>
-                        <input type="number" v-model="aspectHeight" class="md3-field aspect-field" />
-                      </div>
+                      <label class="field-label">{{ t('tip') }}</label>
+                      <input v-model="chartInfo.tip" class="blur-glass md3-field" :placeholder="t('tip-placeholder')" />
                     </div>
                     <div class="field-group">
-                      <label class="field-label">{{ t('dim') }} — {{ Math.round(chartInfo.backgroundDim * 100) }}%</label>
-                      <input type="range" v-model="chartInfo.backgroundDim" min="0" max="1" step="0.01" class="md3-slider" />
+                      <label class="field-label">{{ t('dim') }} — {{ Math.round(pstBackgroundDim) }}%</label>
+                      <fv-slider
+                        class="slider"
+                        :mininum="0"
+                        :unit=1
+                        :maxinum="100" 
+                        :color="mainColor"
+                        :background="bgColor"
+                        :icon-wrapper-background="bgColor"
+                        v-model:value="pstBackgroundDim"
+                        @update:model-value = "handleDimChange"
+                        >
+                      </fv-slider>
                     </div>
                     <div class="field-group field-toggle">
                       <label class="field-label">{{ t('hold_cover') }}</label>
-                      <button
-                        type="button"
-                        class="md3-switch"
-                        :class="{ 'is-on': chartInfo.HoldPartialCover }"
+                      <fv-ToggleSwitch
+                        :borderColor="mainColor"
+                        :ringBackground="mainColor"
+                        :switchOnBackground="subColor"
+                        :onForeground="subColor"
+                        :offForeground="mainColor"
+                        class="switch"
+                        v-model:value= "chartInfo.HoldPartialCover"
                         @click="chartInfo.HoldPartialCover = !chartInfo.HoldPartialCover"
-                      >
-                        <span class="switch-thumb"></span>
-                      </button>
-                    </div>
-                    <div class="field-group">
-                      <label class="field-label">{{ t('tip') }}</label>
-                      <input v-model="chartInfo.tip" class="md3-field" :placeholder="t('tip-placeholder')" />
+                      />
                     </div>
                   </div>
                 </div>
@@ -537,7 +567,7 @@ function resetAndGoChoose() {
       </div>
 
       <!-- Step 3: Options -->
-      <div class="step-panel" :class="{ 'is-active': step === 'options' }">
+      <div class="fluent-glass glass step-panel" v-glass :class="{ 'is-active': step === 'options' }">
         <div class="options-wrapper">
           <ConfigView ref="configView" :init-aspect-ratio="tryParseAspect()" />
         </div>
@@ -565,7 +595,6 @@ function resetAndGoChoose() {
               <div class="info-row"><span class="info-label">{{ t('charter') }}</span><span class="info-value">{{ chartInfo.charter }}</span></div>
               <div class="info-row" v-if="chartInfo.composer"><span class="info-label">{{ t('composer') }}</span><span class="info-value">{{ chartInfo.composer }}</span></div>
               <div class="info-row" v-if="chartInfo.illustrator"><span class="info-label">{{ t('illustrator') }}</span><span class="info-value">{{ chartInfo.illustrator }}</span></div>
-              <div class="info-row"><span class="info-label">{{ t('aspect') }}</span><span class="info-value">{{ aspectWidth }}:{{ aspectHeight }}</span></div>
             </div>
             <div v-if="renderProgress !== undefined" class="render-progress">
               <v-progress-linear :model-value="renderProgress" color="primary" height="6" rounded />
@@ -587,9 +616,10 @@ function resetAndGoChoose() {
     </main>
 
     <!-- File drag overlay -->
-    <v-overlay v-model="fileHovering" contained class="align-center justify-center drop-overlay" persistent :close-on-content-click="false">
-      <div class="drop-zone">
-        <v-icon size="48" class="mb-2">mdi-download</v-icon>
+    <v-overlay v-model="fileHovering" contained class="fluent-glass align-center justify-center drop-overlay" persistent :close-on-content-click="false">
+      <div class="glass drop-zone" v-glass>
+        <fv-AnimatedIcon :font-size=32 icon="OpenFile" modelValue="bounceRotate" customize-animation="棍母。。。" />
+        <!-- 我故意的，不让你点嘻嘻 -->
         <p>{{ t('choose-drop') }}</p>
       </div>
     </v-overlay>
@@ -598,7 +628,7 @@ function resetAndGoChoose() {
     <v-overlay v-model="parsingChart" contained class="align-center justify-center parse-overlay" persistent :close-on-content-click="false">
       <div class="parse-card">
         <v-progress-circular indeterminate color="primary" size="36" width="3" />
-        <span>解析谱面中...</span>
+        <span>{{ t('parsing') }}</span>
       </div>
     </v-overlay>
   </div>
@@ -622,8 +652,7 @@ function resetAndGoChoose() {
   justify-content: space-between;
   height: 56px;
   padding: 0 20px;
-  background: rgba(20, 20, 20, 0.88);
-  backdrop-filter: blur(20px) saturate(180%);
+  background: rgba(var(--bg-color-rgb), 0.88);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
   z-index: 10;
@@ -697,34 +726,6 @@ function resetAndGoChoose() {
   letter-spacing: 0.1px;
 }
 
-.bar-btn-text {
-  background: transparent;
-  color: rgba(255, 255, 255, 0.7);
-}
-.bar-btn-text:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-}
-
-.bar-btn-tonal {
-  background: rgba(130, 177, 255, 0.12);
-  color: #82b1ff;
-}
-.bar-btn-tonal:hover {
-  background: rgba(130, 177, 255, 0.2);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-
-.bar-btn-filled {
-  background: #82b1ff;
-  color: #002f65;
-  font-weight: 600;
-}
-.bar-btn-filled:hover {
-  background: #a0c4ff;
-  box-shadow: 0 2px 8px rgba(130, 177, 255, 0.3);
-}
-
 /* ===== Content Area ===== */
 .render-content {
   flex: 1;
@@ -751,84 +752,66 @@ function resetAndGoChoose() {
 
 /* ===== Bookshelf (Step 1) ===== */
 .bookshelf {
+  border-radius: 16px;
   display: flex;
+  width: 80%;
+  max-width: 500px;
+  max-height: 300px;
   flex-direction: column;
-  align-items: center;
+  padding: 20px;
   justify-content: center;
-  height: 100%;
+  height: auto;
 }
 
 .shelf-label {
-  font-size: 18px;
+  padding: 12px 20px;
+  font-size: 22px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--main-color);
   margin-bottom: 32px;
   letter-spacing: 0.5px;
 }
 
 .shelf-row {
   display: flex;
-  gap: 32px;
-  perspective: 1000px;
+  flex-direction: column; /* 改为竖直排列 */
+  gap: 16px; /* 调整卡片之间的间距 */
+  width: 100%; /* 确保占满父容器宽度 */
+  height: 100%; /* 确保占满父容器高度 */
 }
 
 .book-card {
-  width: 200px;
-  height: 320px;
-  border-radius: 6px 16px 16px 6px;
+  min-width: 100%;
+  max-height: 62px; /* 高度根据内容自适应 */
+  border-radius: 16px; /* 调整圆角 */
   cursor: pointer;
   position: relative;
   transition: transform 0.3s ease, box-shadow 0.3s ease;
-  box-shadow: 4px 4px 16px rgba(0, 0, 0, 0.5);
-}
-
-.book-card:hover {
-  transform: translateY(-8px) rotateY(-5deg);
-  box-shadow: 8px 8px 24px rgba(0, 0, 0, 0.6);
-}
-
-.book-spine {
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 12px;
-  border-radius: 6px 0 0 6px;
-  background: linear-gradient(180deg, #5a3e8e, #3a2660);
-}
-.book-spine-alt {
-  background: linear-gradient(180deg, #2e7d5e, #1a4a38);
+  display: flex; /* 添加 flex 布局 */
+  flex-direction: column; /* 保持竖直布局 */
 }
 
 .book-face {
-  position: absolute;
-  left: 12px; top: 0; right: 0; bottom: 0;
-  border-radius: 0 16px 16px 0;
-  background: linear-gradient(160deg, #2a2040, #1a1430);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 24px;
+  min-width: 100%;
+  height: 100%;
+  padding: 18px 20px;
+  border-radius: 16px;
+  border-width: 1px;
+  border-style: solid;
+  border-color: rgba(var(--main-color-rgb), 0.08);
 }
 
-.book-card-alt .book-face {
-  background: linear-gradient(160deg, #1a3030, #0f2020);
-}
-
-.book-icon {
-  color: rgba(255, 255, 255, 0.7);
-}
 
 .book-title {
   font-size: 16px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(var(--main-color-rgb), 0.9);
 }
 
 .book-desc {
+  margin: 10px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(var(--main-color-rgb), 0.45);
 }
 
 /* ===== Config Card (Step 2) ===== */
@@ -842,12 +825,8 @@ function resetAndGoChoose() {
 
 .config-card {
   width: 100%;
-  background: rgba(28, 28, 28, 0.95);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 28px;
   padding: 32px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
 .config-form {
@@ -859,7 +838,7 @@ function resetAndGoChoose() {
 .config-title {
   font-size: 22px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(var(--main-color-rgb), 0.9);
   margin: 0;
 }
 
@@ -883,30 +862,34 @@ function resetAndGoChoose() {
 
 .field-label {
   font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.55);
+  font-weight: 800;
+  color: rgba(var(--main-color-rgb), 0.55);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .md3-field {
   width: 100%;
+  border-top: 1px solid rgba(var(--main-color-rgb), 0.3);
+  border-left: 1px solid rgba(var(--main-color-rgb), 0.25);
+  border-right: 1px solid rgba(var(--main-color-rgb), 0.1);
+  border-bottom: 1px solid rgba(var(--main-color-rgb), 0.05);
   padding: 12px 16px;
-  background: rgba(45, 45, 45, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  color: rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
   font-size: 14px;
   font-family: inherit;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .md3-field:focus {
   outline: none;
-  border-color: #82b1ff;
-  box-shadow: 0 0 0 3px rgba(130, 177, 255, 0.15);
+  border-top: 1px solid rgba(var(--sub-color-rgb), 0.3);
+  border-left: 1px solid rgba(var(--sub-color-rgb), 0.25);
+  border-right: 1px solid rgba(var(--sub-color-rgb), 0.1);
+  border-bottom: 1px solid rgba(var(--sub-color-rgb), 0.05);
+  box-shadow: 0 0 0 3px rgba(var(--sub-color-rgb), 0.15);
 }
 .md3-field::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(var(--main-color-rgb), 0.3);
 }
 
 .aspect-row {
@@ -924,21 +907,13 @@ function resetAndGoChoose() {
   color: rgba(255, 255, 255, 0.4);
 }
 
-.md3-slider {
+.slider {
   width: 100%;
-  height: 4px;
   appearance: none;
-  background: rgba(255, 255, 255, 0.12);
+  color: var(--main-color);
   border-radius: 2px;
   cursor: pointer;
-}
-.md3-slider::-webkit-slider-thumb {
-  appearance: none;
-  width: 20px; height: 20px;
-  background: #82b1ff;
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  margin-top: 20px;
 }
 
 .field-toggle {
@@ -947,30 +922,11 @@ function resetAndGoChoose() {
   justify-content: space-between;
 }
 
-.md3-switch {
-  width: 52px; height: 28px;
-  background: rgba(60, 60, 60, 0.8);
-  border: 2px solid rgba(255, 255, 255, 0.15);
-  border-radius: 14px;
+.switch {
+  height: 28px;
   cursor: pointer;
   position: relative;
   transition: all 0.25s ease;
-}
-.md3-switch.is-on {
-  background: #82b1ff;
-  border-color: #82b1ff;
-}
-.switch-thumb {
-  position: absolute;
-  top: 2px; left: 2px;
-  width: 20px; height: 20px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.25s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-.md3-switch.is-on .switch-thumb {
-  transform: translateX(24px);
 }
 
 /* ===== Options (Step 3) ===== */
@@ -985,19 +941,13 @@ function resetAndGoChoose() {
   flex-direction: row;
   max-width: 900px;
   margin: 24px auto;
-  background: rgba(28, 28, 28, 0.95);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 28px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   min-height: 360px;
 }
 
 .render-cover {
   width: 40%;
-  flex-shrink: 0;
-  background: rgba(0, 0, 0, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1075,18 +1025,15 @@ function resetAndGoChoose() {
 
 /* ===== Overlays ===== */
 .drop-overlay {
-  background-color: rgba(0, 0, 0, 0.85);
   z-index: 200;
 }
 .drop-zone {
-  background: rgba(28, 28, 28, 0.95);
-  border-radius: 28px;
   padding: 48px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  color: rgba(255, 255, 255, 0.7);
-  border: 2px dashed rgba(130, 177, 255, 0.4);
+  border-radius: 16px;
+  border: 2px dashed rgba(var(--bg-color-rgb), 0.4);
 }
 .drop-zone p {
   margin: 0;

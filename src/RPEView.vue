@@ -73,7 +73,7 @@ onMounted(() => {
   <div class="rpe-container">
     <!-- Unbinded state -->
     <template v-if="!charts">
-      <div class="fluent-glass empty-state">
+      <div class="glass fluent-glass empty-state">
         <h2 class="empty-title">{{ t('not-binded') }}</h2>
         <button class="md3-btn md3-btn-filled" @click="bindRPE">
           <v-icon icon="mdi-link-variant" size="18" />

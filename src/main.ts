@@ -78,6 +78,39 @@ app.component('ColorSwatch', ColorSwatch)
 app.use(VueFluent)
 app.use(i18n)
 app.use(router)
+
+// 注册全局 v-glass 自定义指令：鼠标跟随高光效果
+app.directive('glass', {
+  mounted(el: HTMLElement) {
+    // 鼠标移动：更新高光位置
+    const handleMove = (e: MouseEvent) => {
+      const rect = el.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      el.style.setProperty('--highlight-x', `${x}px`)
+      el.style.setProperty('--highlight-y', `${y}px`)
+      el.style.setProperty('--highlight-opacity', '1')
+    }
+    // 鼠标离开：隐藏高光
+    const handleLeave = () => {
+      el.style.setProperty('--highlight-opacity', '0')
+    }
+
+    el.addEventListener('mousemove', handleMove)
+    el.addEventListener('mouseleave', handleLeave)
+    
+    // 存储事件处理器，卸载时用于清理
+    ;(el as any).__glassHandlers = { handleMove, handleLeave }
+  },
+  unmounted(el: HTMLElement) {
+    const handlers = (el as any).__glassHandlers
+    if (handlers) {
+      el.removeEventListener('mousemove', handlers.handleMove)
+      el.removeEventListener('mouseleave', handlers.handleLeave)
+    }
+  }
+})
+
 app.mount('#app')
 
 export { i18n }
@@ -95,4 +128,3 @@ document.addEventListener('keydown', (e) => {
   if (ctrl && shift && (key === 'I' || key === 'J')) e.preventDefault();
   if (ctrl && (key === 'U' || key === 'R')) e.preventDefault();
 });
-

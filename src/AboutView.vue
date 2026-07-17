@@ -8,12 +8,12 @@
     <div class="about-content">
       <!-- Logo 和版本号，带进入动画 -->
       <div class="app-header">
-        <fv-img src="/phi-tklogo.png" alt="Phi TKC" class="fluent-glass app-logo-img" />
-		<p class="fluent-glass version-badge">v{{appVersion}}</p>
+        <fv-img src="/phi-tklogo.png" alt="Phi TKC" v-glass class="glass fluent-glass app-logo-img" />
+		<p v-glass class="glass fluent-glass version-badge">v{{appVersion}}</p>
       </div>
       <!-- 信息卡片，纵向排列，依次滑入 -->
       <div class="info-cards">
-        <v-card class="fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
+        <v-card v-glass class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
           <div class="card-content">
             <div class="static-glass card-icon">
               <fv-AnimatedIcon fontSize="28" icon="Globe" />
@@ -23,28 +23,28 @@
               <p class="card-subtitle">View source code</p>
             </div>
             <div class="card-link">
-              <fv-AnimatedIcon fontSize="20" icon="Link" />
+              <fv-AnimatedIcon :fontSize="20" icon="Link" />
             </div>
           </div>
         </v-card>
-        <v-card class="fluent-glass info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
+        <v-card v-glass class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
           <div class="card-content">
             <div class="static-glass card-icon">
-              <fv-AnimatedIcon fontSize="28" icon="PrintAllPages" />
+              <fv-AnimatedIcon :fontSize="28" icon="PrintAllPages" />
             </div>
             <div class="card-text">
               <h3 class="card-title">License</h3>
               <p class="card-subtitle">{{ t('license') }}</p>
             </div>
             <div class="card-link">
-              <fv-AnimatedIcon fontSize="20" icon="Link" />
+              <fv-AnimatedIcon :fontSize="20" icon="Link" />
             </div>
           </div>
         </v-card>
-        <v-card class="fluent-glass info-card" :style="{ '--i': 2 }">
+        <v-card v-glass class="glass fluent-glass info-card" :style="{ '--i': 2 }">
           <div class="card-content">
             <div class="static-glass card-icon">
-              <fv-AnimatedIcon fontSize="28" icon="Package" />
+              <fv-AnimatedIcon :fontSize="28" icon="Package" />
             </div>
             <div class="card-text">
               <h3 class="card-title">Version</h3>
@@ -54,7 +54,7 @@
         </v-card>
       </div>
       <!-- 底部版权（传入动态年份） -->
-      <div class="fluent-glass about-footer">
+      <div v-glass class="glass fluent-glass about-footer">
         		<p class="footer-sec">{{ t('footer.copyright', { year: currentYear }) }}</p>
       </div>
     </div>

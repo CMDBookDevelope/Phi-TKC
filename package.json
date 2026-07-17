@@ -23,7 +23,6 @@
     "@tauri-apps/plugin-http": "^2.5.9",
     "@tauri-apps/plugin-os": "^2.3.2",
     "@tauri-apps/plugin-shell": "^2.3.5",
-    "@vibrant/core": "^4.0.4",
     "add": "^2.0.6",
     "gsap": "^3.15.0",
     "liquid-glass-react": "^1.1.1",

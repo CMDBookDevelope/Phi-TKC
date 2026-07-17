@@ -41,9 +41,6 @@ importers:
       '@tauri-apps/plugin-shell':
         specifier: ^2.3.5
         version: 2.3.5
-      '@vibrant/core':
-        specifier: ^4.0.4
-        version: 4.0.4
       add:
         specifier: ^2.0.6
         version: 2.0.6
@@ -758,27 +755,6 @@ packages:
   '@typescript-eslint/visitor-keys@8.64.0':
     resolution: {integrity: sha512-mrtuL8Nsn6gi2H4mo5KMTp823M+3Q19Ew/i+Zlikq20tIMm99C3Ez0dCmkWWnxut20esQvTg8aUSEhMcAOXhEw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
-
-  '@vibrant/color@4.0.4':
-    resolution: {integrity: sha512-Fq2tAszz4QOPWfHZ+KuEAchXUD8i594BM2fOJt8dI/fvYbiVoBycBF/BlNH6F4IWBubxXoPqD4JmmAHvFYbNew==}
-
-  '@vibrant/core@4.0.4':
-    resolution: {integrity: sha512-yZ0XSpW2biKyaJPpBC31AVYgn7NseKSO2q3KNMmDrkL2qC6TEWsBMnSQ28n0m///chZELXpQLx1CCOsWg5pj8w==}
-
-  '@vibrant/generator@4.0.4':
-    resolution: {integrity: sha512-rwq8PnlpKdch4YqaA1FAwdm71gKE2cMrUsbu72TqRFGa8rpP1roaZlQCVXIIwElXVc3r9axZyAcqyTLaMjhrTg==}
-
-  '@vibrant/image@4.0.4':
-    resolution: {integrity: sha512-NBIJj7umfDRVpFjJHQo1AFSCWCzQyjfil+Yxu7W62PEL72GPCif0CDiglPkvVF8QhDLmnx/x1k3LIBb9jWF2sw==}
-
-  '@vibrant/quantizer@4.0.4':
-    resolution: {integrity: sha512-722CooC2W4mlBiv+zyAsIrIvARnMCN/P2Muo8bnWd0SQlVWFtQnFxJWGOUPOPS4DGe3pGoqmNfvS0let4dICZQ==}
-
-  '@vibrant/types@4.0.4':
-    resolution: {integrity: sha512-Qq3mVTJamn7yD4OBgBEUKaxfDlm3sxBK55N7dH3XzI9Ey7KR00R06uwtqOcEJMsziWTEXdYN3VUlYaj2Tkt7hw==}
-
-  '@vibrant/worker@4.0.4':
-    resolution: {integrity: sha512-Q/R6PYhSMWCXEk/IcXbWIzIu7Z4b58ABkGvcdF8Y+q/7g+KnpxKW5x/jfQ/6ciyYSby13wZZoEdNr3QQVgsdBQ==}
 
   '@vitejs/plugin-vue@4.6.2':
     resolution: {integrity: sha512-kqf7SGFoG+80aZG6Pf+gsZIVvGSCKE98JbiWqcCV9cThtg91Jav0yvYFC9Zb+jKetNGF6ZKeoaxgZfND21fWKw==}
@@ -2669,37 +2645,6 @@ snapshots:
     dependencies:
       '@typescript-eslint/types': 8.64.0
       eslint-visitor-keys: 5.0.1
-
-  '@vibrant/color@4.0.4': {}
-
-  '@vibrant/core@4.0.4':
-    dependencies:
-      '@vibrant/color': 4.0.4
-      '@vibrant/generator': 4.0.4
-      '@vibrant/image': 4.0.4
-      '@vibrant/quantizer': 4.0.4
-      '@vibrant/worker': 4.0.4
-
-  '@vibrant/generator@4.0.4':
-    dependencies:
-      '@vibrant/color': 4.0.4
-      '@vibrant/types': 4.0.4
-
-  '@vibrant/image@4.0.4':
-    dependencies:
-      '@vibrant/color': 4.0.4
-
-  '@vibrant/quantizer@4.0.4':
-    dependencies:
-      '@vibrant/color': 4.0.4
-      '@vibrant/image': 4.0.4
-      '@vibrant/types': 4.0.4
-
-  '@vibrant/types@4.0.4': {}
-
-  '@vibrant/worker@4.0.4':
-    dependencies:
-      '@vibrant/types': 4.0.4
 
   '@vitejs/plugin-vue@4.6.2(vite@4.5.14(@types/node@18.19.130)(sass@1.101.0))(vue@3.5.39(typescript@5.1.6))':
     dependencies:
