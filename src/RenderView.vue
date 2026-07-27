@@ -598,13 +598,13 @@ function resetAndGoChoose() {
           <div class="render-cover">
             <img v-if="renderCover" :src="convertFileSrc(renderCover)" class="cover-img" />
             <div v-else class="cover-placeholder">
-              <fv-AnimatedIcon :font-size=32 icon="MusicNote" modelValue="bounceRotate" customize-animation="棍母。。。" />
+              <fv-AnimatedIcon :font-size=32 icon="MusicNote" modelValue="bounceRotate" :customize-animation="true" />
             </div>
           </div>
           <!-- Right: Info -->
           <div class="render-info">
             <div class="render-header">
-              <fv-AnimatedIcon :font-size=32 icon="Completed" modelValue="bounceRotate" customize-animation="棍母。。。" />
+              <fv-AnimatedIcon :font-size=32 icon="Completed" modelValue="bounceRotate" :customize-animation="true" />
               <h3>{{ t('render-started') }}</h3>
             </div>
             <div class="info-rows">
@@ -646,7 +646,7 @@ function resetAndGoChoose() {
     <!-- File drag overlay -->
     <div v-if="fileHovering" class="overlay-container drop-overlay">
       <div class="glass drop-zone" v-glass>
-        <fv-AnimatedIcon :font-size=32 icon="OpenFile" modelValue="bounceRotate" customize-animation="棍母。。。" />
+        <fv-AnimatedIcon :font-size=32 icon="OpenFile" modelValue="bounceRotate" :customize-animation="true" />
         <!-- 我故意的，不让你点嘻嘻 -->
         <p>{{ t('choose-drop') }}</p>
       </div>

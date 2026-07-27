@@ -76,7 +76,7 @@ onMounted(() => {
       <div class="glass fluent-glass empty-state">
         <h2 class="empty-title">{{ t('not-binded') }}</h2>
         <fv-button :background="mainColor" :foreground="bgColor" :border-radius="20" @click="bindRPE">
-          <fv-AnimatedIcon :font-size=16 icon="Link" modelValue="bounceRotate" customize-animation="棍母。。。" />
+          <fv-AnimatedIcon :font-size=16 icon="Link" modelValue="bounceRotate" :customize-animation="true" />
           <span>{{ t('bind') }}</span>
         </fv-button>
       </div>
@@ -86,7 +86,7 @@ onMounted(() => {
     <template v-else>
       <div class="rpe-header">
         <fv-button :background="bgColor" :foreground="subColor" :border-radius="20" @click="unbindRPE">
-          <fv-AnimatedIcon :font-size=16 icon="Cancel" modelValue="bounceRotate" customize-animation="棍母。。。" />
+          <fv-AnimatedIcon :font-size=16 icon="Cancel" modelValue="bounceRotate" :customize-animation="true" />
           <span>{{ t('unbind') }}</span>
         </fv-button>
       </div>
@@ -108,7 +108,7 @@ onMounted(() => {
             <p class="chart-id">{{ chart.id }}</p>
             <div class="chart-action">
               <fv-button :background="mainColor" :foreground="bgColor" :border-radius="20" @click="router.push({ name: 'render', query: { chart: chart.path } })">
-                <fv-AnimatedIcon :font-size=16 icon="Play" modelValue="bounceRotate" customize-animation="棍母。。。" />
+                <fv-AnimatedIcon :font-size=16 icon="Play" modelValue="bounceRotate" :customize-animation="true" />
                 <span>{{ t('render') }}</span>
               </fv-button>
             </div>

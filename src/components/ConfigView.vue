@@ -157,7 +157,8 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { anyFilter } from '../common';
 import type { RenderConfig } from '../model';
 import TipSwitch from './TipSwitch.vue';
-import { ElMessage, FormInstance } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import type { FormInstance } from 'element-plus'
 const form = ref<FormInstance>()
 
 const props = defineProps<{ initAspectRatio?: number }>();
@@ -662,7 +663,7 @@ async function replacePreset() {
                 <div class="card-label">{{ t('resolution') }}</div>
                 <fv-combobox
                 v-model="resolution" 
-                :options="RESOLUTIONS" 
+                :options="(RESOLUTIONS as any)" 
                 :placeholder="t('resolution')"
                 class="combo-boxes"
                 :border-radius="7"
@@ -685,7 +686,7 @@ async function replacePreset() {
                 <div class="card-label">{{t('video-codec')}}</div>
                 <fv-combobox
                   v-model="videoCodec" 
-                  :options="VIDEO_CODECS" 
+                  :options="(VIDEO_CODECS as any)" 
                   :placeholder="t('video-codec')"
                   class="combo-boxes"
                   :border-radius="7"
@@ -694,7 +695,7 @@ async function replacePreset() {
                 <div class="card-label">{{t('encoder-select')}}</div>
                 <fv-combobox
                   v-model="encoder" 
-                  :options="ENCODERS" 
+                  :options="(ENCODERS as any)" 
                   :placeholder="t('encoder-select')"
                   class="combo-boxes"
                   :border-radius="7"
@@ -705,7 +706,7 @@ async function replacePreset() {
                 <div class="card-label">{{t('ffmpeg-preset')}}</div>
                 <fv-combobox
                   v-model="ffmpegPreset"
-                  :options="FFMPEG_PRESETS.map(p => ({text: p, key: p}))"
+                  :options="(FFMPEG_PRESETS.map(p => ({text: p, key: p})) as any)"
                   :placeholder="t('ffmpeg-preset')"
                   class="combo-boxes"
                   :border-radius="7"
@@ -714,7 +715,7 @@ async function replacePreset() {
                 <div class="card-label">{{t('video-format')}}</div>
                 <fv-combobox
                   v-model="videoFormat"
-                  :options="[{text: 'mp4', key: 'mp4'}, {text: 'mov', key: 'mov'}]"
+                  :options="([{text: 'mp4', key: 'mp4'}, {text: 'mov', key: 'mov'}] as any)"
                   :placeholder="t('video-format')"
                   class="combo-boxes"
                   :border-radius="7"
@@ -727,7 +728,7 @@ async function replacePreset() {
                 <div class="card-label">{{t('bitrate-control')}}</div>
                 <fv-combobox
                   v-model="bitrateControl" 
-                  :options="[{text: 'CRF', key: 'CRF'}, {text: 'CBR', key: 'CBR'}]"
+                  :options="([{text: 'CRF', key: 'CRF'}, {text: 'CBR', key: 'CBR'}] as any)"
                   :placeholder="t('bitrate-control')"
                   class="combo-boxes"
                   :border-radius="7"
@@ -783,7 +784,7 @@ async function replacePreset() {
                 <div class="card-label">{{ t('audio-format') }}</div>
                 <fv-combobox
                   v-model="audioFormat" 
-                  :options="AUDIO_FORMATS" 
+                  :options="(AUDIO_FORMATS as any)" 
                   :placeholder="t('audio-format')"
                   class="combo-boxes"
                   :border-radius="7"
@@ -792,7 +793,7 @@ async function replacePreset() {
                 <div class="card-label">{{ t('audio-bit-depth') }}</div>
                 <fv-combobox
                   v-model="audioBit"
-                  :options="AUDIO_BITS" 
+                  :options="(AUDIO_BITS as any)" 
                   :placeholder="t('audio-bit-depth')"
                   class="combo-boxes"
                   :border-radius="7"
@@ -801,7 +802,7 @@ async function replacePreset() {
                 <div class="card-label">{{ t('buffer_size') }}</div>
                 <fv-combobox
                   v-model="targetAudio"
-                  :options="SAMPLE_RATES"
+                  :options="(SAMPLE_RATES as any)"
                   :placeholder="t('buffer_size')"
                   class="combo-boxes"
                   :border-radius="7"
@@ -876,7 +877,7 @@ async function replacePreset() {
                 <div class="card-label">{{ t('respack') }}</div>
                 <fv-combobox
                 v-model="respack" 
-                :options="respacks" 
+                :options="(respacks as any)" 
                 :placeholder="t('respack')"
                 class="combo-boxes"
                 :border-radius="7"
@@ -963,7 +964,7 @@ async function replacePreset() {
                 <input v-model="challengeRank" type="number" :placeholder="t('challenge-rank')" class="blur-glass input-field" />
                 <fv-combobox
                 v-model="challengeColor" 
-                :options="t('challenge-colors').split(',').map(s => ({text: s, key: s}))"
+                :options="(t('challenge-colors').split(',').map(s => ({text: s, key: s})) as any)"
                 :placeholder="t('challenge-colors')"
                 class="combo-boxes"
                 :border-radius="7"
@@ -1006,7 +1007,7 @@ async function replacePreset() {
     <div class="preset-bar">
         <fv-combobox
           v-model="preset" 
-          :options="presetOptions" 
+          :options="(presetOptions as any)" 
           :placeholder="t('presets')"
           class="combo-boxes"
           :border-radius="7"

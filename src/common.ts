@@ -31,7 +31,7 @@ export function changeLocale(locale: string) {
   if (locale.startsWith('en')) locale = 'en'
   if (!SUPPORTED_LOCALES.includes(locale)) locale = 'en'
   if (locale === 'zh-TW') i18n.global.locale.value = 'zh-CN'
-  else i18n.global.locale.value = locale
+  else i18n.global.locale.value = locale as 'en' | 'zh-CN'
   localStorage.setItem('locale', locale)
 }
 

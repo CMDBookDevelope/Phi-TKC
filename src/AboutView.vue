@@ -16,7 +16,7 @@
         <div v-glass class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
           <div class="card-content">
             <div class="static-glass card-icon">
-              <fv-AnimatedIcon fontSize="28" icon="Globe" />
+              <fv-AnimatedIcon :font-size="28" icon="Globe" />
             </div>
             <div class="card-text">
               <h3 class="card-title">GitHub</h3>

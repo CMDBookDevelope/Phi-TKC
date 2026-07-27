@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { bgColor, mainColor, subColor } from '@/colorStore';
 
 defineProps<{ tooltip: string; btnClass?: string[] | string }>();
+
+const show = ref(false);
 </script>
 
 <template>

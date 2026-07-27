@@ -183,7 +183,7 @@ const bulkEditData = ref({
   aspectWidth: '',
   aspectHeight: '',
   backgroundDim: null as number | null,
-  holdCover: null as boolean | null,
+  holdCover: null as number | null,
 });
 
 const isAddingFiles = ref(false);
@@ -400,7 +400,7 @@ function saveBulkEdit() {
     if (!chart.chartInfo) return;
     if (aspect) { chart.aspectWidth = bulkEditData.value.aspectWidth; chart.aspectHeight = bulkEditData.value.aspectHeight; chart.chartInfo.aspectRatio = aspect; }
     if (bulkEditData.value.backgroundDim !== null) chart.chartInfo.backgroundDim = bulkEditData.value.backgroundDim;
-    if (bulkEditData.value.holdCover !== null) chart.chartInfo.HoldPartialCover = bulkEditData.value.holdCover;
+    if (bulkEditData.value.holdCover !== null) chart.chartInfo.HoldPartialCover = !!bulkEditData.value.holdCover;
   });
   bulkEditDialog.value = false;
   toast(t('config-saved'), 'success');
@@ -612,7 +612,7 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
               <div class="edit-col-full">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
                   <span class="field-label-sm">{{ t('hold_cover') }}</span>
-                  <input type="checkbox" :checked="editingChart.chartInfo!.HoldPartialCover === 1" @change="editingChart.chartInfo!.HoldPartialCover = $event.target.checked ? 1 : 0" class="md3-checkbox" />
+                  <input type="checkbox" :checked="editingChart.chartInfo!.HoldPartialCover" @change="editingChart.chartInfo!.HoldPartialCover = ($event.target as HTMLInputElement).checked" class="md3-checkbox" />
                 </div>
               </div>
               <div class="edit-col-full">

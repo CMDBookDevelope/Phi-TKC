@@ -33,7 +33,7 @@ import { i18n } from '../main';
 import { setTitle } from '../common';
 router.afterEach((to) => {
   nextTick(() => {
-    const title = i18n.global.t('title-' + (to.name || 'default'));
+    const title = i18n.global.t('title-' + String(to.name || 'default'));
     setTitle(title);
   });
 });

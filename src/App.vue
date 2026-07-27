@@ -124,7 +124,7 @@ function updateNavigation(routeName: string) {
     console.log('API 背景已刷新')
   }
 
-  window.refreshApiBackground = refreshApiBackground
+  (window as any).refreshApiBackground = refreshApiBackground
 
   // ---- 固定背景（保存到本地AppData目录，支持覆盖旧文件） ----
   async function fixCurrentBackground() {
@@ -164,7 +164,7 @@ function updateNavigation(routeName: string) {
     }
   }
 
-  window.fixCurrentBackground = fixCurrentBackground
+  (window as any).fixCurrentBackground = fixCurrentBackground
 
 watch(
   () => route.name,
@@ -310,7 +310,7 @@ function updateCssVariables() {
 }
 
 // ---- 暴露方法给全局 ----
-window.loadApiBackground = loadApiBackground
+(window as any).loadApiBackground = loadApiBackground
 window.loadCustomBackground = loadCustomBackground
 // 注意：refreshApiBackground 和 fixCurrentBackground 已在上方赋值
 
@@ -331,7 +331,7 @@ window.loadCustomBackground = loadCustomBackground
     }, 3000);
   }
 
-window.showToast = showToast
+(window as any).showToast = showToast
 
 // ===== 生命周期 =====
 onMounted(async () => {
