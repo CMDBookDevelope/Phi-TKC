@@ -34,13 +34,4 @@ export function changeLocale(locale: string) {
   else i18n.global.locale.value = locale
   localStorage.setItem('locale', locale)
 }
-// 全局提示调用App挂载的$toast
-export function toast(message: string, intent: ToastIntent = 'info') {
-  (window as any).$toast(message, intent)
-}
-export function toastError(error: any) {
-  console.error(error)
-  const msg = error instanceof Error ? error.message : String(error)
-  if (msg) toast(msg, 'warning')
-}
 

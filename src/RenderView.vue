@@ -87,8 +87,8 @@
     play: 游玩
 
     render-started: 视频开始渲染了！
-    see-tasks: 查看任务列表
-    next-chart: 渲染下一个谱面
+    see-tasks: 任务列表
+    next-chart: 下一个
     render-status: '进度：{progress}% | FPS: {fps} | 预计：{estimate}'
 
     ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并设置 Path。
@@ -103,7 +103,7 @@ import { watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { event } from '@tauri-apps/api';
-import { toastError, RULES, toast, anyFilter, isString } from './common';
+import { anyFilter, isString } from './common';
 import type { ChartInfo, FileDropEvent, Task } from './model';
 import ConfigView from './components/ConfigView.vue';
 import moment from 'moment';
@@ -111,7 +111,7 @@ import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
 import { listen } from '@tauri-apps/api/event';
 import gsap from 'gsap';
-import { bgColor, mainColor, subColor } from './stores/colorStore';
+import { bgColor, mainColor, subColor } from './colorStore';
 
 const { t } = useI18n();
 
@@ -196,7 +196,7 @@ async function loadChart(file: string) {
     await nextTick();
     performFlip();
   } catch (e) {
-    toastError(e);
+    showToast(e, 'error');
   } finally {
     parsingChart.value = false;
   }
@@ -267,7 +267,7 @@ async function postRender() {
     await invoke('post_render', { params, outputPath: outputPath || null });
     return true;
   } catch (e) {
-    toastError(e);
+    showToast(e, 'error');
     return false;
   }
 }
@@ -280,7 +280,7 @@ async function previewChart() {
     await invoke('preview_chart', { params });
     return true;
   } catch (e) {
-    toastError(e);
+    showToast(e, 'error');
     return false;
   }
 }
@@ -293,7 +293,7 @@ async function playChart() {
     await invoke('preview_chart', { params });
     return true;
   } catch (e) {
-    toastError(e);
+    showToast(e, 'error');
     return false;
   }
 }
@@ -357,14 +357,14 @@ async function moveNext() {
   if (step.value === 'config') {
     // VFluent3 v-form无validate API，手动校验必填字段
     if (!chartInfo.value) {
-      toast(t('has-error'), 'error');
+      showToast(t('has-error'), 'error');
       return;
     }
     const { name, level, charter } = chartInfo.value;
     // 判断三个必填是否为空/纯空格
     const isInvalid = !name?.trim() || !level?.trim() || !charter?.trim();
     if (isInvalid) {
-      toast(t('has-error'), 'error');
+      showToast(t('has-error'), 'error');
       return;
     }
     // 校验通过，切换页面
@@ -432,12 +432,16 @@ function resetAndGoChoose() {
 <template>
   <div class="render-container">
     <!-- MD3 Top Action Bar -->
-    <header class="md3-top-bar" v-if="step !== 'choose'">
+    <header class="clear-glass glass md3-top-bar" v-glass v-if="step !== 'choose'">
       <div class="bar-left">
-        <button class="bar-btn bar-btn-text" v-if="step === 'config' || step === 'options'" @click="goBack">
-          <v-icon icon="mdi-arrow-left" size="20" />
+        <fv-button icon="PageLeft"
+        v-if="step === 'config' || step === 'options'"
+        @click="goBack"
+        :foreground="mainColor"
+        :background="bgColor"
+        :border-radius="16">
           <span>{{ t('prev-step') }}</span>
-        </button>
+        </fv-button>
       </div>
 
       <div class="bar-center">
@@ -455,18 +459,34 @@ function resetAndGoChoose() {
       </div>
 
       <div class="bar-right">
-        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="playChart">
-          <v-icon icon="mdi-gamepad-variant" size="18" />
+        <fv-button
+        v-if="step === 'options'"
+        @click="playChart"
+        icon="Play"
+        :foreground="mainColor"
+        :background="bgColor"
+        :border-radius="16"
+        >
           <span>{{ t('play') }}</span>
-        </button>
-        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="previewChart">
-          <v-icon icon="mdi-eye" size="18" />
+        </fv-button>
+        <fv-button
+        v-if="step === 'options'"
+        @click="previewChart"
+        icon="Preview"
+        :foreground="mainColor"
+        :background="bgColor"
+        :border-radius="16">
           <span>{{ t('preview') }}</span>
-        </button>
-        <button class="bar-btn bar-btn-filled" v-if="step === 'config' || step === 'options'" @click="moveNext">
+        </fv-button>
+        <fv-button
+        v-if="step === 'config' || step === 'options'"
+        @click="moveNext"
+        icon="Accept"
+        :foreground="mainColor"
+        :background="bgColor"
+        :border-radius="16">
           <span>{{ step === 'options' ? t('render') : t('next-step') }}</span>
-          <v-icon icon="mdi-arrow-right" size="18" />
-        </button>
+        </fv-button>
       </div>
     </header>
 
@@ -480,7 +500,6 @@ function resetAndGoChoose() {
             <!-- Archive card (book-style) -->
             <div class="glass book-card" v-glass @click="chooseChart(false)">
               <div class="fluent-glass book-face">
-                <v-icon icon="mdi-folder-zip-outline" size="40" class="book-icon" />
                 <span class="book-title">{{ t('choose.archive') }}</span>
                 <span class="book-desc">.zip / .pez</span>
               </div>
@@ -488,7 +507,6 @@ function resetAndGoChoose() {
             <!-- Folder card (book-style) -->
             <div class="book-card glass" v-glass @click="chooseChart(true)">
               <div class="fluent-glass book-face">
-                <v-icon icon="mdi-folder-outline" size="40" class="book-icon" />
                 <span class="book-title">{{ t('choose.folder') }}</span>
                 <span class="book-desc">{{ t('choose.folder') }}</span>
               </div>
@@ -501,7 +519,7 @@ function resetAndGoChoose() {
       <div class="step-panel" :class="{ 'is-active': step === 'config' }">
         <div class="config-card-wrapper" ref="flipCardRef">
           <div class="glass fluent-glass config-card" v-glass v-if="chartInfo">
-            <v-form ref="form" class="config-form" @submit.prevent>
+            <form ref="form" class="config-form" @submit.prevent>
                 <h2 class="config-title">{{ t('steps.config') }}</h2>
                 <div class="config-grid">
                   <div class="config-section">
@@ -537,7 +555,7 @@ function resetAndGoChoose() {
                         class="slider"
                         :mininum="0"
                         :unit=1
-                        :maxinum="100" 
+                        :maxinum="100"
                         :color="mainColor"
                         :background="bgColor"
                         :icon-wrapper-background="bgColor"
@@ -561,13 +579,13 @@ function resetAndGoChoose() {
                     </div>
                   </div>
                 </div>
-              </v-form>
+              </form>
           </div>
         </div>
       </div>
 
       <!-- Step 3: Options -->
-      <div class="fluent-glass glass step-panel" v-glass :class="{ 'is-active': step === 'options' }">
+      <div class="clear-glass glass step-panel" v-glass :class="{ 'is-active': step === 'options' }">
         <div class="options-wrapper">
           <ConfigView ref="configView" :init-aspect-ratio="tryParseAspect()" />
         </div>
@@ -575,18 +593,18 @@ function resetAndGoChoose() {
 
       <!-- Step 4: Render -->
       <div class="step-panel" :class="{ 'is-active': step === 'render' }">
-        <div class="render-card" v-if="chartInfo">
+        <div class="render-card fluent-glass glass" v-if="chartInfo" v-glass>
           <!-- Left: Illustration -->
           <div class="render-cover">
             <img v-if="renderCover" :src="convertFileSrc(renderCover)" class="cover-img" />
             <div v-else class="cover-placeholder">
-              <v-icon icon="mdi-music-note-outline" size="48" color="rgba(255,255,255,0.15)" />
+              <fv-AnimatedIcon :font-size=32 icon="MusicNote" modelValue="bounceRotate" customize-animation="棍母。。。" />
             </div>
           </div>
           <!-- Right: Info -->
           <div class="render-info">
             <div class="render-header">
-              <v-icon icon="mdi-video" size="24" color="primary" />
+              <fv-AnimatedIcon :font-size=32 icon="Completed" modelValue="bounceRotate" customize-animation="棍母。。。" />
               <h3>{{ t('render-started') }}</h3>
             </div>
             <div class="info-rows">
@@ -597,18 +615,28 @@ function resetAndGoChoose() {
               <div class="info-row" v-if="chartInfo.illustrator"><span class="info-label">{{ t('illustrator') }}</span><span class="info-value">{{ chartInfo.illustrator }}</span></div>
             </div>
             <div v-if="renderProgress !== undefined" class="render-progress">
-              <v-progress-linear :model-value="renderProgress" color="primary" height="6" rounded />
+              <div class="custom-progress-linear">
+                <div class="custom-progress-fill" :style="{ width: renderProgress + '%' }"></div>
+              </div>
               <p class="progress-text">{{ renderMsg }}</p>
             </div>
             <div class="render-actions">
-              <button class="bar-btn bar-btn-tonal" @click="router.push({ name: 'tasks' })">
-                <v-icon icon="mdi-view-list" size="18" />
+              <fv-button
+              @click="router.push({ name: 'tasks' })"
+              :foreground="mainColor"
+              :background="bgColor"
+              :border-radius="16"
+              icon="List">
                 <span>{{ t('see-tasks') }}</span>
-              </button>
-              <button class="bar-btn bar-btn-filled" @click="resetAndGoChoose">
-                <v-icon icon="mdi-plus" size="18" />
+              </fv-button>
+              <fv-button
+              @click="resetAndGoChoose"
+              :foreground="mainColor"
+              :background="bgColor"
+              :border-radius="16"
+              icon="Add">
                 <span>{{ t('next-chart') }}</span>
-              </button>
+              </fv-button>
             </div>
           </div>
         </div>
@@ -616,21 +644,21 @@ function resetAndGoChoose() {
     </main>
 
     <!-- File drag overlay -->
-    <v-overlay v-model="fileHovering" contained class="fluent-glass align-center justify-center drop-overlay" persistent :close-on-content-click="false">
+    <div v-if="fileHovering" class="overlay-container drop-overlay">
       <div class="glass drop-zone" v-glass>
         <fv-AnimatedIcon :font-size=32 icon="OpenFile" modelValue="bounceRotate" customize-animation="棍母。。。" />
         <!-- 我故意的，不让你点嘻嘻 -->
         <p>{{ t('choose-drop') }}</p>
       </div>
-    </v-overlay>
+    </div>
 
     <!-- Parsing overlay -->
-    <v-overlay v-model="parsingChart" contained class="align-center justify-center parse-overlay" persistent :close-on-content-click="false">
+    <div v-if="parsingChart" class="overlay-container parse-overlay">
       <div class="parse-card">
-        <v-progress-circular indeterminate color="primary" size="36" width="3" />
+        <fv-spinner size="large" />
         <span>{{ t('parsing') }}</span>
       </div>
-    </v-overlay>
+    </div>
   </div>
 </template>
 
@@ -640,9 +668,6 @@ function resetAndGoChoose() {
   flex-direction: column;
   height: 100vh;
   width: 100%;
-  background: transparent;
-  font-family: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
-  color: #e3e2e6;
 }
 
 /* ===== MD3 Top Action Bar ===== */
@@ -652,8 +677,8 @@ function resetAndGoChoose() {
   justify-content: space-between;
   height: 56px;
   padding: 0 20px;
-  background: rgba(var(--bg-color-rgb), 0.88);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
   flex-shrink: 0;
   z-index: 10;
 }
@@ -693,37 +718,20 @@ function resetAndGoChoose() {
 }
 
 .step-chip.is-active {
-  background: rgba(130, 177, 255, 0.12);
+  background: rgba(var(--main-color-rgb),0.12);
 }
 .step-chip.is-active .chip-dot {
-  background: #82b1ff;
-  box-shadow: 0 0 8px rgba(130, 177, 255, 0.5);
+  background: var(--sub-color);
+  box-shadow: 0 0 8px rgba(var(--sub-color-rgb), 0.5);
 }
 .step-chip.is-done .chip-dot {
-  background: #7dd87d;
+  background: var(--main-color);
 }
 
 .chip-label {
   font-size: 13px;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.8);
-}
-
-/* MD3 Button variants */
-.bar-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  white-space: nowrap;
-  font-family: inherit;
-  letter-spacing: 0.1px;
 }
 
 /* ===== Content Area ===== */
@@ -879,6 +887,7 @@ function resetAndGoChoose() {
   font-size: 14px;
   font-family: inherit;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  color: var(--main-color) !important;
 }
 .md3-field:focus {
   outline: none;
@@ -1008,6 +1017,19 @@ function resetAndGoChoose() {
 .render-progress {
   margin-top: 8px;
 }
+.custom-progress-linear {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.custom-progress-fill {
+  height: 100%;
+  background: var(--sub-color, #82b1ff);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
 .progress-text {
   text-align: center;
   margin-top: 6px;
@@ -1024,6 +1046,13 @@ function resetAndGoChoose() {
 }
 
 /* ===== Overlays ===== */
+.overlay-container {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .drop-overlay {
   z-index: 200;
 }
@@ -1072,9 +1101,6 @@ function resetAndGoChoose() {
     padding: 0 12px;
     height: 48px;
   }
-  .bar-btn span {
-    display: none;
-  }
   .config-card {
     padding: 20px;
     border-radius: 20px;
@@ -1092,4 +1118,5 @@ function resetAndGoChoose() {
     padding: 20px;
   }
 }
+
 </style>

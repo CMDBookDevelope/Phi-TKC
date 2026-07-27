@@ -9,7 +9,7 @@
         hint: "Prefer Browser FS API; use Electron for absolute path"
         aria: "Output path"
       selectFolder: "Browse"
-      save: "Save Path"
+      save: "Save"
       saved: "Saved"
       selected:
         picked: "Selected folder: {name}"
@@ -43,7 +43,7 @@
         hint: "请输入正确路径"
         aria: "自定义输出路径"
       selectFolder: "选择"
-      save: "保存路径"
+      save: "保存"
       copy: "复制路径"
       selected:
         picked: "已选择文件夹：{name}"
@@ -111,7 +111,7 @@
         <!-- 自定义主题色卡片 -->
         <fv-card class="md3-card fluent-glass glass" v-glass>
           <div class="card-label">{{ t('settings.colors.label') }}</div>
-          <div class="color-row" :key="colorPickerKey">
+          <div class="color-row">
             <!-- 主色 -->
             <div class="color-item">
               <div class="color-prom"><a>{{ t('settings.colors.main') }}</a></div>
@@ -168,18 +168,6 @@
           </div>
         </fv-card>
       </div>
-  
-      <!-- Toast 容器 -->
-      <div class="toast-container">
-        <div
-          v-for="msg in toastMessages"
-          :key="msg.id"
-          class="toast-item"
-          :class="msg.type"
-        >
-          {{ msg.text }}
-        </div>
-      </div>
     </div>
   </template>
   
@@ -189,36 +177,17 @@
   import { open } from '@tauri-apps/plugin-dialog';
   import { appConfigDir, appDataDir } from '@tauri-apps/api/path';
   import { convertFileSrc } from '@tauri-apps/api/core';
-  import { mainColor, bgColor, subColor } from './stores/colorStore'
-  
+  import { mainColor, bgColor, subColor } from './colorStore'
+
   defineOptions({ name: 'SettingsPanel' });
   
   const { t } = useI18n();
 
-  const colorPickerKey = ref(0)
-  
-  // ---- Toast 系统 ----
-  interface ToastMessage {
-    id: number;
-    text: string;
-    type: 'success' | 'warning' | 'error';
-  }
-  const toastMessages = ref<ToastMessage[]>([]);
-  let toastId = 0;
-  
-  function showToast(text: string, type: 'success' | 'warning' | 'error' = 'success') {
-    const id = toastId++;
-    toastMessages.value.push({ id, text, type });
-    setTimeout(() => {
-      toastMessages.value = toastMessages.value.filter(msg => msg.id !== id);
-    }, 3000);
-  }
-    
   // ---- 颜色选择器弹出状态 ----
   const tempMainColor = ref(mainColor.value);
   const tempBgColor = ref(bgColor.value);
   const tempSubColor = ref(subColor.value);
-  
+
   function confirmColor(type: 'main' | 'bg' | 'sub') {
       if (type === 'main') {
         saveColor('mainColor', tempMainColor.value);
@@ -227,11 +196,6 @@
       } else {
         saveColor('subColor', tempSubColor.value);
       }
-      
-      // 关键：key +1 触发三个颜色控件全部销毁重建 = 重载
-      nextTick(() => {
-        colorPickerKey.value++
-      })
     }
   function saveColor(colorKey: string, value: string) {
     localStorage.setItem(colorKey, value);
@@ -311,9 +275,9 @@
     }
   }
 
-  function refreshBackground() {
+  async function refreshBackground() {
     if (window.refreshApiBackground) {
-      window.refreshApiBackground();
+      await window.refreshApiBackground();
       backgroundPath.value = '';
       showToast(t('settings.background.saved'), 'success');
     } else {
@@ -327,16 +291,6 @@
       const name = newPath.split(/[\\/]/).pop() || newPath;
       selectedInfo.value = t('settings.selected.picked', { name });
     }
-  });
-  
-  // ---- 监听外部主题颜色变化 ----
-  onMounted(() => {
-    window.addEventListener('themeColorChanged', ((e: CustomEvent) => {
-      const { key, value } = e.detail;
-      if (key === 'mainColor') localMain.value = value;
-      else if (key === 'bgColor') localBg.value = value;
-      else if (key === 'subColor') localSub.value = value;
-    }) as EventListener);
   });
   </script>
   
@@ -449,41 +403,6 @@
     gap: 8px;
   }
   
-  /* Toast 样式 */
-  .toast-container {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-width: 360px;
-    pointer-events: none;
-  }
-  .toast-item {
-    padding: 12px 20px;
-    border-radius: 12px;
-    background: rgba(30, 30, 30, 0.9);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #fff;
-    font-size: 14px;
-    font-weight: 500;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    pointer-events: auto;
-    animation: slideIn 0.3s ease;
-  }
-  .toast-item.success {
-    border-left: 4px solid #4caf50;
-  }
-  .toast-item.warning {
-    border-left: 4px solid #ff9800;
-  }
-  .toast-item.error {
-    border-left: 4px solid #f44336;
-  }
-  
   @keyframes slideIn {
     from {
       opacity: 0;
@@ -499,6 +418,6 @@
     .settings-container { padding: 16px; }
     .md3-card { padding: 16px; }
     .color-item { flex-direction: column; align-items: stretch; gap: 8px; }
-    .toast-container { top: 10px; right: 10px; max-width: 280px; }
   }
-  </style>
+
+</style>

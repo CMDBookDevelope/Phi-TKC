@@ -119,3 +119,14 @@ input, textarea, [contenteditable="true"] {
 .flex-row { display: flex; align-items: center; gap: 8px; }
 .flex-col { display: flex; flex-direction: column; gap: 8px; }
 
+/* Chrome / Edge / Safari 去除数字上下箭头 */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox 去除数字控制器 */
+input[type="number"] {
+  -moz-appearance: textfield;
+}

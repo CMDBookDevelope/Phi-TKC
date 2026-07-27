@@ -40,6 +40,8 @@ impl Scene for BaseScene {
 }
 
 pub async fn main() -> Result<()> {
+    // Ensure windowed mode: remove any surfaceless EGL setting from env
+    std::env::remove_var("EGL_PLATFORM");
     set_pc_assets_folder(&std::env::args().nth(2).unwrap());
 
     let mut stdin = std::io::stdin().lock();

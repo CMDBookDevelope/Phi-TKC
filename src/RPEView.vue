@@ -19,13 +19,13 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
+import { mainColor, bgColor, subColor } from '@/colorStore'
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
-import { toast, toastError } from './common'
 import type { RPEChart } from './model'
 import router from './router'
 
@@ -37,7 +37,7 @@ const getRPECharts = async () => {
   try {
     charts.value = (await invoke('get_rpe_charts')) as RPEChart[] | null
   } catch (e) {
-    toastError(e)
+    showToast(e, 'error')
     charts.value = null
   }
 }
@@ -50,7 +50,7 @@ const bindRPE = async () => {
     toast(t('binded'), 'success')
     await getRPECharts()
   } catch (e) {
-    toastError(e)
+    showToast(e, 'error')
   }
 }
 
@@ -60,7 +60,7 @@ const unbindRPE = async () => {
     toast(t('unbinded'), 'success')
     charts.value = null
   } catch (e) {
-    toastError(e)
+    showToast(e, 'error')
   }
 }
 
@@ -75,20 +75,20 @@ onMounted(() => {
     <template v-if="!charts">
       <div class="glass fluent-glass empty-state">
         <h2 class="empty-title">{{ t('not-binded') }}</h2>
-        <button class="md3-btn md3-btn-filled" @click="bindRPE">
-          <v-icon icon="mdi-link-variant" size="18" />
+        <fv-button :background="mainColor" :foreground="bgColor" :border-radius="20" @click="bindRPE">
+          <fv-AnimatedIcon :font-size=16 icon="Link" modelValue="bounceRotate" customize-animation="棍母。。。" />
           <span>{{ t('bind') }}</span>
-        </button>
+        </fv-button>
       </div>
     </template>
 
     <!-- Binded state -->
     <template v-else>
       <div class="rpe-header">
-        <button class="md3-btn md3-btn-text" @click="unbindRPE" style="color: #ff5252;">
-          <v-icon icon="mdi-link-off" size="18" />
+        <fv-button :background="bgColor" :foreground="subColor" :border-radius="20" @click="unbindRPE">
+          <fv-AnimatedIcon :font-size=16 icon="Cancel" modelValue="bounceRotate" customize-animation="棍母。。。" />
           <span>{{ t('unbind') }}</span>
-        </button>
+        </fv-button>
       </div>
 
       <div class="chart-list">
@@ -107,10 +107,10 @@ onMounted(() => {
             <h3 class="chart-name">{{ chart.name }}</h3>
             <p class="chart-id">{{ chart.id }}</p>
             <div class="chart-action">
-              <button class="md3-btn md3-btn-filled" @click="router.push({ name: 'render', query: { chart: chart.path } })">
-                <v-icon icon="mdi-play-circle-outline" size="18" />
+              <fv-button :background="mainColor" :foreground="bgColor" :border-radius="20" @click="router.push({ name: 'render', query: { chart: chart.path } })">
+                <fv-AnimatedIcon :font-size=16 icon="Play" modelValue="bounceRotate" customize-animation="棍母。。。" />
                 <span>{{ t('render') }}</span>
-              </button>
+              </fv-button>
             </div>
           </div>
         </div>
@@ -131,26 +131,6 @@ onMounted(() => {
   gap: 16px;
 }
 
-/* ===== MD3 Buttons ===== */
-.md3-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  white-space: nowrap;
-  font-family: inherit;
-}
-.md3-btn-filled { background: #82b1ff; color: #002f65; font-weight: 600; }
-.md3-btn-filled:hover { background: #a0c4ff; box-shadow: 0 2px 8px rgba(130, 177, 255, 0.3); }
-.md3-btn-text { background: transparent; color: rgba(255, 255, 255, 0.7); }
-.md3-btn-text:hover { background: rgba(255, 255, 255, 0.08); }
-
 /* ===== Empty State ===== */
 .empty-state {
   display: flex;
@@ -160,11 +140,10 @@ onMounted(() => {
   flex: 1;
   gap: 24px;
 }
-
 .empty-title {
   font-size: 22px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(var(--main-color-rgb), 0.7);
   margin: 0;
   text-align: center;
 }
@@ -185,30 +164,27 @@ onMounted(() => {
   flex: 1;
 }
 
-/* ===== Chart Card (RPEView style, MD3 enhanced) ===== */
+/* ===== Chart Card ===== */
 .chart-card {
   display: flex;
   flex-direction: row;
   background: rgba(25, 25, 25, 0.85);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(var(--main-color-rgb), 0.08);
   border-radius: 20px;
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-
 .chart-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(var(--main-color-rgb), 0.12);
 }
-
 .chart-cover {
   width: 35%;
   min-height: 180px;
   background: rgba(0, 0, 0, 0.15);
 }
-
 .cover-image {
   width: 100%;
   height: 100%;
@@ -216,7 +192,6 @@ onMounted(() => {
   background-repeat: no-repeat;
   background-size: cover;
 }
-
 .chart-content {
   width: 65%;
   padding: 20px;
@@ -224,21 +199,18 @@ onMounted(() => {
   flex-direction: column;
   gap: 8px;
 }
-
 .chart-name {
   font-size: 18px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(var(--main-color-rgb), 0.9);
   margin: 0;
 }
-
 .chart-id {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--main-color-rgb), 0.4);
   margin: 0;
   font-family: 'Consolas', monospace;
 }
-
 .chart-action {
   margin-top: auto;
   display: flex;

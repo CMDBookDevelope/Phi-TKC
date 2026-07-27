@@ -1,14 +1,22 @@
 <script setup lang="ts">
+import { bgColor, mainColor, subColor } from '@/colorStore';
+
 defineProps<{ tooltip: string; btnClass?: string[] | string }>();
 </script>
 
 <template>
-  <v-tooltip location="bottom" max-width="250px">
-    <template v-slot:activator="{ props }">
-      <v-btn :class="btnClass" icon v-bind="props" :ripple="false" variant="plain">
-        <v-icon> mdi-information-outline </v-icon>
-      </v-btn>
+  <fv-callout
+  v-model="show"
+  effect="hover"
+  position="bottomLeft"
+  max-width="250px"
+  :callout-bg="bgColor"
+  border-radius="16px"
+  >
+    <fv-animated-icon icon="Info" model-value="scaleDown" />
+    <template v-slot:main>
+      <fv-animated-icon icon="Info" model-value="scaleDown" />
+      <a>{{ tooltip }}</a>
     </template>
-    <span>{{ tooltip }}</span>
-  </v-tooltip>
+  </fv-callout>
 </template>

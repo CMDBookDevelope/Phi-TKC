@@ -3,12 +3,13 @@ use clap::Parser;
 use render::{render_cli, CliArgs};
 
 fn build_conf() -> macroquad::window::Conf {
-    let is_cli = std::env::args().any(|arg| arg == "--input" || arg == "-i");
+    // Headless except for preview mode (which needs a real rendering window)
+    let is_preview = std::env::args().skip(1).next().as_deref() == Some("preview");
     macroquad::window::Conf {
         window_title: "Phi-TKC (GUI/CLI)".to_string(),
         window_width: 1920,
         window_height: 1440,
-        headless: is_cli,
+        headless: !is_preview,
         ..Default::default()
     }
 }

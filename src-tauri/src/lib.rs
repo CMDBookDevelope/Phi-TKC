@@ -70,16 +70,7 @@ pub async fn run() -> Result<()> {
     if std::env::args().len() > 1 {
         match std::env::args().skip(1).next().as_deref() {
             Some("render") => {
-                let remaining_args: Vec<String> = std::env::args().skip(2).collect();
-                match render::CliArgs::try_parse_from(remaining_args) {
-                    Ok(cli_args) => {
-                        run_wrapped(render::render_cli(cli_args)).await;
-                    }
-                    Err(e) => {
-                        eprintln!("{}", e);
-                        std::process::exit(1);
-                    }
-                }
+                run_wrapped(render::main()).await;
             }
             Some("preview") => {
                 run_wrapped(preview::main()).await;

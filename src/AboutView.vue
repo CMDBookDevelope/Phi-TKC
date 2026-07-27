@@ -13,7 +13,7 @@
       </div>
       <!-- 信息卡片，纵向排列，依次滑入 -->
       <div class="info-cards">
-        <v-card v-glass class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
+        <div v-glass class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
           <div class="card-content">
             <div class="static-glass card-icon">
               <fv-AnimatedIcon fontSize="28" icon="Globe" />
@@ -26,8 +26,8 @@
               <fv-AnimatedIcon :fontSize="20" icon="Link" />
             </div>
           </div>
-        </v-card>
-        <v-card v-glass class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
+        </div>
+        <div v-glass class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
           <div class="card-content">
             <div class="static-glass card-icon">
               <fv-AnimatedIcon :fontSize="28" icon="PrintAllPages" />
@@ -40,8 +40,8 @@
               <fv-AnimatedIcon :fontSize="20" icon="Link" />
             </div>
           </div>
-        </v-card>
-        <v-card v-glass class="glass fluent-glass info-card" :style="{ '--i': 2 }">
+        </div>
+        <div v-glass class="glass fluent-glass info-card" :style="{ '--i': 2 }">
           <div class="card-content">
             <div class="static-glass card-icon">
               <fv-AnimatedIcon :fontSize="28" icon="Package" />
@@ -51,7 +51,7 @@
               <p class="card-subtitle">v{{ appVersion }}</p>
             </div>
           </div>
-        </v-card>
+        </div>
       </div>
       <!-- 底部版权（传入动态年份） -->
       <div v-glass class="glass fluent-glass about-footer">

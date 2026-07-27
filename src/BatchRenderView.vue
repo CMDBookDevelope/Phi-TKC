@@ -1,16 +1,16 @@
 <i18n>
 en:
   title: Batch Render
-  select-charts: Select Charts
-  select-preset: Select Preset
-  add-files: Add Files
-  add-folder: Add Folder
-  clear-list: Clear All
-  clear-done: Clear Completed
-  start-render: Start Render
+  select-charts: Charts
+  select-preset: Preset
+  add-files: Add
+  add-folder: Add Dir
+  clear-list: Clear
+  clear-done: Clear Done
+  start-render: Render
   stop-render: Stop
-  retry-failed: Retry Failed
-  bulk-edit: Bulk Edit
+  retry-failed: Retry
+  bulk-edit: Edit
   name: Name
   level: Level
   charter: Charter
@@ -19,119 +19,120 @@ en:
   rendering: Rendering
   done: Done
   failed: Failed
-  total-selected: "Total selected: {count}"
+  total-selected: "Selected: {count}"
   all: All
   none: None
-  configure: Global Config
+  configure: Config
   save: Save
   actions: Actions
   close: Close
   total-charts: "Total: {count}"
-  select-all: Select All
-  deselect-all: Deselect All
+  select-all: Sel All
+  deselect-all: Deselect
   progress: Progress
   eta: ETA
-  no-charts: Drag and drop chart folders/files here, or use the buttons above to add them.
-  no-results: No results found
-  search-placeholder: Search charts, charter or level...
-  selected: "Selected: {count}"
-  filtered-results: "Filtered: {count}"
-  add-files-failed: Failed to add files
-  no-charts-found: No charts found in folder
-  charts-added: "{count} charts added"
-  add-folder-failed: Failed to add folder
-  no-charts-selected: No charts selected
-  batch-completed: "Batch completed: {count} rendered"
-  batch-stopped: "Batch queue stopped"
-  ffmpeg-not-found: FFmpeg not found
-  chart-info-missing: Chart info missing
+  no-charts: Drop chart files/folders here or use buttons above.
+  no-results: No results
+  search-placeholder: Search...
+  selected: "Sel: {count}"
+  filtered-results: "Filter: {count}"
+  add-files-failed: Add failed
+  no-charts-found: No charts found
+  charts-added: "{count} added"
+  add-folder-failed: Add failed
+  no-charts-selected: None selected
+  batch-completed: "Done: {count}"
+  batch-stopped: Stopped
+  ffmpeg-not-found: No FFmpeg
+  chart-info-missing: No info
   adding-charts: Adding...
-  invalid-chart-file: Invalid chart file
-  file-type-error: "File type error: {message}"
-  config-saved: "Configuration saved"
-  chart-name: Chart Name
+  invalid-chart-file: Bad file
+  file-type-error: "Error: {message}"
+  config-saved: Saved
+  chart-name: Name
   composer: Composer
-  illustrator: Illustrator
-  background-dim: Background Dim
-  hold_cover: Hold Partial Cover
+  illustrator: Artist
+  background-dim: Dim
+  hold_cover: Hold Cover
   tip: Tip
-  aspect: Aspect Ratio
+  aspect: Aspect
   width: Width
   height: Height
-  dim: Background Dim
+  dim: Dim
   preview: Preview
   edit: Edit
-  chart-info: Chart Info
-  bulk-edit-title: Bulk Edit Settings
-  bulk-edit-hint: Leave fields blank to keep their original values.
+  chart-info: Info
+  bulk-edit-title: Bulk Edit
+  bulk-edit-hint: Leave blank to keep original values.
 zh-CN:
   title: 批量渲染
-  select-charts: 选择谱面
-  select-preset: 选择预设
-  add-files: 添加文件
-  add-folder: 添加文件夹
-  clear-list: 清空全部
-  clear-done: 清除已完成
-  start-render: 开始渲染
-  stop-render: 停止渲染
-  retry-failed: 重试失败项
-  bulk-edit: 批量编辑
+  select-charts: 谱面
+  select-preset: 预设
+  add-files: 添加
+  add-folder: 目录
+  clear-list: 清空
+  clear-done: 清理完成
+  start-render: 渲染
+  stop-render: 停止
+  retry-failed: 重试
+  bulk-edit: 编辑
   name: 名称
   level: 难度
   charter: 谱师
   status: 状态
-  pending: 已就绪
+  pending: 就绪
   rendering: 渲染中
-  done: 已完成
+  done: 完成
   failed: 失败
   actions: 操作
   total-selected: "已选择: {count}"
   all: 全选
-  none: 取消全选
-  configure: 全局渲染配置
+  none: 取消
+  configure: 配置
   close: 关闭
   total-charts: "总计: {count}"
   select-all: 全选
-  deselect-all: 取消全选
+  deselect-all: 取消
   progress: 进度
   eta: 预计
-  no-charts: 将谱面文件或文件夹拖拽至此，或使用上方按钮添加
-  no-results: 未找到相关谱面
-  search-placeholder: 搜索谱面名称、谱师或难度...
-  selected: "已选择 {count} 项"
-  filtered-results: "筛选结果: {count}"
+  no-charts: 拖拽谱面至此，或使用上方按钮添加
+  no-results: 无结果
+  search-placeholder: 搜索...
+  selected: "已选: {count}"
+  filtered-results: "筛选: {count}"
   save: 保存
-  add-files-failed: 添加文件失败
-  no-charts-found: 未找到有效谱面文件
-  charts-added: "成功添加 {count} 个谱面"
-  add-folder-failed: 添加文件夹失败
-  no-charts-selected: 未选择任何谱面
-  batch-completed: "批量任务完成，共处理 {count} 个谱面"
-  batch-stopped: "已停止队列"
-  ffmpeg-not-found: 未找到 FFmpeg 环境
-  chart-info-missing: 谱面信息缺失
+  add-files-failed: 添加失败
+  no-charts-found: 无谱面
+  charts-added: "已添加 {count} 个"
+  add-folder-failed: 添加失败
+  no-charts-selected: 未选择
+  batch-completed: "完成: {count} 个"
+  batch-stopped: 已停止
+  ffmpeg-not-found: 无FFmpeg
+  chart-info-missing: 无信息
   adding-charts: 解析中...
-  invalid-chart-file: 无效的谱面文件
-  file-type-error: "文件类型错误: {message}"
-  config-saved: "配置已保存"
-  chart-name: 谱面名称
-  composer: 作曲家
-  illustrator: 插画师
-  background-dim: 背景暗度
-  hold_cover: Hold 头部遮罩
-  aspect: 宽高比
-  tip: 提示信息 (Tip)
+  invalid-chart-file: 无效文件
+  file-type-error: "错误: {message}"
+  config-saved: 已保存
+  chart-name: 谱面名
+  composer: 曲师
+  illustrator: 画师
+  background-dim: 暗度
+  hold_cover: 遮罩
+  aspect: 比例
+  tip: 提示
   width: 宽
   height: 高
-  dim: 背景昏暗程度
+  dim: 暗度
   preview: 预览
   edit: 编辑
-  chart-info: 谱面信息
-  bulk-edit-title: 批量编辑属性
-  bulk-edit-hint: 未填写的项将保持每个谱面原有的设置不变。
+  chart-info: 信息
+  bulk-edit-title: 批量编辑
+  bulk-edit-hint: 留空则保持原值。
 </i18n>
 
 <script setup lang="ts">
+import { mainColor, bgColor, subColor } from '@/colorStore'
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
@@ -140,7 +141,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { event } from '@tauri-apps/api';
 import moment from 'moment';
 
-import { toast, toastError, RULES } from './common';
+import { RULES } from './common';
 import type { ChartInfo, RenderConfig } from './model';
 import ConfigView from '@/components/ConfigView.vue';
 
@@ -430,23 +431,23 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
     <div class="batch-header">
       <div class="header-row">
         <div class="search-wrap">
-          <v-icon icon="mdi-magnify" size="18" class="search-icon" />
+          <fv-animated-icon icon="Filter" :font-size="16" class="search-icon" />
           <input v-model="searchQuery" :placeholder="t('search-placeholder')" class="md3-search" />
         </div>
 
         <div class="header-actions">
-          <button class="md3-btn md3-btn-tonal" :disabled="isAddingFiles" @click="addFiles">
-            <v-icon icon="mdi-file-plus-outline" size="18" />
+          <fv-button :background="bgColor" :border-radius="30" :foreground="mainColor" :disabled="isAddingFiles" @click="addFiles">
+            <fv-animated-icon icon="FolderHorizontal" :font-size="18" />
             <span>{{ t('add-files') }}</span>
-          </button>
-          <button class="md3-btn md3-btn-tonal" :disabled="isAddingFolder" @click="addFolder">
-            <v-icon icon="mdi-folder-plus-outline" size="18" />
+          </fv-button>
+          <fv-button :background="bgColor" :border-radius="30" :foreground="mainColor" :disabled="isAddingFolder" @click="addFolder">
+            <fv-animated-icon icon="FolderHorizontal" :font-size="18" />
             <span>{{ t('add-folder') }}</span>
-          </button>
-          <button class="md3-btn md3-btn-tonal" @click="configDialog = true">
-            <v-icon icon="mdi-cog-outline" size="18" />
+          </fv-button>
+          <fv-button :background="bgColor" :border-radius="30" :foreground="mainColor" @click="configDialog = true">
+            <fv-animated-icon icon="Settings" :font-size="18" />
             <span>{{ t('configure') }}</span>
-          </button>
+          </fv-button>
         </div>
       </div>
     </div>
@@ -454,50 +455,51 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
     <!-- Selection bar -->
     <div class="selection-bar">
       <div class="sel-left">
-        <v-checkbox-btn :model-value="allSelected" :indeterminate="isIndeterminate" @click="toggleSelectAll" color="primary" />
+        <input type="checkbox" :checked="allSelected" :indeterminate="isIndeterminate" @click="toggleSelectAll" class="md3-checkbox" />
         <span class="sel-count">{{ t('selected', { count: selectedCount }) }} / {{ t('total-charts', { count: charts.length }) }}</span>
 
-        <button v-if="selectedCount > 1" class="md3-btn md3-btn-text md3-btn-sm" @click="openBulkEditDialog">
-          <v-icon icon="mdi-pencil-box-multiple-outline" size="16" />
+        <fv-button v-if="selectedCount > 1" class="md3-btn md3-btn-text md3-btn-sm" :border-radius="30" @click="openBulkEditDialog">
+          <fv-animated-icon icon="Sort" :font-size="16" />
           <span>{{ t('bulk-edit') }}</span>
-        </button>
+        </fv-button>
       </div>
       <div class="sel-right">
-        <button v-if="charts.some(c => c.status === 'failed')" class="md3-btn md3-btn-text md3-btn-sm" @click="retryFailed">
-          <v-icon icon="mdi-refresh" size="16" /><span>{{ t('retry-failed') }}</span>
-        </button>
-        <button v-if="charts.some(c => c.status === 'done')" class="md3-btn md3-btn-text md3-btn-sm" @click="clearDone">
-          <v-icon icon="mdi-check-all" size="16" /><span>{{ t('clear-done') }}</span>
-        </button>
-        <button class="md3-btn md3-btn-text md3-btn-sm" @click="clearList" :disabled="charts.length === 0">
-          <v-icon icon="mdi-delete-outline" size="16" /><span>{{ t('clear-list') }}</span>
-        </button>
+        <fv-button v-if="charts.some(c => c.status === 'failed')" :border-radius="30" class="md3-btn md3-btn-text md3-btn-sm" @click="retryFailed">
+          <fv-animated-icon icon="Refresh" :font-size="16" /><span>{{ t('retry-failed') }}</span>
+        </fv-button>
+        <fv-button :disabled="charts.some(c => c.status === 'done')" :border-radius="30" class="md3-btn md3-btn-text md3-btn-sm" @click="clearDone">
+          <fv-animated-icon icon="CheckMark" :font-size="16" /><span>{{ t('clear-done') }}</span>
+        </fv-button>
+        <fv-button :background="bgColor" :foreground="mainColor" :border-radius="30" @click="clearList" :disabled="charts.length === 0">
+          <fv-animated-icon icon="Delete" :font-size="16" /><span>{{ t('clear-list') }}</span>
+        </fv-button>
       </div>
     </div>
 
     <!-- Render action -->
     <div class="render-bar">
       <template v-if="isRenderingQueue">
-        <v-chip color="warning" variant="flat" class="rendering-chip">
-          <v-icon start icon="mdi-loading" class="spin-anim" />
+        <span class="rendering-chip">
+          <fv-AnimatedIcon icon="Refresh" modelValue="bounceRotate" :font-size="14" />
           {{ t('rendering') }}
-        </v-chip>
-        <button class="md3-btn md3-btn-text" @click="stopRender" style="color: #ff5252;">
-          <v-icon icon="mdi-stop" size="18" /><span>{{ t('stop-render') }}</span>
-        </button>
+        </span>
+        <fv-button :background="bgColor" :border-radius="30" :foreground="mainColor" @click="stopRender">
+          <fv-animated-icon icon="Blocked" :font-size="18" /><span>{{ t('stop-render') }}</span>
+        </fv-button>
       </template>
       <template v-else>
-        <button class="md3-btn md3-btn-filled" :disabled="selectedCount === 0" @click="startRender">
-          <v-icon icon="mdi-play" size="18" />
-          <span>{{ t('start-render') }} ({{ selectedCount }})</span>
-        </button>
+        <fv-button :background="mainColor" :border-radius="30" :foreground="bgColor" :disabled="selectedCount === 0" @click="startRender">
+          <fv-animated-icon icon="Play" :font-size="18" />
+          <span>{{ t('start-render') }}</span>
+        </fv-button>
+        <span class="render-count">({{ selectedCount }} Tasks)</span>
       </template>
     </div>
 
     <!-- List -->
     <div class="chart-list">
       <div v-if="charts.length === 0" class="empty-state">
-        <v-icon icon="mdi-text-box-plus-outline" size="64" color="rgba(255,255,255,0.15)" />
+        <fv-animated-icon icon="Page" :font-size="64" style="opacity: 0.15;" />
         <p>{{ t('no-charts') }}</p>
       </div>
 
@@ -511,15 +513,15 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
           <div v-if="item.status === 'rendering' && item.id === currentRenderingId" class="progress-bg" :style="{ width: `${renderProgress}%` }"></div>
 
           <div class="row-content">
-            <v-checkbox-btn v-model="item.selected" :disabled="item.status === 'rendering'" color="primary" />
+            <input type="checkbox" v-model="item.selected" :disabled="item.status === 'rendering'" class="md3-checkbox" />
 
             <div class="row-info">
               <div class="row-title">
                 <span class="row-name" :title="item.name">{{ item.name }}</span>
-                <v-chip size="x-small" variant="outlined" color="primary">{{ item.level }}</v-chip>
+                <span class="level-badge">{{ item.level }}</span>
               </div>
               <div class="row-sub">
-                <v-icon icon="mdi-account-music" size="14" />
+                <fv-animated-icon icon="MusicNote" :font-size="14" />
                 <span>{{ item.charter }}</span>
                 <template v-if="item.status === 'rendering' && item.id === currentRenderingId">
                   <span class="render-status">{{ renderProgress.toFixed(1) }}% - {{ renderMsg }}</span>
@@ -530,22 +532,12 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
               </div>
             </div>
 
-            <v-chip
-              :color="item.status === 'done' ? 'success' : item.status === 'failed' ? 'error' : item.status === 'rendering' ? 'warning' : 'default'"
-              :variant="item.status === 'pending' ? 'tonal' : 'flat'"
-              size="small"
-            >{{ t(item.status) }}</v-chip>
+            <span class="status-chip" :class="'status-' + item.status">{{ t(item.status) }}</span>
 
             <div class="row-actions">
-              <button class="icon-btn" :disabled="!item.chartInfo || item.status === 'rendering'" @click="openEditDialog(item.id)" :title="t('edit')">
-                <v-icon icon="mdi-pencil-outline" size="18" />
-              </button>
-              <button class="icon-btn" :disabled="!item.chartInfo || item.status === 'rendering'" @click="previewChart(item.id)" :title="t('preview')">
-                <v-icon icon="mdi-play-circle-outline" size="18" />
-              </button>
-              <button class="icon-btn icon-btn-danger" :disabled="item.status === 'rendering'" @click="removeChart(item.id)" :title="t('close')">
-                <v-icon icon="mdi-close" size="18" />
-              </button>
+              <fv-button :border-radius="30" icon="Sort" :background="bgColor" :foreground="mainColor" :disabled="!item.chartInfo || item.status === 'rendering'" @click="openEditDialog(item.id)">{{ t('edit') }}</fv-button>
+              <fv-button :border-radius="30" icon="Play" :background="bgColor" :foreground="mainColor" :disabled="!item.chartInfo || item.status === 'rendering'" @click="previewChart(item.id)">{{ t('preview') }}</fv-button>
+              <fv-button :border-radius="30" icon="ChromeClose" :background="bgColor" :foreground="subColor" :disabled="item.status === 'rendering'" @click="removeChart(item.id)">{{ t('close') }}</fv-button>
             </div>
           </div>
         </div>
@@ -553,113 +545,133 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
     </div>
 
     <!-- Config Dialog -->
-    <v-dialog v-model="configDialog" fullscreen transition="dialog-bottom-transition">
-      <v-card class="md3-dialog-full h-100">
-        <v-toolbar color="transparent" class="border-b">
-          <v-toolbar-title>{{ t('configure') }}</v-toolbar-title>
-          <v-spacer />
-          <v-btn icon="mdi-close" variant="text" @click="configDialog = false" />
-        </v-toolbar>
-        <v-card-text class="pa-0 h-100">
+    <div v-if="configDialog" class="dialog-overlay">
+      <div class="md3-dialog-full dialog-fullscreen-inner">
+        <div class="dialog-header border-b">
+          <h3 class="dialog-title">{{ t('configure') }}</h3>
+          <div style="flex: 1;"></div>
+          <fv-button :border-radius="30" icon="ChromeClose" class="dialog-close-btn" @click="configDialog = false" />
+        </div>
+        <div class="pa-0 h-100 dialog-body">
           <ConfigView ref="configViewRef" />
-        </v-card-text>
-        <v-card-actions class="pa-4 border-t">
-          <v-spacer />
-          <button class="md3-btn md3-btn-text" @click="configDialog = false">{{ t('close') }}</button>
-          <button class="md3-btn md3-btn-filled" @click="saveConfig">{{ t('save') }}</button>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+        </div>
+        <div class="pa-4 border-t dialog-footer">
+          <div style="flex: 1;"></div>
+          <fv-button :border-radius="30" :background="bgColor" :foreground="mainColor" @click="configDialog = false">{{ t('close') }}</fv-button>
+          <fv-button :border-radius="30" :background="mainColor" :foreground="bgColor" @click="saveConfig">{{ t('save') }}</fv-button>
+        </div>
+      </div>
+    </div>
 
     <!-- Edit Dialog -->
-    <v-dialog v-model="editDialog" max-width="600">
-      <v-card class="md3-dialog" v-if="editingChart?.chartInfo">
-        <v-toolbar color="transparent" class="border-b">
-          <v-toolbar-title>{{ t('chart-info') }}</v-toolbar-title>
-          <v-spacer />
-          <v-btn icon="mdi-close" variant="text" @click="editDialog = false" />
-        </v-toolbar>
-        <v-card-text class="pa-6">
-          <v-form ref="form" @submit.prevent>
-            <v-row dense>
-              <v-col cols="8"><v-text-field :label="t('chart-name')" :rules="[RULES.non_empty]" v-model="editingChart.chartInfo!.name" variant="outlined" density="comfortable" /></v-col>
-              <v-col cols="4"><v-text-field :label="t('level')" :rules="[RULES.non_empty]" v-model="editingChart.chartInfo!.level" variant="outlined" density="comfortable" /></v-col>
-              <v-col cols="4"><v-text-field :label="t('charter')" :rules="[RULES.non_empty]" v-model="editingChart.chartInfo!.charter" variant="outlined" density="comfortable" /></v-col>
-              <v-col cols="4"><v-text-field :label="t('composer')" v-model="editingChart.chartInfo!.composer" variant="outlined" density="comfortable" /></v-col>
-              <v-col cols="4"><v-text-field :label="t('illustrator')" v-model="editingChart.chartInfo!.illustrator" variant="outlined" density="comfortable" /></v-col>
-            </v-row>
-            <v-divider class="my-4" />
-            <v-row dense align="center">
-              <v-col cols="12" sm="5">
+    <div v-if="editDialog" class="dialog-overlay" @click.self="editDialog = false">
+      <div class="md3-dialog dialog-modal-inner" v-if="editingChart?.chartInfo">
+        <div class="dialog-header border-b">
+          <h3 class="dialog-title">{{ t('chart-info') }}</h3>
+          <div style="flex: 1;"></div>
+          <fv-button :border-radius="30" icon="ChromeClose" class="dialog-close-btn" @click="editDialog = false" />
+        </div>
+        <div class="pa-6 dialog-body">
+          <form ref="form" @submit.prevent>
+            <div class="input-grid">
+              <div class="input-grid-col" style="flex: 2;">
+                <label class="field-label-sm">{{ t('chart-name') }}</label>
+                <input v-model="editingChart.chartInfo!.name" class="blur-glass md3-field" required />
+              </div>
+              <div class="input-grid-col">
+                <label class="field-label-sm">{{ t('level') }}</label>
+                <input v-model="editingChart.chartInfo!.level" class="blur-glass md3-field" required />
+              </div>
+              <div class="input-grid-col">
+                <label class="field-label-sm">{{ t('charter') }}</label>
+                <input v-model="editingChart.chartInfo!.charter" class="blur-glass md3-field" required />
+              </div>
+              <div class="input-grid-col">
+                <label class="field-label-sm">{{ t('composer') }}</label>
+                <input v-model="editingChart.chartInfo!.composer" class="blur-glass md3-field" />
+              </div>
+              <div class="input-grid-col">
+                <label class="field-label-sm">{{ t('illustrator') }}</label>
+                <input v-model="editingChart.chartInfo!.illustrator" class="blur-glass md3-field" />
+              </div>
+            </div>
+            <hr class="hr-divider" />
+            <div class="edit-two-col">
+              <div class="edit-col-left">
                 <div class="field-label-sm">{{ t('aspect') }}</div>
-                <div class="d-flex align-center gap-2">
-                  <v-text-field type="number" :rules="[RULES.positive]" v-model="editingChart.aspectWidth" hide-details variant="outlined" density="compact" />
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <input type="number" v-model="editingChart.aspectWidth" class="blur-glass md3-field" style="width: 80px;" />
                   <span>:</span>
-                  <v-text-field type="number" :rules="[RULES.positive]" v-model="editingChart.aspectHeight" hide-details variant="outlined" density="compact" />
+                  <input type="number" v-model="editingChart.aspectHeight" class="blur-glass md3-field" style="width: 80px;" />
                 </div>
-              </v-col>
-              <v-col cols="12" sm="7">
-                <v-slider :label="t('dim')" thumb-label="always" :min="0" :max="1" :step="0.01" v-model="editingChart.chartInfo!.backgroundDim" hide-details class="mt-4" />
-              </v-col>
-              <v-col cols="12">
-                <v-switch color="primary" :label="t('hold_cover')" v-model="editingChart.chartInfo!.HoldPartialCover" :true-value="1" :false-value="0" hide-details />
-              </v-col>
-              <v-col cols="12">
-                <v-text-field :label="t('tip')" v-model="editingChart.chartInfo!.tip" variant="outlined" density="comfortable" hide-details class="mt-2" />
-              </v-col>
-            </v-row>
-          </v-form>
-        </v-card-text>
-        <v-card-actions class="pa-4 border-t">
-          <v-spacer />
-          <button class="md3-btn md3-btn-text" @click="editDialog = false">{{ t('close') }}</button>
-          <button class="md3-btn md3-btn-filled" @click="saveChartInfo">{{ t('save') }}</button>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+              </div>
+              <div class="edit-col-right">
+                <label class="field-label-sm">{{ t('dim') }}</label>
+                <fv-slider thumb-label="always" :min="0" :max="1" :step="0.01" v-model="editingChart.chartInfo!.backgroundDim" class="mt-4" />
+              </div>
+              <div class="edit-col-full">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <span class="field-label-sm">{{ t('hold_cover') }}</span>
+                  <input type="checkbox" :checked="editingChart.chartInfo!.HoldPartialCover === 1" @change="editingChart.chartInfo!.HoldPartialCover = $event.target.checked ? 1 : 0" class="md3-checkbox" />
+                </div>
+              </div>
+              <div class="edit-col-full">
+                <label class="field-label-sm">{{ t('tip') }}</label>
+                <input v-model="editingChart.chartInfo!.tip" class="blur-glass md3-field" />
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="pa-4 border-t dialog-footer">
+          <div style="flex: 1;"></div>
+          <fv-button :border-radius="30" :background="bgColor" :foreground="mainColor" @click="editDialog = false">{{ t('close') }}</fv-button>
+          <fv-button :border-radius="30" :background="mainColor" :foreground="bgColor" @click="saveChartInfo">{{ t('save') }}</fv-button>
+        </div>
+      </div>
+    </div>
 
     <!-- Bulk Edit Dialog -->
-    <v-dialog v-model="bulkEditDialog" max-width="500">
-      <v-card class="md3-dialog">
-        <v-toolbar color="transparent" class="border-b">
-          <v-toolbar-title>{{ t('bulk-edit-title') }}</v-toolbar-title>
-          <v-spacer />
-          <v-btn icon="mdi-close" variant="text" @click="bulkEditDialog = false" />
-        </v-toolbar>
-        <v-card-text class="pa-6">
-          <v-alert color="info" variant="tonal" class="mb-4" icon="mdi-information-outline">
-            {{ t('bulk-edit-hint') }}
-          </v-alert>
-          <v-form ref="bulkForm" @submit.prevent>
+    <div v-if="bulkEditDialog" class="dialog-overlay" @click.self="bulkEditDialog = false">
+      <div class="md3-dialog dialog-modal-inner">
+        <div class="dialog-header border-b">
+          <h3 class="dialog-title">{{ t('bulk-edit-title') }}</h3>
+          <div style="flex: 1;"></div>
+          <fv-button :border-radius="30" icon="ChromeClose" class="dialog-close-btn" @click="bulkEditDialog = false" />
+        </div>
+        <div class="pa-6 dialog-body">
+          <div class="alert-info">
+            <fv-animated-icon icon="Info" :font-size="16" />
+            <span>{{ t('bulk-edit-hint') }}</span>
+          </div>
+          <form ref="bulkForm" @submit.prevent>
             <div class="field-label-sm mb-1">{{ t('aspect') }}</div>
-            <div class="d-flex align-center gap-2 mb-4">
-              <v-text-field type="number" placeholder="Original" v-model="bulkEditData.aspectWidth" hide-details variant="outlined" density="comfortable" />
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+              <input type="number" placeholder="Original" v-model="bulkEditData.aspectWidth" class="blur-glass md3-field" style="flex: 1;" />
               <span>:</span>
-              <v-text-field type="number" placeholder="Original" v-model="bulkEditData.aspectHeight" hide-details variant="outlined" density="comfortable" />
+              <input type="number" placeholder="Original" v-model="bulkEditData.aspectHeight" class="blur-glass md3-field" style="flex: 1;" />
             </div>
             <div class="field-label-sm mb-1">{{ t('dim') }}</div>
-            <v-slider thumb-label :min="0" :max="1" :step="0.01" :model-value="bulkEditData.backgroundDim ?? 0" @update:model-value="bulkEditData.backgroundDim = $event" hide-details color="primary" class="mb-2">
-              <template v-slot:append>
-                <v-btn icon="mdi-close-circle" size="small" variant="text" color="error" v-if="bulkEditData.backgroundDim !== null" @click="bulkEditData.backgroundDim = null" />
-              </template>
-            </v-slider>
-            <div class="d-flex align-center justify-space-between mt-4">
-              <span class="field-label-sm">{{ t('hold_cover') }}</span>
-              <v-btn-toggle v-model="bulkEditData.holdCover" color="primary" variant="outlined" density="compact">
-                <v-btn :value="null">Keep</v-btn>
-                <v-btn :value="1">On</v-btn>
-                <v-btn :value="0">Off</v-btn>
-              </v-btn-toggle>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+              <fv-slider :min="0" :max="1" :step="0.01" :model-value="bulkEditData.backgroundDim ?? 0" @update:model-value="bulkEditData.backgroundDim = $event" style="flex: 1;" />
+              <fv-button :border-radius="30" v-if="bulkEditData.backgroundDim !== null" icon="ChromeClose" class="icon-btn" @click="bulkEditData.backgroundDim = null" />
             </div>
-          </v-form>
-        </v-card-text>
-        <v-card-actions class="pa-4 border-t">
-          <v-spacer />
-          <button class="md3-btn md3-btn-text" @click="bulkEditDialog = false">{{ t('close') }}</button>
-          <button class="md3-btn md3-btn-filled" @click="saveBulkEdit">{{ t('save') }}</button>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 16px;">
+              <span class="field-label-sm">{{ t('hold_cover') }}</span>
+              <div class="btn-group">
+                <fv-button :border-radius="30" type="button" class="group-btn" :class="{ 'is-active': bulkEditData.holdCover === null }" @click="bulkEditData.holdCover = null">Keep</fv-button>
+                <fv-button :border-radius="30" type="button" class="group-btn" :class="{ 'is-active': bulkEditData.holdCover === 1 }" @click="bulkEditData.holdCover = 1">On</fv-button>
+                <fv-button :border-radius="30" type="button" class="group-btn" :class="{ 'is-active': bulkEditData.holdCover === 0 }" @click="bulkEditData.holdCover = 0">Off</fv-button>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="pa-4 border-t dialog-footer">
+          <div style="flex: 1;"></div>
+          <fv-button :border-radius="30" :background="bgColor" :foreground="mainColor" @click="bulkEditDialog = false">{{ t('close') }}</fv-button>
+          <fv-button :border-radius="30" :background="mainColor" :foreground="bgColor" @click="saveBulkEdit">{{ t('save') }}</fv-button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -674,36 +686,13 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   font-family: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
-/* ===== MD3 Buttons ===== */
-.md3-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-  white-space: nowrap;
-  font-family: inherit;
-}
-.md3-btn:disabled { opacity: 0.5; cursor: default; }
-.md3-btn-sm { padding: 6px 12px; font-size: 12px; }
-.md3-btn-text { background: transparent; color: rgba(255, 255, 255, 0.7); }
-.md3-btn-text:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
-.md3-btn-tonal { background: rgba(130, 177, 255, 0.12); color: #82b1ff; }
-.md3-btn-tonal:hover:not(:disabled) { background: rgba(130, 177, 255, 0.2); }
-.md3-btn-filled { background: #82b1ff; color: #002f65; font-weight: 600; }
-.md3-btn-filled:hover:not(:disabled) { background: #a0c4ff; box-shadow: 0 2px 8px rgba(130, 177, 255, 0.3); }
 
 /* ===== Header ===== */
 .batch-header {
   flex-shrink: 0;
-  background: rgba(24, 24, 24, 0.85);
+  background: transparent;
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(var(--main-color-rgb), 0.08);
   border-radius: 20px;
   padding: 14px 18px;
   margin-bottom: 12px;
@@ -728,27 +717,28 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--main-color-rgb), 0.4);
   pointer-events: none;
+  font-size: 18px;
 }
 
 .md3-search {
   width: 100%;
   padding: 8px 12px 8px 36px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(var(--main-color-rgb), 0.06);
+  border: 1px solid rgba(var(--main-color-rgb), 0.1);
   border-radius: 16px;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(var(--main-color-rgb), 0.9);
   font-size: 13px;
   font-family: inherit;
   transition: border-color 0.2s ease;
 }
 .md3-search:focus {
   outline: none;
-  border-color: rgba(130, 177, 255, 0.5);
+  border-color: rgba(var(--main-color-rgb),0.5);
 }
 .md3-search::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(var(--main-color-rgb), 0.35);
 }
 
 .header-actions {
@@ -774,7 +764,7 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
 
 .sel-count {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(var(--main-color-rgb), 0.55);
 }
 
 /* ===== Render Bar ===== */
@@ -790,9 +780,9 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   animation: pulse-glow 2s infinite;
 }
 @keyframes pulse-glow {
-  0% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.4); }
-  70% { box-shadow: 0 0 0 8px rgba(255, 152, 0, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(var(--main-color-rgb), 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(var(--main-color-rgb), 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--main-color-rgb), 0); }
 }
 
 .spin-anim { animation: spin 1.5s linear infinite; }
@@ -821,39 +811,40 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   justify-content: center;
   height: 100%;
   gap: 16px;
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(var(--main-color-rgb), 0.35);
   font-size: 14px;
 }
 
 /* ===== Chart Row (MD3 Card) ===== */
 .chart-row {
   position: relative;
-  background: rgba(30, 30, 30, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(var(--main-color-rgb), 0.08);
   border-radius: 16px;
   overflow: hidden;
   transition: all 0.2s ease;
 }
 
 .chart-row:hover {
-  background: rgba(40, 40, 40, 0.9);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(var(--main-color-rgb), 0.04);
+  border-color: rgba(var(--main-color-rgb), 0.15);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .chart-row.is-failed {
-  border-left: 3px solid #ff5252;
+  border-left: 3px solid var(--sub-color);
 }
 
 .chart-row.is-rendering {
-  border: 1px solid rgba(255, 152, 0, 0.3);
+  border: 1px solid rgba(var(--main-color-rgb), 0.3);
 }
 
 .progress-bg {
   position: absolute;
   top: 0; left: 0;
   height: 100%;
-  background: linear-gradient(90deg, rgba(130, 177, 255, 0.08), rgba(130, 177, 255, 0.18));
+  background: linear-gradient(90deg, rgba(var(--main-color-rgb),0.08), rgba(var(--main-color-rgb),0.18));
   z-index: 0;
   transition: width 0.3s linear;
 }
@@ -884,7 +875,7 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
 .row-name {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(var(--main-color-rgb), 0.9);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -895,16 +886,16 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(var(--main-color-rgb), 0.45);
 }
 
 .render-status {
-  color: #82b1ff;
+  color: var(--main-color);
   font-weight: 500;
 }
 
 .error-status {
-  color: #ff5252;
+  color: var(--sub-color);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -917,8 +908,80 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   flex-shrink: 0;
 }
 
-.icon-btn {
-  width: 32px; height: 32px;
+.field-label-sm {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(var(--main-color-rgb), 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ===== Dialogs ===== */
+.md3-dialog {
+  background: transparent !important;
+  backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(var(--main-color-rgb), 0.08) !important;
+  border-radius: 28px !important;
+}
+
+.md3-dialog-full {
+  background: transparent !important;
+  backdrop-filter: blur(24px) !important;
+}
+
+.border-b { border-bottom: 1px solid rgba(var(--main-color-rgb), 0.06) !important; }
+.border-t { border-top: 1px solid rgba(var(--main-color-rgb), 0.06) !important; }
+
+/* ===== Spacing utilities (replacing Vuetify) ===== */
+.pa-0 { padding: 0 !important; }
+.pa-4 { padding: 16px !important; }
+.pa-6 { padding: 24px !important; }
+.h-100 { height: 100% !important; }
+.mb-1 { margin-bottom: 4px !important; }
+.mb-4 { margin-bottom: 16px !important; }
+.mt-4 { margin-top: 16px !important; }
+.mt-2 { margin-top: 8px !important; }
+
+/* ===== Dialogs (custom overlay) ===== */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dialog-fullscreen-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dialog-modal-inner {
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dialog-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  flex-shrink: 0;
+}
+.dialog-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: rgba(var(--main-color-rgb), 0.9);
+  margin: 0;
+}
+.dialog-close-btn {
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -926,45 +989,150 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   background: transparent;
   border-radius: 50%;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.6);
-  transition: all 0.15s ease;
+  transition: background 0.15s ease;
 }
-.icon-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+.dialog-close-btn:hover {
+  background: rgba(var(--main-color-rgb), 0.08);
 }
-.icon-btn:disabled {
-  opacity: 0.3;
-  cursor: default;
+.dialog-body {
+  flex: 1;
+  overflow-y: auto;
 }
-.icon-btn-danger:hover:not(:disabled) {
-  background: rgba(255, 82, 82, 0.15);
-  color: #ff5252;
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
-.field-label-sm {
-  font-size: 12px;
+/* ===== Custom Checkbox ===== */
+.md3-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--sub-color, var(--main-color));
+  flex-shrink: 0;
+}
+
+/* ===== Level Badge (replaces v-chip for level) ===== */
+.level-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.5);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  border: 1px solid rgba(var(--main-color-rgb),0.4);
+  color: var(--main-color);
+  background: transparent;
+  flex-shrink: 0;
 }
 
-/* ===== Dialogs ===== */
-.md3-dialog {
-  background: rgba(28, 28, 28, 0.95) !important;
-  backdrop-filter: blur(20px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 28px !important;
+/* ===== Status Chip (replaces v-chip for status) ===== */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.status-chip.status-pending {
+  background: rgba(var(--main-color-rgb), 0.08);
+  color: rgba(var(--main-color-rgb), 0.6);
+}
+.status-chip.status-rendering {
+  background: rgba(var(--main-color-rgb), 0.15);
+  color: var(--main-color);
+}
+.status-chip.status-done {
+  background: rgba(var(--main-color-rgb), 0.15);
+  color: var(--main-color);
+}
+.status-chip.status-failed {
+  background: rgba(var(--sub-color-rgb), 0.15);
+  color: var(--sub-color);
 }
 
-.md3-dialog-full {
-  background: rgba(20, 20, 20, 0.98) !important;
-  backdrop-filter: blur(20px) !important;
+/* ===== Input Grid (replaces v-row/v-col) ===== */
+.input-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.input-grid-col {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.border-b { border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important; }
-.border-t { border-top: 1px solid rgba(255, 255, 255, 0.06) !important; }
+/* ===== Edit Dialog Two Column Layout ===== */
+.edit-two-col {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+.edit-col-left {
+  flex: 0 0 100%;
+}
+.edit-col-right {
+  flex: 1;
+  min-width: 200px;
+}
+.edit-col-full {
+  flex: 0 0 100%;
+}
+
+/* ===== Divider ===== */
+.hr-divider {
+  border: none;
+  border-top: 1px solid rgba(var(--main-color-rgb), 0.06);
+  margin: 16px 0;
+}
+
+/* ===== Alert Info (replaces v-alert) ===== */
+.alert-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(33, 150, 243, 0.08);
+  border: 1px solid rgba(33, 150, 243, 0.15);
+  border-radius: 12px;
+  color: rgba(var(--main-color-rgb), 0.7);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+/* ===== Button Group (replaces v-btn-toggle) ===== */
+.btn-group {
+  display: inline-flex;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1px solid rgba(var(--main-color-rgb),0.3);
+}
+.group-btn {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  color: rgba(var(--main-color-rgb), 0.6);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+.group-btn:hover {
+  background: rgba(var(--main-color-rgb),0.08);
+}
+.group-btn.is-active {
+  background: rgba(var(--main-color-rgb),0.15);
+  color: var(--main-color);
+}
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {

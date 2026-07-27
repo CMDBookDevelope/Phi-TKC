@@ -446,7 +446,6 @@ pub fn find_ffmpeg() -> Result<Option<String>> {
             }
         }
     }
-
     warn!("Failed to find global ffmpeg. Using bundled ffmpeg");
     Ok(if test(&bundled_ffmpeg) {
         Some(bundled_ffmpeg.to_string_lossy().into_owned())
@@ -455,11 +454,7 @@ pub fn find_ffmpeg() -> Result<Option<String>> {
     })
 }
 
-// ⚠️ 原 render_clionly.rs 中的 pub async fn main() -> Result<()> 已被移除，不再重复定义
-
-pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Result<()> {
-    init_colored_logger();
-    welcome_logger();
+pub async fn main_with_params(params: RenderParams, output_path: PathBuf,  exit_after: bool, log_mode: bool) -> Result<()> {
     unsafe{
         std::env::set_var("EGL_PLATFORM", "surfaceless");
         std::env::remove_var("DISPLAY");
@@ -469,10 +464,18 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
     let mut fs = fs::fs_from_file(&path)?;
     let font = FontArc::try_from_vec(load_file("font.ttf").await?)?;
     let Some(ffmpeg) = find_ffmpeg()? else {
-        error!("FFmpeg not found");
+        if log_mode == true{
+            error!("FFmpeg not found");
+        } else{
+            println!("FFmpeg not found");
+        }
         return Err(anyhow::anyhow!("FFmpeg not found"));
     };
-    debug!("Using ffmpeg: {}", ffmpeg);
+    if log_mode == true{
+        info!("Using ffmpeg: {}", ffmpeg);
+    } else{
+        println!("Using ffmpeg: {}", ffmpeg);
+    }
     let mut painter = TextPainter::new(font);
     let mut config = params.config.to_config();
     config.mods = Mods::AUTOPLAY;
@@ -495,7 +498,11 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
     let offset = chart.offset.max(0.);
     let render_start_time = Instant::now();
 
-    debug!("IPCEvent::StartMixing");
+    if log_mode == true{
+        debug!("IPCEvent::StartMixing");
+    } else{
+        println!("{}", serde_json::to_string(&IPCEvent::StartMixing).unwrap());
+    }
     let mixing_output = NamedTempFile::new()?;
     let target_sample_rate = params.config.target_audio;
     let sample_rate = 44100;
@@ -509,30 +516,57 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
     let frame_duration = 1.0 / fps_f64;
     let audio_delay = params.config.audio_delay_frames as f64 * frame_duration;
 
-    debug!("{}", split_line('=', Some(" Audio/Video Sync Configuration s")));
-    debug!("{}", split_line(' ', Some(format!("Audio delay: {} frames", params.config.audio_delay_frames).as_str())));
-    debug!("{}", split_line(' ', Some(format!("Audio delay: {:.6} seconds", audio_delay).as_str())));
-    debug!("{}",
-        split_line(' ',
-            Some(
-                format!(
-                "Frame duration: {:.6}s @ {}fps",
-                frame_duration, params.config.fps
-                ).as_str()
+    if log_mode == true{
+        debug!("{}", split_line('=', Some(" Audio/Video Sync Configuration s")));
+        debug!("{}", split_line(' ', Some(format!("Audio delay: {} frames", params.config.audio_delay_frames).as_str())));
+        debug!("{}", split_line(' ', Some(format!("Audio delay: {:.6} seconds", audio_delay).as_str())));
+        debug!("{}",
+            split_line(' ',
+                Some(
+                    format!(
+                    "Frame duration: {:.6}s @ {}fps",
+                    frame_duration, params.config.fps
+                    ).as_str()
+                )
             )
-        )
-    );
-    debug!("{}",
-        split_line(' ',
-            Some(
-                format!(
-                    "Sample delay: {} samples @ {}Hz",
-                    (audio_delay * sample_rate_f64).round() as i64, sample_rate
-                ).as_str()
+        );
+        debug!("{}",
+            split_line(' ',
+                Some(
+                    format!(
+                        "Sample delay: {} samples @ {}Hz",
+                        (audio_delay * sample_rate_f64).round() as i64, sample_rate
+                    ).as_str()
+                )
             )
-        )
-    );
-    debug!("{}", split_line('=', None));
+        );
+        debug!("{}", split_line('=', None));
+    } else {
+        println!("{}", split_line('=', Some(" Audio/Video Sync Configuration s")));
+        println!("{}", split_line(' ', Some(format!("Audio delay: {} frames", params.config.audio_delay_frames).as_str())));
+        println!("{}", split_line(' ', Some(format!("Audio delay: {:.6} seconds", audio_delay).as_str())));
+        println!("{}",
+            split_line(' ',
+                Some(
+                    format!(
+                    "Frame duration: {:.6}s @ {}fps",
+                    frame_duration, params.config.fps
+                    ).as_str()
+                )
+            )
+        );
+        println!("{}",
+            split_line(' ',
+                Some(
+                    format!(
+                        "Sample delay: {} samples @ {}Hz",
+                        (audio_delay * sample_rate_f64).round() as i64, sample_rate
+                    ).as_str()
+                )
+            )
+        );
+        println!("{}", split_line('=', None));
+    }
 
     let audio_buffer_length = video_length + audio_delay.abs();
     let mut output = vec![0.0_f32; (audio_buffer_length * sample_rate_f64).ceil() as usize * 2];
@@ -541,18 +575,33 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
         let start_time = Instant::now();
         let original_pos = O - chart.offset.min(0.) as f64;
         let pos = original_pos + audio_delay;
-        debug!(
-            "Music mixing: original_pos={:.6}s, delayed_pos={:.6}s",
-            original_pos, pos
-        );
+        if log_mode == true {
+            debug!(
+                "Music mixing: original_pos={:.6}s, delayed_pos={:.6}s",
+                original_pos, pos
+            );
+        } else {
+            println!(
+                "Music mixing: original_pos={:.6}s, delayed_pos={:.6}s",
+                original_pos, pos
+            );
+        }
         let start_index = (pos * sample_rate_f64).round() as usize * 2;
         let ratio = 1.0 / sample_rate_f64;
         if start_index >= output.len() {
-            warn!(
-                "Music start position {} exceeds output buffer length {}",
-                start_index,
-                output.len()
-            );
+            if log_mode == true {
+                warn!(
+                    "Music start position {} exceeds output buffer length {}",
+                    start_index,
+                    output.len()
+                );
+            } else {
+                println!(
+                    "Music start position {} exceeds output buffer length {}",
+                    start_index,
+                    output.len()
+                );
+            }
         } else {
             let output_ptr = output.as_mut_ptr();
             let max_i = (output.len() - start_index) / 2;
@@ -570,7 +619,12 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
                 time += ratio;
             }
         }
-        debug!("music Time:{:?}", start_time.elapsed());
+        if log_mode == true {
+            debug!("music Time:{:?}", start_time.elapsed());
+        } else {
+            println!("music Time:{:?}", start_time.elapsed());
+        }
+        
     }
 
     let mut place = |pos: f64, clip: &AudioClip, volume: f32| {
@@ -597,10 +651,17 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
         let start_time = Instant::now();
         let offset_f64 = offset as f64;
         let o_offset = O + offset_f64 + audio_delay;
-        debug!(
-            "SFX mixing: offset={:.6}s (includes {:.6}s delay)",
-            o_offset, audio_delay
-        );
+        if log_mode == true{
+            debug!(
+                "SFX mixing: offset={:.6}s (includes {:.6}s delay)",
+                o_offset, audio_delay
+            );
+        } else {
+            println!(
+                "SFX mixing: offset={:.6}s (includes {:.6}s delay)",
+                o_offset, audio_delay
+            );
+        }
         let sfx_click_ptr = &sfx_click as *const _;
         let sfx_drag_ptr = &sfx_drag as *const _;
         let sfx_flick_ptr = &sfx_flick as *const _;
@@ -625,11 +686,19 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
                 }
             }
         }
-        debug!("sfx Time:{:?}", start_time.elapsed());
+        if log_mode == true{
+            debug!("sfx Time:{:?}", start_time.elapsed());
+        } else {
+            println!("sfx Time:{:?}", start_time.elapsed());
+        }
     }
 
     let mut pos = O + length + A + audio_delay;
-    debug!("Ending music start: {:.6}s", pos);
+    if log_mode == true{
+        debug!("Ending music start: {:.6}s", pos);
+    } else {
+        println!("Ending music start: {:.6}s", pos);
+    }
     while place(pos, &ending, volume_music) != 0 && params.config.ending_length > 0.1 {
         pos += ending.frame_count() as f64 / sample_rate_f64;
     }
@@ -638,18 +707,33 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
     let audio_format = params.config.audio_format.to_lowercase();
     let supported_formats = ["flac", "mp3", "aac", "opus", "wav"];
     if !supported_formats.contains(&audio_format.as_str()) {
-        error!(
-            "Unsupported audio format: {}. Supported formats are: {}",
-            audio_format,
-            supported_formats.join(", ")
-        );
+        if log_mode == true{
+            error!(
+                "Unsupported audio format: {}. Supported formats are: {}",
+                audio_format,
+                supported_formats.join(", ")
+            );
+        } else {
+            println!(
+                "Unsupported audio format: {}. Supported formats are: {}",
+                audio_format,
+                supported_formats.join(", ")
+            );
+        }
     }
     if let Some(bit) = audio_bit {
         if ![16, 24, 32].contains(&bit) {
-            error!(
-                "Invalid audio bit depth: {}. Supported values are 16, 24, 32.",
-                bit
-            );
+            if log_mode == true{
+                error!(
+                    "Invalid audio bit depth: {}. Supported values are 16, 24, 32.",
+                    bit
+                );
+            } else {
+                println!(
+                    "Invalid audio bit depth: {}. Supported values are 16, 24, 32.",
+                    bit
+                );
+            }
             return Err(anyhow::anyhow!("Invalid audio bit depth: {}. Supported values are 16, 24, 32.", bit));
         }
         if audio_format != "wav" {
@@ -670,10 +754,18 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
             "opus" => ("libopus".to_string(), "opus".to_string()),
             "wav" => ("pcm_f16le".to_string(), "wav".to_string()),
             _ => {
-                error!(
-                    "Unknown audio format '{}', using AAC/MP4 as default",
-                    audio_format
-                );
+                if log_mode == true{
+                    error!(
+                        "Unknown audio format '{}', using AAC/MP4 as default",
+                        audio_format
+                    );
+                } else{
+                    println!(
+                        "Unknown audio format '{}', using AAC/MP4 as default",
+                        audio_format
+                    );
+                    
+                }
                 ("aac".to_string(), "mp4".to_string())
             }
         }
@@ -757,8 +849,12 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
         ProgressStyle::default_bar()
             .progress_chars("#>_"),
     );
-    debug!("progress bar successfully created");
-    log::info!("IPCEvent::StartRender({})", frames);
+    if log_mode == true{
+        debug!("progress bar successfully created");
+        log::info!("IPCEvent::StartRender({})", frames);
+    } else{
+        println!("{}", serde_json::to_string(&IPCEvent::StartRender(frames)).unwrap());
+    }
 
     let test_encoder = |ffmpeg: &Path, encoder: &str| -> Result<(bool, String)> {
         let mut cmd = Command::new(ffmpeg);
@@ -1330,34 +1426,61 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
         .find(|&&(_name, available, _)| available)
         .map(|&(name, _, _)| name)
         .expect("At least one software encoder is available.");
-
-    debug!("{}", split_line('=', Some(" Encoder Selection ")));
-    debug!("{}", split_line(' ', Some(format!("Video codec: {}", params.config.video_codec).as_str())));
-    debug!("{}", split_line(' ', Some(format!("User preference: {}", params.config.encoder).as_str())));
-    debug!("{}", split_line(' ', Some(" Encoder Availability ")));
-    debug!("{}", split_line(' ', Some(format!("h264_nvenc: {}", encoder_availability.h264_nvenc).as_str())));
-    debug!("{}", split_line(' ', Some(format!("h264_qsv: {}", encoder_availability.h264_qsv).as_str())));
-    debug!("{}", split_line(' ', Some(format!("h264_amf: {}", encoder_availability.h264_amf).as_str())));
-    debug!("{}", split_line(' ', Some(format!("h264_vulkan: {}", encoder_availability.h264_vulkan).as_str())));
-    debug!("{}", split_line(' ', Some(format!("hevc_nvenc: {}", encoder_availability.hevc_nvenc).as_str())));
-    debug!("{}", split_line(' ', Some(format!("hevc_qsv: {}", encoder_availability.hevc_qsv).as_str())));
-    debug!("{}", split_line(' ', Some(format!("hevc_amf: {}", encoder_availability.hevc_amf).as_str())));
-    debug!("{}", split_line(' ', Some(format!("hevc_vulkan: {}", encoder_availability.hevc_vulkan).as_str())));
-    debug!("{}", split_line(' ', Some(format!("av1_nvenc: {}", encoder_availability.av1_nvenc).as_str())));
-    debug!("{}", split_line(' ', Some(format!("av1_qsv: {}", encoder_availability.av1_qsv).as_str())));
-    debug!("{}", split_line(' ', Some(format!("av1_amf: {}", encoder_availability.av1_amf).as_str())));
-    debug!("{}", split_line(' ', Some(format!("av1_vulkan: {}", encoder_availability.av1_vulkan).as_str())));
-    debug!("{}", split_line('=', None));
-    if !hw_errors.is_empty() {
-        error!("{}", split_line('-', Some(" Encoder Errors ")));
-        for error in &hw_errors {
-            error!("    {}", error);
+    if log_mode == true{
+        debug!("{}", split_line('=', Some(" Encoder Selection ")));
+        debug!("{}", split_line(' ', Some(format!("Video codec: {}", params.config.video_codec).as_str())));
+        debug!("{}", split_line(' ', Some(format!("User preference: {}", params.config.encoder).as_str())));
+        debug!("{}", split_line(' ', Some(" Encoder Availability ")));
+        debug!("{}", split_line(' ', Some(format!("h264_nvenc: {}", encoder_availability.h264_nvenc).as_str())));
+        debug!("{}", split_line(' ', Some(format!("h264_qsv: {}", encoder_availability.h264_qsv).as_str())));
+        debug!("{}", split_line(' ', Some(format!("h264_amf: {}", encoder_availability.h264_amf).as_str())));
+        debug!("{}", split_line(' ', Some(format!("h264_vulkan: {}", encoder_availability.h264_vulkan).as_str())));
+        debug!("{}", split_line(' ', Some(format!("hevc_nvenc: {}", encoder_availability.hevc_nvenc).as_str())));
+        debug!("{}", split_line(' ', Some(format!("hevc_qsv: {}", encoder_availability.hevc_qsv).as_str())));
+        debug!("{}", split_line(' ', Some(format!("hevc_amf: {}", encoder_availability.hevc_amf).as_str())));
+        debug!("{}", split_line(' ', Some(format!("hevc_vulkan: {}", encoder_availability.hevc_vulkan).as_str())));
+        debug!("{}", split_line(' ', Some(format!("av1_nvenc: {}", encoder_availability.av1_nvenc).as_str())));
+        debug!("{}", split_line(' ', Some(format!("av1_qsv: {}", encoder_availability.av1_qsv).as_str())));
+        debug!("{}", split_line(' ', Some(format!("av1_amf: {}", encoder_availability.av1_amf).as_str())));
+        debug!("{}", split_line(' ', Some(format!("av1_vulkan: {}", encoder_availability.av1_vulkan).as_str())));
+        debug!("{}", split_line('=', None));
+        if !hw_errors.is_empty() {
+            error!("{}", split_line('-', Some(" Encoder Errors ")));
+            for error in &hw_errors {
+                error!("    {}", error);
+            }
         }
+        log::info!("{}", split_line('=', None));
+        log::info!("{}", split_line(' ', Some(format!("Selected encoder: {}", ffmpeg_encoder).as_str())));
+        log::info!("{}", split_line('=', None));
+    } else {
+        println!("{}", split_line('=', Some(" Encoder Selection ")));
+        println!("{}", split_line(' ', Some(format!("Video codec: {}", params.config.video_codec).as_str())));
+        println!("{}", split_line(' ', Some(format!("User preference: {}", params.config.encoder).as_str())));
+        println!("{}", split_line(' ', Some(" Encoder Availability ")));
+        println!("{}", split_line(' ', Some(format!("h264_nvenc: {}", encoder_availability.h264_nvenc).as_str())));
+        println!("{}", split_line(' ', Some(format!("h264_qsv: {}", encoder_availability.h264_qsv).as_str())));
+        println!("{}", split_line(' ', Some(format!("h264_amf: {}", encoder_availability.h264_amf).as_str())));
+        println!("{}", split_line(' ', Some(format!("h264_vulkan: {}", encoder_availability.h264_vulkan).as_str())));
+        println!("{}", split_line(' ', Some(format!("hevc_nvenc: {}", encoder_availability.hevc_nvenc).as_str())));
+        println!("{}", split_line(' ', Some(format!("hevc_qsv: {}", encoder_availability.hevc_qsv).as_str())));
+        println!("{}", split_line(' ', Some(format!("hevc_amf: {}", encoder_availability.hevc_amf).as_str())));
+        println!("{}", split_line(' ', Some(format!("hevc_vulkan: {}", encoder_availability.hevc_vulkan).as_str())));
+        println!("{}", split_line(' ', Some(format!("av1_nvenc: {}", encoder_availability.av1_nvenc).as_str())));
+        println!("{}", split_line(' ', Some(format!("av1_qsv: {}", encoder_availability.av1_qsv).as_str())));
+        println!("{}", split_line(' ', Some(format!("av1_amf: {}", encoder_availability.av1_amf).as_str())));
+        println!("{}", split_line(' ', Some(format!("av1_vulkan: {}", encoder_availability.av1_vulkan).as_str())));
+        println!("{}", split_line('=', None));
+        if !hw_errors.is_empty() {
+            println!("{}", split_line('-', Some(" Encoder Errors ")));
+            for error in &hw_errors {
+                println!("    {}", error);
+            }
+        }
+        println!("{}", split_line('=', None));
+        println!("{}", split_line(' ', Some(format!("Selected encoder: {}", ffmpeg_encoder).as_str())));
+        println!("{}", split_line('=', None));
     }
-    log::info!("{}", split_line('=', None));
-    log::info!("{}", split_line(' ', Some(format!("Selected encoder: {}", ffmpeg_encoder).as_str())));
-    log::info!("{}", split_line('=', None));
-
     let ffmpeg_preset = match ffmpeg_encoder {
         "h264_amf" | "hevc_amf" | "av1_amf" => "-quality",
         "h264_vulkan" | "hevc_vulkan" | "av1_vulkan" => "-preset",
@@ -1427,36 +1550,70 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
             || (params.config.video_codec == "hevc" && !hevc_supported)
             || (params.config.video_codec == "av1" && !av1_supported)
         {
-            error!("{}", tl!("no-hwacc"));
-            error!("Hardware detection summary:");
-            error!("  - NVIDIA: {}", hw_detected.h264_nvenc);
-            error!("  - Intel Quick Sync: {}", hw_detected.h264_qsv);
-            error!("  - AMD AMF: {}", hw_detected.h264_amf);
-            error!("  - Vulkan: {}", hw_detected.h264_vulkan);
-            error!("Encoder test results:");
-            error!("  - h264_nvenc: {}", if encoder_availability.h264_nvenc { "SUCCESS" } else { "FAILED" });
-            error!("  - hevc_nvenc: {}", if encoder_availability.hevc_nvenc { "SUCCESS" } else { "FAILED" });
-            error!("  - av1_nvenc: {}", if encoder_availability.av1_nvenc { "SUCCESS" } else { "FAILED" });
-            error!("  - h264_qsv: {}", if encoder_availability.h264_qsv { "SUCCESS" } else { "FAILED" });
-            error!("  - hevc_qsv: {}", if encoder_availability.hevc_qsv { "SUCCESS" } else { "FAILED" });
-            error!("  - av1_qsv: {}", if encoder_availability.av1_qsv { "SUCCESS" } else { "FAILED" });
-            error!("  - h264_amf: {}", if encoder_availability.h264_amf { "SUCCESS" } else { "FAILED" });
-            error!("  - hevc_amf: {}", if encoder_availability.hevc_amf { "SUCCESS" } else { "FAILED" });
-            error!("  - av1_amf: {}", if encoder_availability.av1_amf { "SUCCESS" } else { "FAILED" });
-            error!("  - h264_vulkan: {}", if encoder_availability.h264_vulkan { "SUCCESS" } else { "FAILED" });
-            error!("  - hevc_vulkan: {}", if encoder_availability.hevc_vulkan { "SUCCESS" } else { "FAILED" });
-            error!("  - av1_vulkan: {}", if encoder_availability.av1_vulkan { "SUCCESS" } else { "FAILED" });
-            error!("  - h264_cuvid: {}", if encoder_availability.h264_cuvid { "SUCCESS" } else { "FAILED" });
-            error!("  - hevc_cuvid: {}", if encoder_availability.hevc_cuvid { "SUCCESS" } else { "FAILED" });
-            error!("  - av1_cuvid: {}", if encoder_availability.av1_cuvid { "SUCCESS" } else { "FAILED" });
+            if log_mode == true {
+                error!("{}", tl!("no-hwacc"));
+                error!("Hardware detection summary:");
+                error!("  - NVIDIA: {}", hw_detected.h264_nvenc);
+                error!("  - Intel Quick Sync: {}", hw_detected.h264_qsv);
+                error!("  - AMD AMF: {}", hw_detected.h264_amf);
+                error!("  - Vulkan: {}", hw_detected.h264_vulkan);
+                error!("Encoder test results:");
+                error!("  - h264_nvenc: {}", if encoder_availability.h264_nvenc { "SUCCESS" } else { "FAILED" });
+                error!("  - hevc_nvenc: {}", if encoder_availability.hevc_nvenc { "SUCCESS" } else { "FAILED" });
+                error!("  - av1_nvenc: {}", if encoder_availability.av1_nvenc { "SUCCESS" } else { "FAILED" });
+                error!("  - h264_qsv: {}", if encoder_availability.h264_qsv { "SUCCESS" } else { "FAILED" });
+                error!("  - hevc_qsv: {}", if encoder_availability.hevc_qsv { "SUCCESS" } else { "FAILED" });
+                error!("  - av1_qsv: {}", if encoder_availability.av1_qsv { "SUCCESS" } else { "FAILED" });
+                error!("  - h264_amf: {}", if encoder_availability.h264_amf { "SUCCESS" } else { "FAILED" });
+                error!("  - hevc_amf: {}", if encoder_availability.hevc_amf { "SUCCESS" } else { "FAILED" });
+                error!("  - av1_amf: {}", if encoder_availability.av1_amf { "SUCCESS" } else { "FAILED" });
+                error!("  - h264_vulkan: {}", if encoder_availability.h264_vulkan { "SUCCESS" } else { "FAILED" });
+                error!("  - hevc_vulkan: {}", if encoder_availability.hevc_vulkan { "SUCCESS" } else { "FAILED" });
+                error!("  - av1_vulkan: {}", if encoder_availability.av1_vulkan { "SUCCESS" } else { "FAILED" });
+                error!("  - h264_cuvid: {}", if encoder_availability.h264_cuvid { "SUCCESS" } else { "FAILED" });
+                error!("  - hevc_cuvid: {}", if encoder_availability.hevc_cuvid { "SUCCESS" } else { "FAILED" });
+                error!("  - av1_cuvid: {}", if encoder_availability.av1_cuvid { "SUCCESS" } else { "FAILED" });
 
-            if !hw_errors.is_empty() {
-                error!("Detailed error logs:");
-                for (i, e) in hw_errors.iter().enumerate() {
-                    error!("  {}. {}", i + 1, e);
+                if !hw_errors.is_empty() {
+                    error!("Detailed error logs:");
+                    for (i, e) in hw_errors.iter().enumerate() {
+                        error!("  {}. {}", i + 1, e);
+                    }
+                } else {
+                    error!("No hardware encoders were tested (all detection failed).");
                 }
             } else {
-                error!("No hardware encoders were tested (all detection failed).");
+                println!("{}", tl!("no-hwacc"));
+                println!("Hardware detection summary:");
+                println!("  - NVIDIA: {}", hw_detected.h264_nvenc);
+                println!("  - Intel Quick Sync: {}", hw_detected.h264_qsv);
+                println!("  - AMD AMF: {}", hw_detected.h264_amf);
+                println!("  - Vulkan: {}", hw_detected.h264_vulkan);
+                println!("Encoder test results:");
+                println!("  - h264_nvenc: {}", if encoder_availability.h264_nvenc { "SUCCESS" } else { "FAILED" });
+                println!("  - hevc_nvenc: {}", if encoder_availability.hevc_nvenc { "SUCCESS" } else { "FAILED" });
+                println!("  - av1_nvenc: {}", if encoder_availability.av1_nvenc { "SUCCESS" } else { "FAILED" });
+                println!("  - h264_qsv: {}", if encoder_availability.h264_qsv { "SUCCESS" } else { "FAILED" });
+                println!("  - hevc_qsv: {}", if encoder_availability.hevc_qsv { "SUCCESS" } else { "FAILED" });
+                println!("  - av1_qsv: {}", if encoder_availability.av1_qsv { "SUCCESS" } else { "FAILED" });
+                println!("  - h264_amf: {}", if encoder_availability.h264_amf { "SUCCESS" } else { "FAILED" });
+                println!("  - hevc_amf: {}", if encoder_availability.hevc_amf { "SUCCESS" } else { "FAILED" });
+                println!("  - av1_amf: {}", if encoder_availability.av1_amf { "SUCCESS" } else { "FAILED" });
+                println!("  - h264_vulkan: {}", if encoder_availability.h264_vulkan { "SUCCESS" } else { "FAILED" });
+                println!("  - hevc_vulkan: {}", if encoder_availability.hevc_vulkan { "SUCCESS" } else { "FAILED" });
+                println!("  - av1_vulkan: {}", if encoder_availability.av1_vulkan { "SUCCESS" } else { "FAILED" });
+                println!("  - h264_cuvid: {}", if encoder_availability.h264_cuvid { "SUCCESS" } else { "FAILED" });
+                println!("  - hevc_cuvid: {}", if encoder_availability.hevc_cuvid { "SUCCESS" } else { "FAILED" });
+                println!("  - av1_cuvid: {}", if encoder_availability.av1_cuvid { "SUCCESS" } else { "FAILED" });
+
+                if !hw_errors.is_empty() {
+                    println!("Detailed error logs:");
+                    for (i, e) in hw_errors.iter().enumerate() {
+                        println!("  {}. {}", i + 1, e);
+                    }
+                } else {
+                    println!("No hardware encoders were tested (all detection failed).");
+                }
             }
             return Err(anyhow::anyhow!(tl!("no-hwacc")));
         }
@@ -1553,12 +1710,16 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
     let mut input = proc.stdin.take().unwrap();
 
     let rgba_size = vw as usize * vh as usize * 4;
-    debug!("RGBA buffer size: {}", rgba_size);
-
     const MAX_PBO_COUNT: usize = 4;
     let n = MAX_PBO_COUNT.min(fps as usize).max(2);
     let mut pbos: Vec<GLuint> = vec![0; n];
-    debug!("Using {} PBOs for async readback (buffering strategy)", n);
+    if log_mode == true {
+        debug!("Using {} PBOs for async readback (buffering strategy)", n);
+        debug!("RGBA buffer size: {}", rgba_size);
+    } else {
+        println!("Using {} PBOs for async readback (buffering strategy)", n);
+        println!("RGBA buffer size: {}", rgba_size);
+    }
 
     unsafe {
         use miniquad::gl::*;
@@ -1630,7 +1791,11 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
                     input.write_all(std::slice::from_raw_parts(src as *const u8, rgba_size))?;
                     glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
                 } else {
-                    error!("Failed to map PBO at frame {}", frame);
+                    if log_mode == true {
+                        error!("Failed to map PBO at frame {}", frame);
+                    } else {
+                        println!("Failed to map PBO at frame {}", frame);
+                    }
                     return Err(anyhow::anyhow!("Failed to map PBO at frame {}", frame));
                 }
                 glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -1655,6 +1820,11 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
         
         previous_pbo = current_pbo;
         current_pbo = (current_pbo + 1) % n;
+
+        // Send Frame event for GUI progress tracking
+        if log_mode == false {
+            println!("{}", serde_json::to_string(&IPCEvent::Frame).unwrap());
+        }
     }
 
     for _ in 0..n {
@@ -1678,19 +1848,29 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
 
     drop(input);
     proc.wait()?;
-
-    log::info!("Render Time: {:.2?}", render_start_time.elapsed());
-    log::info!(
-        "Average FPS: {:.2}",
-        total_frames as f64 / render_start_time.elapsed().as_secs_f64()
-    );
+    if log_mode == true {
+        log::info!("Render Time: {:.2?}", render_start_time.elapsed());
+        log::info!(
+            "Average FPS: {:.2}",
+            total_frames as f64 / render_start_time.elapsed().as_secs_f64()
+        );
+    } else {
+        println!("Render Time: {:.2?}", render_start_time.elapsed());
+        println!(
+            "Average FPS: {:.2}",
+            total_frames as f64 / render_start_time.elapsed().as_secs_f64()
+        );
+    }
 
     unsafe {
         use miniquad::gl::*;
         glDeleteBuffers(n as _, pbos.as_ptr());
     }
-
-    debug!("IPCEvent::Done(render_start_time.elapsed().as_secs_f64())");
+    if log_mode == true {
+        debug!("IPCEvent::Done({:.2})", render_start_time.elapsed().as_secs_f64());
+    } else {
+        println!("{}", serde_json::to_string(&IPCEvent::Done(render_start_time.elapsed().as_secs_f64())).unwrap());
+    }
     
     println!(
         "\n\n\n{} {}{:?}",
@@ -1700,9 +1880,10 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf) -> Res
     );
     
     prpr::cleanup_billboard();
-    std::process::exit(0);
-    
-    return Ok(());
+    if exit_after {
+        std::process::exit(0);
+    }
+    Ok(())
 }
 
 use clap::Parser;
@@ -1785,8 +1966,9 @@ pub async fn render_cli(args: CliArgs) -> Result<()> {
         info,
         config,
     };
-
-    main_with_params(params, PathBuf::from(&args.output)).await
+    init_colored_logger();
+    welcome_logger();
+    main_with_params(params, PathBuf::from(&args.output), true, true).await
 }
 
 pub fn init_colored_logger() {
@@ -1877,4 +2059,20 @@ fn split_line_println(fill: char, title: Option<&str>) -> String {
     let left = fill_str.repeat(left_pad);
     let right = fill_str.repeat(right_pad);
     format!("{left}{text}{right}")
+}
+
+pub async fn main() -> Result<()> {
+    // Set assets folder from command line arg (passed by parent GUI process)
+    let assets_path = std::env::args().nth(2).unwrap_or_else(|| "/usr/lib/ptkc-assets".into());
+    set_pc_assets_folder(&assets_path);
+
+    use tokio::io::AsyncBufReadExt;
+    let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
+    let mut line = String::new();
+    reader.read_line(&mut line).await?;
+    let params: RenderParams = serde_json::from_str(line.trim())?;
+    line.clear();
+    reader.read_line(&mut line).await?;
+    let output_path: PathBuf = serde_json::from_str(line.trim())?;
+    main_with_params(params, output_path, true, false).await
 }

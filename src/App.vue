@@ -1,4 +1,15 @@
 <template>
+  <!-- Toast 容器 -->
+  <div v-glass class="glass fluent-glass toast-container">
+    <div
+      v-for="msg in toastMessages"
+      :key="msg.id"
+      class="toast-item"
+      :class="msg.type"
+    >
+      {{ msg.text }}
+    </div>
+  </div>
   <div class="custom-bg-layer" :style="backgroundStyle"></div>
   <div class="custom-bg-overlay"></div>
 
@@ -14,7 +25,6 @@
       :show-back="false"
       :full-size-display="500"
       theme="dark"
-      :foreground="subColor"
       title="Phi-TKC"
       background="#00000000"
       :setting-title="t('setting')"
@@ -64,7 +74,8 @@ const selectedKey = ref(route.name as string)
 const sliderIndex = ref(-1)
 
 // ===== 主题颜色（提供全局） =====
-import { mainColor, bgColor, subColor } from './stores/colorStore'
+import { mainColor, bgColor, subColor, loadCustomColors } from './colorStore'
+import { show } from '@tauri-apps/api/app'
 
 // ===== 背景相关 =====
 const customBackground = ref<string | null>(null)
@@ -135,14 +146,12 @@ function updateNavigation(routeName: string) {
         byteArr[i] = binaryStr.charCodeAt(i)
       }
 
-      // 3. 跨平台拼接正确保存路径
+      // 3. 写入文件（使用 BaseDirectory 确保覆盖）
       const fileName = 'fixed_background.png'
+      await writeFile(fileName, byteArr, { baseDir: BaseDirectory.AppData })
+
+      // 4. 更新全局状态、缓存、派发事件
       const savePath = await join(await appDataDir(), fileName)
-
-      // 4. 写入文件（默认覆盖同路径文件）
-      await writeFile(savePath, byteArr)
-
-      // 5. 更新全局状态、缓存、派发事件
       customBackground.value = savePath
       localStorage.setItem('customBackground', savePath)
       window.dispatchEvent(
@@ -264,17 +273,6 @@ async function loadCustomBackground(path: string) {
   }
 }
 
-// ---- 读取用户自定义颜色 ----
-function loadCustomColors() {
-  const m = localStorage.getItem('mainColor')
-  const b = localStorage.getItem('bgColor')
-  const s = localStorage.getItem('subColor')
-  if (m) mainColor.value = m
-  if (b) bgColor.value = b
-  if (s) subColor.value = s
-}
-provide('themeColors', { mainColor, bgColor, subColor })
-
 // ---- 将颜色注入到全局 ----
 provide('themeColors', {
   mainColor,
@@ -316,13 +314,32 @@ window.loadApiBackground = loadApiBackground
 window.loadCustomBackground = loadCustomBackground
 // 注意：refreshApiBackground 和 fixCurrentBackground 已在上方赋值
 
+  // ---- Toast 系统 ----
+  interface ToastMessage {
+    id: number;
+    text: string;
+    type: 'success' | 'warning' | 'error';
+  }
+  const toastMessages = ref<ToastMessage[]>([]);
+  let toastId = 0;
+  
+  function showToast(text: string, type: 'success' | 'warning' | 'error' = 'success') {
+    const id = toastId++;
+    toastMessages.value.push({ id, text, type });
+    setTimeout(() => {
+      toastMessages.value = toastMessages.value.filter(msg => msg.id !== id);
+    }, 3000);
+  }
+
+window.showToast = showToast
+
 // ===== 生命周期 =====
 onMounted(async () => {
   document.addEventListener('contextmenu', (e) => e.preventDefault())
   const stored = localStorage.getItem('customBackground')
   if (stored && stored !== 'null') {
     await loadCustomBackground(stored)
-  } else
+  }
 
   // 恢复用户自定义颜色（若存在则覆盖提取的颜色）
   loadCustomColors()
@@ -405,6 +422,7 @@ onBeforeUnmount(() => {
 }
 
 .nav-view:deep(*) {
+  border-radius: 0px !important;
   backdrop-filter: none !important;
   box-shadow: none !important;
   border: none !important;
@@ -413,9 +431,41 @@ onBeforeUnmount(() => {
   font-weight: 600 !important;
 }
 
+  /* Toast 样式 */
+  .toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 360px;
+    pointer-events: none;
+  }
+  .toast-item {
+    padding: 12px 20px;
+    border-radius: 12px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    pointer-events: auto;
+    animation: slideIn 0.3s ease;
+  }
+  .toast-item.success {
+    border-left: 4px solid var(--main-color);
+  }
+  .toast-item.warning {
+    border-left: 4px solid var(--main-color);
+  }
+  .toast-item.error {
+    border-left: 4px solid var(--sub-color);
+  }
+
 /* ===== 响应式 ===== */
 @media (max-width: 600px) {
   .tklogo { width: 28px; }
   .poslogo { padding: -5px -5px; }
+  .toast-container { top: 10px; right: 10px; max-width: 280px; }
 }
 </style>
