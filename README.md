@@ -128,7 +128,7 @@ phi-tk-cli # or wrapper.sh \
 
 ### 运行
 ```bash
-./phi-tkc #后面添加渲染染变量
+./phi-tkc #后面添加渲染变量
 ```
 
 ## 项目结构
