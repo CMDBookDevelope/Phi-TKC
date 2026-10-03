@@ -13,6 +13,7 @@
     choose:
       archive: Archive
       folder: Folder
+      filter-name: Chart file
 
     chart-file: Chart file
     choose-drop: Drag and drop chart file here
@@ -23,6 +24,7 @@
     composer: Composer
     illustrator: Illustrator
     level: Level
+    aspect: Aspect ratio
     dim: Background dim
     hold_cover: Hold Head Partial Cover
 
@@ -47,7 +49,7 @@
     next-chart: Render Next Chart
     render-status: 'Progress: {progress}% | FPS: {fps} | ETA: {estimate}'
 
-    ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and set Path correctly.
+    ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and put it in the specific folder.
 
   zh-CN:
     already-running: Phi TKC 已经在运行
@@ -63,6 +65,7 @@
     choose:
       archive: 压缩包
       folder: 文件夹
+      filter-name: 谱面文件
 
     chart-file: 谱面文件
     choose-drop: 拖拽谱面文件到此处
@@ -73,6 +76,7 @@
     composer: 曲师
     illustrator: 画师
     level: 难度
+    aspect: 宽高比
     dim: 背景昏暗程度
     hold_cover: Hold 头部遮罩
 
@@ -82,38 +86,56 @@
     width: 宽
     height: 高
 
+    file:
+      title: 文件
+      chart: 谱面文件（留空则使用默认）
+      music: 音乐（留空则使用默认）
+      illustration: 插画（留空则使用默认）
+
     preview: 演示
     render: 渲染
     play: 游玩
 
     render-started: 视频开始渲染了！
-    see-tasks: 任务列表
-    next-chart: 下一个
+    see-tasks: 查看任务列表
+    next-chart: 渲染下一个谱面
     render-status: '进度：{progress}% | FPS: {fps} | 预计：{estimate}'
 
-    ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并设置 Path。
+    ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并放置在指定文件夹内。
 
 </i18n>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { watch } from 'vue';
-import { invoke } from '@tauri-apps/api/core';
-import { convertFileSrc } from '@tauri-apps/api/core';
-import { event } from '@tauri-apps/api';
-import { anyFilter, isString } from './common';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { toastError, toast, anyFilter, isString, RULES } from './common';
 import type { ChartInfo, FileDropEvent, Task } from './model';
+import { VForm } from 'vuetify/components';
 import ConfigView from './components/ConfigView.vue';
 import moment from 'moment';
 import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
-import { listen } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import gsap from 'gsap';
-import { bgColor, mainColor, subColor } from './colorStore';
 
 const { t } = useI18n();
+
+// Tauri's `listen` resolves asynchronously, so a component unmounted before it settles
+// must still release the handle — hence the `disposed` guard.
+let disposed = false;
+const unlistenFns: UnlistenFn[] = [];
+
+function track(pending: Promise<UnlistenFn>) {
+  pending.then((unlisten) => (disposed ? unlisten() : unlistenFns.push(unlisten))).catch((e) => console.error('Failed to register listener:', e));
+}
+
+onUnmounted(() => {
+  disposed = true;
+  unlistenFns.forEach((unlisten) => unlisten());
+  unlistenFns.length = 0;
+});
 
 if (!(await invoke('is_the_only_instance'))) {
   await dialog.message(t('already-running'));
@@ -127,7 +149,7 @@ const stepIndex = ref(1),
   step = computed(() => steps[stepIndex.value - 1]);
 
 const chartInfo = ref<ChartInfo>();
-const pstBackgroundDim = ref(0)
+const pstBackgroundDim = ref(0);
 let chartPath = '';
 
 const choosingChart = ref(false),
@@ -136,18 +158,10 @@ const choosingChart = ref(false),
 const flipCardRef = ref<HTMLElement>();
 
 function handleDimChange(val: number) {
-  // 1. 先更新中间临时变量
-  pstBackgroundDim.value = val
-
-  // 2. 判断chartInfo存在再赋值，避免空报错
-    if (chartInfo.value) {
-      chartInfo.value.backgroundDim = val / 100
-    }
+  pstBackgroundDim.value = val;
+  if (chartInfo.value) {
+    chartInfo.value.backgroundDim = val / 100;
   }
-
-// 页面初始化时同步初始值（双向同步兜底）
-if (chartInfo.value) {
-pstBackgroundDim.value = chartInfo.value.backgroundDim * 100
 }
 
 async function chooseChart(folder?: boolean) {
@@ -192,11 +206,13 @@ async function loadChart(file: string) {
         break;
       }
     }
+    // Keep the Phi-TKC dim slider in sync with the freshly parsed chart.
+    pstBackgroundDim.value = Math.round(chartInfo.value.backgroundDim * 100);
 
     await nextTick();
     performFlip();
   } catch (e) {
-    showToast(e, 'error');
+    toastError(e);
   } finally {
     parsingChart.value = false;
   }
@@ -224,7 +240,7 @@ function unflipCard() {
 const aspectWidth = ref('0'),
   aspectHeight = ref('0');
 
-const form = ref();
+const form = ref<VForm>();
 
 const configView = ref<typeof ConfigView>();
 async function buildParams() {
@@ -258,7 +274,7 @@ async function postRender() {
     if (!(await invoke('test_ffmpeg'))) {
       await dialog.message(t('ffmpeg-not-found'));
       await invoke('open_app_folder');
-      await shell.open('https://mivik.moe/ffmpeg-windows/');
+      await shell.open('https://github.com/BtbN/FFmpeg-Builds/releases');
       return false;
     }
     let params = await buildParams();
@@ -267,7 +283,7 @@ async function postRender() {
     await invoke('post_render', { params, outputPath: outputPath || null });
     return true;
   } catch (e) {
-    showToast(e, 'error');
+    toastError(e);
     return false;
   }
 }
@@ -280,7 +296,7 @@ async function previewChart() {
     await invoke('preview_chart', { params });
     return true;
   } catch (e) {
-    showToast(e, 'error');
+    toastError(e);
     return false;
   }
 }
@@ -293,7 +309,7 @@ async function playChart() {
     await invoke('preview_chart', { params });
     return true;
   } catch (e) {
-    showToast(e, 'error');
+    toastError(e);
     return false;
   }
 }
@@ -303,29 +319,34 @@ const renderMsg = ref(''),
   renderDuration = ref<number>();
 const renderCover = ref<string | null>(null);
 let coverPollInterval: ReturnType<typeof setInterval> | null = null;
-event.listen('render-msg', (msg) => (renderMsg.value = msg.payload as string));
-event.listen('render-progress', (msg) => {
-  let payload = msg.payload as { progress: number; fps: number; estimate: number };
-  renderMsg.value = t('render-status', {
-    progress: (payload.progress * 100).toFixed(2),
-    fps: payload.fps,
-    estimate: moment.duration(payload.estimate, 'seconds').humanize(true, { ss: 1 }),
-  });
-  renderProgress.value = payload.progress * 100;
-});
-
-event.listen('render-done', (msg) => {
-  stepIndex.value++;
-  renderDuration.value = Math.round(msg.payload as number);
-});
+track(listen('render-msg', (msg) => (renderMsg.value = msg.payload as string)));
+track(
+  listen('render-progress', (msg) => {
+    let payload = msg.payload as { progress: number; fps: number; estimate: number };
+    renderMsg.value = t('render-status', {
+      progress: (payload.progress * 100).toFixed(2),
+      fps: payload.fps,
+      estimate: moment.duration(payload.estimate, 'seconds').humanize(true, { ss: 1 }),
+    });
+    renderProgress.value = payload.progress * 100;
+  }),
+);
+track(
+  listen('render-done', (msg) => {
+    stepIndex.value++;
+    renderDuration.value = Math.round(msg.payload as number);
+  }),
+);
 
 async function fetchRenderCover() {
   try {
     const tasks = await invoke<Task[]>('get_tasks');
     if (tasks && tasks.length > 0) {
-      const task = tasks.find(t => t.path === chartPath);
+      const task = tasks.find((t) => t.path === chartPath);
       if (task?.cover) {
         renderCover.value = task.cover;
+        // The cover never changes once resolved — no reason to keep hitting the backend.
+        stopCoverPolling();
       }
     }
   } catch (e) {
@@ -355,20 +376,19 @@ onUnmounted(() => stopCoverPolling());
 
 async function moveNext() {
   if (step.value === 'config') {
-    // VFluent3 v-form无validate API，手动校验必填字段
-    if (!chartInfo.value) {
-      showToast(t('has-error'), 'error');
+    // The config step uses plain <input class="md3-field"> elements, which Vuetify's
+    // `v-form` cannot validate (it only knows about its own inputs), so `validate()`
+    // alone would always pass. Check the required fields explicitly.
+    const required = [chartInfo.value?.name, chartInfo.value?.level, chartInfo.value?.charter];
+    if (required.some((value) => RULES.non_empty(value) !== true)) {
+      toast(t('has-error'), 'error');
       return;
     }
-    const { name, level, charter } = chartInfo.value;
-    // 判断三个必填是否为空/纯空格
-    const isInvalid = !name?.trim() || !level?.trim() || !charter?.trim();
-    if (isInvalid) {
-      showToast(t('has-error'), 'error');
-      return;
+    if ((await form.value!.validate()).valid) {
+      stepIndex.value++;
+    } else {
+      toast(t('has-error'), 'error');
     }
-    // 校验通过，切换页面
-    stepIndex.value++;
     return;
   }
   if (step.value === 'options') {
@@ -378,7 +398,6 @@ async function moveNext() {
     return;
   }
 }
-
 
 function goBack() {
   if (step.value === 'config') {
@@ -407,19 +426,21 @@ function tryParseAspect(): number | undefined {
 }
 
 const fileHovering = ref(false);
-listen('tauri://drag-over', () => (fileHovering.value = step.value === 'choose'));
-listen('tauri://drag-leave', () => (fileHovering.value = false));
-listen('tauri://drag-drop', async (event) => {
-  const files = (event.payload as FileDropEvent).paths;
-  if (step.value === 'choose') {
-    fileHovering.value = false;
-    await loadChart(files[0]);
-  } else if (step.value === 'config' || step.value === 'options' || step.value === 'render') {
-    fileHovering.value = false;
-    stepIndex.value = 1;
-    await loadChart(files[0]);
-  }
-});
+track(listen('tauri://drag-over', () => (fileHovering.value = step.value === 'choose')));
+track(listen('tauri://drag-leave', () => (fileHovering.value = false)));
+track(
+  listen('tauri://drag-drop', async (payload) => {
+    const files = (payload.payload as FileDropEvent).paths;
+    if (step.value === 'choose') {
+      fileHovering.value = false;
+      await loadChart(files[0]);
+    } else if (step.value === 'config' || step.value === 'options' || step.value === 'render') {
+      fileHovering.value = false;
+      stepIndex.value = 1;
+      await loadChart(files[0]);
+    }
+  }),
+);
 
 function resetAndGoChoose() {
   stepIndex.value = 1;
@@ -432,26 +453,17 @@ function resetAndGoChoose() {
 <template>
   <div class="render-container">
     <!-- MD3 Top Action Bar -->
-    <header class="clear-glass glass md3-top-bar" v-glass v-if="step !== 'choose'">
+    <header class="clear-glass glass md3-top-bar" v-glass v-if="step !== 'choose' && step !== 'render'">
       <div class="bar-left">
-        <fv-button icon="PageLeft"
-        v-if="step === 'config' || step === 'options'"
-        @click="goBack"
-        :foreground="mainColor"
-        :background="bgColor"
-        :border-radius="16">
+        <button class="bar-btn bar-btn-text" v-if="step === 'config' || step === 'options'" @click="goBack">
+          <v-icon icon="mdi-arrow-left" size="20" />
           <span>{{ t('prev-step') }}</span>
-        </fv-button>
+        </button>
       </div>
 
       <div class="bar-center">
         <div class="step-chips">
-          <span
-            v-for="(s, i) in steps"
-            :key="s"
-            class="step-chip"
-            :class="{ 'is-active': step === s, 'is-done': stepIndex > i + 1 }"
-          >
+          <span v-for="(s, i) in steps" :key="s" class="step-chip" :class="{ 'is-active': step === s, 'is-done': stepIndex > i + 1 }">
             <span class="chip-dot"></span>
             <span class="chip-label" v-if="step === s">{{ t('steps.' + s) }}</span>
           </span>
@@ -459,34 +471,18 @@ function resetAndGoChoose() {
       </div>
 
       <div class="bar-right">
-        <fv-button
-        v-if="step === 'options'"
-        @click="playChart"
-        icon="Play"
-        :foreground="mainColor"
-        :background="bgColor"
-        :border-radius="16"
-        >
+        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="playChart">
+          <v-icon icon="mdi-gamepad-variant" size="18" />
           <span>{{ t('play') }}</span>
-        </fv-button>
-        <fv-button
-        v-if="step === 'options'"
-        @click="previewChart"
-        icon="Preview"
-        :foreground="mainColor"
-        :background="bgColor"
-        :border-radius="16">
+        </button>
+        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="previewChart">
+          <v-icon icon="mdi-eye" size="18" />
           <span>{{ t('preview') }}</span>
-        </fv-button>
-        <fv-button
-        v-if="step === 'config' || step === 'options'"
-        @click="moveNext"
-        icon="Accept"
-        :foreground="mainColor"
-        :background="bgColor"
-        :border-radius="16">
+        </button>
+        <button class="bar-btn bar-btn-filled" v-if="step === 'config' || step === 'options'" @click="moveNext">
           <span>{{ step === 'options' ? t('render') : t('next-step') }}</span>
-        </fv-button>
+          <v-icon icon="mdi-arrow-right" size="18" />
+        </button>
       </div>
     </header>
 
@@ -519,67 +515,64 @@ function resetAndGoChoose() {
       <div class="step-panel" :class="{ 'is-active': step === 'config' }">
         <div class="config-card-wrapper" ref="flipCardRef">
           <div class="glass fluent-glass config-card" v-glass v-if="chartInfo">
-            <form ref="form" class="config-form" @submit.prevent>
-                <h2 class="config-title">{{ t('steps.config') }}</h2>
-                <div class="config-grid">
-                  <div class="config-section">
-                    <div class="field-group">
-                      <label class="field-label">{{ t('chart-name') }} *</label>
-                      <input v-model="chartInfo.name" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.name }" />
-                    </div>
-                    <div class="field-group">
-                      <label class="field-label">{{ t('level') }} *</label>
-                      <input v-model="chartInfo.level" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.level }" />
-                    </div>
-                    <div class="field-group">
-                      <label class="field-label">{{ t('charter') }} *</label>
-                      <input v-model="chartInfo.charter" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.charter }" />
-                    </div>
-                    <div class="field-group">
-                      <label class="field-label">{{ t('composer') }}</label>
-                      <input v-model="chartInfo.composer" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.composer }" />
-                    </div>
-                    <div class="field-group">
-                      <label class="field-label">{{ t('illustrator') }}</label>
-                      <input v-model="chartInfo.illustrator" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.illustrator }" />
-                    </div>
+            <v-form ref="form" class="config-form" @submit.prevent>
+              <h2 class="config-title">{{ t('steps.config') }}</h2>
+              <div class="config-grid">
+                <div class="config-section">
+                  <div class="field-group">
+                    <label class="field-label">{{ t('chart-name') }} *</label>
+                    <input v-model="chartInfo.name" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.name }" />
                   </div>
-                  <div class="config-section">
-                    <div class="field-group">
-                      <label class="field-label">{{ t('tip') }}</label>
-                      <input v-model="chartInfo.tip" class="blur-glass md3-field" :placeholder="t('tip-placeholder')" />
-                    </div>
-                    <div class="field-group">
-                      <label class="field-label">{{ t('dim') }} — {{ Math.round(pstBackgroundDim) }}%</label>
-                      <fv-slider
-                        class="slider"
-                        :mininum="0"
-                        :unit=1
-                        :maxinum="100"
-                        :color="mainColor"
-                        :background="bgColor"
-                        :icon-wrapper-background="bgColor"
-                        v-model:value="pstBackgroundDim"
-                        @update:model-value = "handleDimChange"
-                        >
-                      </fv-slider>
-                    </div>
-                    <div class="field-group field-toggle">
-                      <label class="field-label">{{ t('hold_cover') }}</label>
-                      <fv-ToggleSwitch
-                        :borderColor="mainColor"
-                        :ringBackground="mainColor"
-                        :switchOnBackground="subColor"
-                        :onForeground="subColor"
-                        :offForeground="mainColor"
-                        class="switch"
-                        v-model:value= "chartInfo.HoldPartialCover"
-                        @click="chartInfo.HoldPartialCover = !chartInfo.HoldPartialCover"
-                      />
-                    </div>
+                  <div class="field-group">
+                    <label class="field-label">{{ t('level') }} *</label>
+                    <input v-model="chartInfo.level" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.level }" />
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">{{ t('charter') }} *</label>
+                    <input v-model="chartInfo.charter" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.charter }" />
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">{{ t('composer') }}</label>
+                    <input v-model="chartInfo.composer" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.composer }" />
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">{{ t('illustrator') }}</label>
+                    <input v-model="chartInfo.illustrator" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.illustrator }" />
                   </div>
                 </div>
-              </form>
+                <div class="config-section">
+                  <div class="field-group">
+                    <label class="field-label">{{ t('aspect') }}</label>
+                    <div class="aspect-row">
+                      <input type="number" v-model="aspectWidth" class="blur-glass md3-field aspect-field" />
+                      <span class="aspect-sep">:</span>
+                      <input type="number" v-model="aspectHeight" class="blur-glass md3-field aspect-field" />
+                    </div>
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">{{ t('dim') }} — {{ Math.round(pstBackgroundDim) }}%</label>
+                    <v-slider
+                      class="slider"
+                      color="primary"
+                      :min="0"
+                      :max="100"
+                      :step="1"
+                      hide-details
+                      v-model="pstBackgroundDim"
+                      @update:model-value="handleDimChange"
+                    />
+                  </div>
+                  <div class="field-group field-toggle">
+                    <label class="field-label">{{ t('hold_cover') }}</label>
+                    <v-switch class="switch" color="primary" hide-details v-model="chartInfo.HoldPartialCover" />
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">{{ t('tip') }}</label>
+                    <input v-model="chartInfo.tip" class="blur-glass md3-field" :placeholder="t('tip-placeholder')" />
+                  </div>
+                </div>
+              </div>
+            </v-form>
           </div>
         </div>
       </div>
@@ -596,47 +589,56 @@ function resetAndGoChoose() {
         <div class="render-card fluent-glass glass" v-if="chartInfo" v-glass>
           <!-- Left: Illustration -->
           <div class="render-cover">
-            <img v-if="renderCover" :src="convertFileSrc(renderCover)" class="cover-img" />
+            <img v-if="renderCover" :src="convertFileSrc(renderCover)" class="cover-img" alt="" />
             <div v-else class="cover-placeholder">
-              <fv-AnimatedIcon :font-size=32 icon="MusicNote" modelValue="bounceRotate" :customize-animation="true" />
+              <v-icon icon="mdi-music-note-outline" size="32" color="rgba(var(--main-color-rgb), 0.4)" />
             </div>
           </div>
           <!-- Right: Info -->
           <div class="render-info">
             <div class="render-header">
-              <fv-AnimatedIcon :font-size=32 icon="Completed" modelValue="bounceRotate" :customize-animation="true" />
+              <v-icon icon="mdi-check-circle-outline" size="24" color="primary" />
               <h3>{{ t('render-started') }}</h3>
             </div>
             <div class="info-rows">
-              <div class="info-row"><span class="info-label">{{ t('chart-name') }}</span><span class="info-value">{{ chartInfo.name }}</span></div>
-              <div class="info-row"><span class="info-label">{{ t('level') }}</span><span class="info-value">{{ chartInfo.level }}</span></div>
-              <div class="info-row"><span class="info-label">{{ t('charter') }}</span><span class="info-value">{{ chartInfo.charter }}</span></div>
-              <div class="info-row" v-if="chartInfo.composer"><span class="info-label">{{ t('composer') }}</span><span class="info-value">{{ chartInfo.composer }}</span></div>
-              <div class="info-row" v-if="chartInfo.illustrator"><span class="info-label">{{ t('illustrator') }}</span><span class="info-value">{{ chartInfo.illustrator }}</span></div>
+              <div class="info-row">
+                <span class="info-label">{{ t('chart-name') }}</span
+                ><span class="info-value">{{ chartInfo.name }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">{{ t('level') }}</span
+                ><span class="info-value">{{ chartInfo.level }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">{{ t('charter') }}</span
+                ><span class="info-value">{{ chartInfo.charter }}</span>
+              </div>
+              <div class="info-row" v-if="chartInfo.composer">
+                <span class="info-label">{{ t('composer') }}</span
+                ><span class="info-value">{{ chartInfo.composer }}</span>
+              </div>
+              <div class="info-row" v-if="chartInfo.illustrator">
+                <span class="info-label">{{ t('illustrator') }}</span
+                ><span class="info-value">{{ chartInfo.illustrator }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">{{ t('aspect') }}</span
+                ><span class="info-value">{{ aspectWidth }}:{{ aspectHeight }}</span>
+              </div>
             </div>
             <div v-if="renderProgress !== undefined" class="render-progress">
-              <div class="custom-progress-linear">
-                <div class="custom-progress-fill" :style="{ width: renderProgress + '%' }"></div>
-              </div>
+              <v-progress-linear :model-value="renderProgress" color="primary" height="6" rounded />
               <p class="progress-text">{{ renderMsg }}</p>
             </div>
             <div class="render-actions">
-              <fv-button
-              @click="router.push({ name: 'tasks' })"
-              :foreground="mainColor"
-              :background="bgColor"
-              :border-radius="16"
-              icon="List">
+              <button class="bar-btn bar-btn-tonal" @click="router.push({ name: 'tasks' })">
+                <v-icon icon="mdi-view-list" size="18" />
                 <span>{{ t('see-tasks') }}</span>
-              </fv-button>
-              <fv-button
-              @click="resetAndGoChoose"
-              :foreground="mainColor"
-              :background="bgColor"
-              :border-radius="16"
-              icon="Add">
+              </button>
+              <button class="bar-btn bar-btn-filled" @click="resetAndGoChoose">
+                <v-icon icon="mdi-plus" size="18" />
                 <span>{{ t('next-chart') }}</span>
-              </fv-button>
+              </button>
             </div>
           </div>
         </div>
@@ -644,21 +646,20 @@ function resetAndGoChoose() {
     </main>
 
     <!-- File drag overlay -->
-    <div v-if="fileHovering" class="overlay-container drop-overlay">
+    <v-overlay v-model="fileHovering" contained class="align-center justify-center drop-overlay" persistent :close-on-content-click="false">
       <div class="glass drop-zone" v-glass>
-        <fv-AnimatedIcon :font-size=32 icon="OpenFile" modelValue="bounceRotate" :customize-animation="true" />
-        <!-- 我故意的，不让你点嘻嘻 -->
+        <v-icon size="48" class="mb-2">mdi-download</v-icon>
         <p>{{ t('choose-drop') }}</p>
       </div>
-    </div>
+    </v-overlay>
 
     <!-- Parsing overlay -->
-    <div v-if="parsingChart" class="overlay-container parse-overlay">
+    <v-overlay v-model="parsingChart" contained class="align-center justify-center parse-overlay" persistent :close-on-content-click="false">
       <div class="parse-card">
-        <fv-spinner size="large" />
+        <v-progress-circular indeterminate color="primary" size="36" width="3" />
         <span>{{ t('parsing') }}</span>
       </div>
-    </div>
+    </v-overlay>
   </div>
 </template>
 
@@ -668,6 +669,8 @@ function resetAndGoChoose() {
   flex-direction: column;
   height: 100vh;
   width: 100%;
+  background: transparent;
+  color: var(--main-color);
 }
 
 /* ===== MD3 Top Action Bar ===== */
@@ -683,7 +686,8 @@ function resetAndGoChoose() {
   z-index: 10;
 }
 
-.bar-left, .bar-right {
+.bar-left,
+.bar-right {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -711,14 +715,15 @@ function resetAndGoChoose() {
 }
 
 .chip-dot {
-  width: 8px; height: 8px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(var(--main-color-rgb), 0.25);
   transition: all 0.3s ease;
 }
 
 .step-chip.is-active {
-  background: rgba(var(--main-color-rgb),0.12);
+  background: rgba(var(--main-color-rgb), 0.12);
 }
 .step-chip.is-active .chip-dot {
   background: var(--sub-color);
@@ -731,7 +736,50 @@ function resetAndGoChoose() {
 .chip-label {
   font-size: 13px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(var(--main-color-rgb), 0.8);
+}
+
+/* MD3 Button variants */
+.bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.bar-btn-text {
+  background: transparent;
+  color: rgba(var(--main-color-rgb), 0.7);
+}
+.bar-btn-text:hover {
+  background: rgba(var(--main-color-rgb), 0.08);
+  color: var(--main-color);
+}
+
+.bar-btn-tonal {
+  background: rgba(var(--main-color-rgb), 0.12);
+  color: var(--main-color);
+}
+.bar-btn-tonal:hover {
+  background: rgba(var(--main-color-rgb), 0.2);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.bar-btn-filled {
+  background: var(--main-color);
+  color: var(--bg-color);
+  font-weight: 600;
+}
+.bar-btn-filled:hover {
+  box-shadow: 0 2px 8px rgba(var(--main-color-rgb), 0.3);
 }
 
 /* ===== Content Area ===== */
@@ -749,7 +797,9 @@ function resetAndGoChoose() {
   opacity: 0;
   transform: translateY(16px);
   pointer-events: none;
-  transition: opacity 0.35s cubic-bezier(0.2, 0, 0, 1), transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+  transition:
+    opacity 0.35s cubic-bezier(0.2, 0, 0, 1),
+    transform 0.35s cubic-bezier(0.2, 0, 0, 1);
   overflow-y: auto;
 }
 .step-panel.is-active {
@@ -760,15 +810,13 @@ function resetAndGoChoose() {
 
 /* ===== Bookshelf (Step 1) ===== */
 .bookshelf {
-  border-radius: 16px;
   display: flex;
-  width: 80%;
-  max-width: 500px;
-  max-height: 300px;
   flex-direction: column;
-  padding: 20px;
+  align-items: center;
   justify-content: center;
-  height: auto;
+  height: 100%;
+  padding: 20px;
+  border-radius: 16px;
 }
 
 .shelf-label {
@@ -778,25 +826,31 @@ function resetAndGoChoose() {
   color: var(--main-color);
   margin-bottom: 32px;
   letter-spacing: 0.5px;
+  border-radius: 16px;
 }
 
 .shelf-row {
   display: flex;
-  flex-direction: column; /* 改为竖直排列 */
-  gap: 16px; /* 调整卡片之间的间距 */
-  width: 100%; /* 确保占满父容器宽度 */
-  height: 100%; /* 确保占满父容器高度 */
+  flex-direction: column; /* 竖直排列 */
+  gap: 16px;
+  width: 100%;
 }
 
 .book-card {
   min-width: 100%;
-  max-height: 62px; /* 高度根据内容自适应 */
-  border-radius: 16px; /* 调整圆角 */
+  max-height: 62px;
+  border-radius: 16px;
   cursor: pointer;
   position: relative;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-  display: flex; /* 添加 flex 布局 */
-  flex-direction: column; /* 保持竖直布局 */
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.book-card:hover {
+  transform: translateY(-4px);
 }
 
 .book-face {
@@ -809,7 +863,6 @@ function resetAndGoChoose() {
   border-color: rgba(var(--main-color-rgb), 0.08);
 }
 
-
 .book-title {
   font-size: 16px;
   font-weight: 600;
@@ -817,7 +870,7 @@ function resetAndGoChoose() {
 }
 
 .book-desc {
-  margin: 10px;
+  margin: 10px 0 0;
   font-size: 12px;
   color: rgba(var(--main-color-rgb), 0.45);
 }
@@ -886,7 +939,9 @@ function resetAndGoChoose() {
   border-radius: 16px;
   font-size: 14px;
   font-family: inherit;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
   color: var(--main-color) !important;
 }
 .md3-field:focus {
@@ -913,16 +968,12 @@ function resetAndGoChoose() {
 .aspect-sep {
   font-size: 18px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--main-color-rgb), 0.4);
 }
 
 .slider {
   width: 100%;
-  appearance: none;
   color: var(--main-color);
-  border-radius: 2px;
-  cursor: pointer;
-  margin-top: 20px;
 }
 
 .field-toggle {
@@ -932,10 +983,8 @@ function resetAndGoChoose() {
 }
 
 .switch {
-  height: 28px;
+  flex: none;
   cursor: pointer;
-  position: relative;
-  transition: all 0.25s ease;
 }
 
 /* ===== Options (Step 3) ===== */
@@ -994,7 +1043,7 @@ function resetAndGoChoose() {
 .render-header h3 {
   font-size: 18px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(var(--main-color-rgb), 0.9);
   margin: 0;
 }
 
@@ -1008,33 +1057,29 @@ function resetAndGoChoose() {
   display: flex;
   justify-content: space-between;
   padding: 7px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(var(--main-color-rgb), 0.05);
 }
-.info-row:last-child { border-bottom: none; }
-.info-label { color: rgba(255, 255, 255, 0.5); font-size: 13px; }
-.info-value { color: rgba(255, 255, 255, 0.85); font-size: 13px; text-align: right; }
+.info-row:last-child {
+  border-bottom: none;
+}
+.info-label {
+  color: rgba(var(--main-color-rgb), 0.5);
+  font-size: 13px;
+}
+.info-value {
+  color: rgba(var(--main-color-rgb), 0.85);
+  font-size: 13px;
+  text-align: right;
+}
 
 .render-progress {
   margin-top: 8px;
-}
-.custom-progress-linear {
-  width: 100%;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.custom-progress-fill {
-  height: 100%;
-  background: var(--sub-color, #82b1ff);
-  border-radius: 3px;
-  transition: width 0.3s ease;
 }
 .progress-text {
   text-align: center;
   margin-top: 6px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--main-color-rgb), 0.5);
 }
 
 .render-actions {
@@ -1046,14 +1091,8 @@ function resetAndGoChoose() {
 }
 
 /* ===== Overlays ===== */
-.overlay-container {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 .drop-overlay {
+  background-color: rgba(0, 0, 0, 0.85);
   z-index: 200;
 }
 .drop-zone {
@@ -1062,7 +1101,7 @@ function resetAndGoChoose() {
   flex-direction: column;
   align-items: center;
   border-radius: 16px;
-  border: 2px dashed rgba(var(--bg-color-rgb), 0.4);
+  border: 2px dashed rgba(var(--main-color-rgb), 0.4);
 }
 .drop-zone p {
   margin: 0;
@@ -1078,10 +1117,10 @@ function resetAndGoChoose() {
   display: flex;
   align-items: center;
   gap: 16px;
-  background: rgba(28, 28, 28, 0.95);
+  background: rgba(var(--bg-color-rgb), 0.95);
   border-radius: 28px;
   padding: 24px 32px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(var(--main-color-rgb), 0.7);
   font-size: 14px;
 }
 
@@ -1093,13 +1132,12 @@ function resetAndGoChoose() {
   .shelf-row {
     gap: 16px;
   }
-  .book-card {
-    width: 160px;
-    height: 260px;
-  }
   .md3-top-bar {
     padding: 0 12px;
     height: 48px;
+  }
+  .bar-btn span {
+    display: none;
   }
   .config-card {
     padding: 20px;
@@ -1118,5 +1156,4 @@ function resetAndGoChoose() {
     padding: 20px;
   }
 }
-
 </style>

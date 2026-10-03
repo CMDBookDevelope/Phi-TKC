@@ -1,16 +1,17 @@
 <i18n>
 en:
   title: Batch Render
-  select-charts: Charts
-  select-preset: Preset
-  add-files: Add
-  add-folder: Add Dir
-  clear-list: Clear
-  clear-done: Clear Done
-  start-render: Render
+  chart-file: Chart file
+  select-charts: Select Charts
+  select-preset: Select Preset
+  add-files: Add Files
+  add-folder: Add Folder
+  clear-list: Clear All
+  clear-done: Clear Completed
+  start-render: Start Render
   stop-render: Stop
-  retry-failed: Retry
-  bulk-edit: Edit
+  retry-failed: Retry Failed
+  bulk-edit: Bulk Edit
   name: Name
   level: Level
   charter: Charter
@@ -19,134 +20,132 @@ en:
   rendering: Rendering
   done: Done
   failed: Failed
-  total-selected: "Selected: {count}"
+  total-selected: "Total selected: {count}"
   all: All
   none: None
-  configure: Config
+  configure: Global Config
   save: Save
   actions: Actions
   close: Close
   total-charts: "Total: {count}"
-  select-all: Sel All
-  deselect-all: Deselect
+  select-all: Select All
+  deselect-all: Deselect All
   progress: Progress
   eta: ETA
-  no-charts: Drop chart files/folders here or use buttons above.
-  no-results: No results
-  search-placeholder: Search...
-  selected: "Sel: {count}"
-  filtered-results: "Filter: {count}"
-  add-files-failed: Add failed
-  no-charts-found: No charts found
-  charts-added: "{count} added"
-  add-folder-failed: Add failed
-  no-charts-selected: None selected
-  batch-completed: "Done: {count}"
-  batch-stopped: Stopped
-  ffmpeg-not-found: No FFmpeg
-  chart-info-missing: No info
+  no-charts: Drag and drop chart folders/files here, or use the buttons above to add them.
+  no-results: No results found
+  search-placeholder: Search charts, charter or level...
+  selected: "Selected: {count}"
+  filtered-results: "Filtered: {count}"
+  add-files-failed: Failed to add files
+  no-charts-found: No charts found in folder
+  charts-added: "{count} charts added"
+  add-folder-failed: Failed to add folder
+  no-charts-selected: No charts selected
+  batch-completed: "Batch completed: {count} rendered"
+  batch-stopped: "Batch queue stopped"
+  ffmpeg-not-found: FFmpeg not found
+  chart-info-missing: Chart info missing
   adding-charts: Adding...
-  invalid-chart-file: Bad file
-  file-type-error: "Error: {message}"
-  config-saved: Saved
-  chart-name: Name
+  invalid-chart-file: Invalid chart file
+  file-type-error: "File type error: {message}"
+  config-saved: "Configuration saved"
+  chart-name: Chart Name
   composer: Composer
-  illustrator: Artist
-  background-dim: Dim
-  hold_cover: Hold Cover
+  illustrator: Illustrator
+  background-dim: Background Dim
+  hold_cover: Hold Partial Cover
   tip: Tip
-  aspect: Aspect
+  aspect: Aspect Ratio
   width: Width
   height: Height
-  dim: Dim
+  dim: Background Dim
   preview: Preview
   edit: Edit
-  chart-info: Info
-  bulk-edit-title: Bulk Edit
-  bulk-edit-hint: Leave blank to keep original values.
+  chart-info: Chart Info
+  bulk-edit-title: Bulk Edit Settings
+  bulk-edit-hint: Leave fields blank to keep their original values.
 zh-CN:
   title: 批量渲染
-  select-charts: 谱面
-  select-preset: 预设
-  add-files: 添加
-  add-folder: 目录
-  clear-list: 清空
-  clear-done: 清理完成
-  start-render: 渲染
-  stop-render: 停止
-  retry-failed: 重试
-  bulk-edit: 编辑
+  chart-file: 谱面文件
+  select-charts: 选择谱面
+  select-preset: 选择预设
+  add-files: 添加文件
+  add-folder: 添加文件夹
+  clear-list: 清空全部
+  clear-done: 清除已完成
+  start-render: 开始渲染
+  stop-render: 停止渲染
+  retry-failed: 重试失败项
+  bulk-edit: 批量编辑
   name: 名称
   level: 难度
   charter: 谱师
   status: 状态
-  pending: 就绪
+  pending: 已就绪
   rendering: 渲染中
-  done: 完成
+  done: 已完成
   failed: 失败
   actions: 操作
   total-selected: "已选择: {count}"
   all: 全选
-  none: 取消
-  configure: 配置
+  none: 取消全选
+  configure: 全局渲染配置
   close: 关闭
   total-charts: "总计: {count}"
   select-all: 全选
-  deselect-all: 取消
+  deselect-all: 取消全选
   progress: 进度
   eta: 预计
-  no-charts: 拖拽谱面至此，或使用上方按钮添加
-  no-results: 无结果
-  search-placeholder: 搜索...
-  selected: "已选: {count}"
-  filtered-results: "筛选: {count}"
+  no-charts: 将谱面文件或文件夹拖拽至此，或使用上方按钮添加
+  no-results: 未找到相关谱面
+  search-placeholder: 搜索谱面名称、谱师或难度...
+  selected: "已选择 {count} 项"
+  filtered-results: "筛选结果: {count}"
   save: 保存
-  add-files-failed: 添加失败
-  no-charts-found: 无谱面
-  charts-added: "已添加 {count} 个"
-  add-folder-failed: 添加失败
-  no-charts-selected: 未选择
-  batch-completed: "完成: {count} 个"
-  batch-stopped: 已停止
-  ffmpeg-not-found: 无FFmpeg
-  chart-info-missing: 无信息
+  add-files-failed: 添加文件失败
+  no-charts-found: 未找到有效谱面文件
+  charts-added: "成功添加 {count} 个谱面"
+  add-folder-failed: 添加文件夹失败
+  no-charts-selected: 未选择任何谱面
+  batch-completed: "批量任务完成，共处理 {count} 个谱面"
+  batch-stopped: "已停止队列"
+  ffmpeg-not-found: 未找到 FFmpeg 环境
+  chart-info-missing: 谱面信息缺失
   adding-charts: 解析中...
-  invalid-chart-file: 无效文件
-  file-type-error: "错误: {message}"
-  config-saved: 已保存
-  chart-name: 谱面名
-  composer: 曲师
-  illustrator: 画师
-  background-dim: 暗度
-  hold_cover: 遮罩
-  aspect: 比例
-  tip: 提示
+  invalid-chart-file: 无效的谱面文件
+  file-type-error: "文件类型错误: {message}"
+  config-saved: "配置已保存"
+  chart-name: 谱面名称
+  composer: 作曲家
+  illustrator: 插画师
+  background-dim: 背景暗度
+  hold_cover: Hold 头部遮罩
+  aspect: 宽高比
+  tip: 提示信息 (Tip)
   width: 宽
   height: 高
-  dim: 暗度
+  dim: 背景昏暗程度
   preview: 预览
   edit: 编辑
-  chart-info: 信息
-  bulk-edit-title: 批量编辑
-  bulk-edit-hint: 留空则保持原值。
+  chart-info: 谱面信息
+  bulk-edit-title: 批量编辑属性
+  bulk-edit-hint: 未填写的项将保持每个谱面原有的设置不变。
 </i18n>
 
 <script setup lang="ts">
-import { mainColor, bgColor, subColor } from '@/colorStore'
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { event } from '@tauri-apps/api';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import moment from 'moment';
 
-import { RULES } from './common';
+import { toast, toastError, RULES } from './common';
 import type { ChartInfo, RenderConfig } from './model';
 import ConfigView from '@/components/ConfigView.vue';
 
 const { t } = useI18n();
-const router = useRouter();
 
 interface BatchChart {
   id: string;
@@ -170,9 +169,8 @@ const configDialog = ref(false);
 const editDialog = ref(false);
 const bulkEditDialog = ref(false);
 const editingChartId = ref<string | null>(null);
-const editingChart = computed(() => editingChartId.value ? charts.value.find(c => c.id === editingChartId.value) : undefined);
+const editingChart = computed(() => (editingChartId.value ? charts.value.find((c) => c.id === editingChartId.value) : undefined));
 const form = ref<any>();
-const bulkForm = ref<any>();
 
 const currentRenderingId = ref<string | null>(null);
 const isRenderingQueue = ref(false);
@@ -183,7 +181,7 @@ const bulkEditData = ref({
   aspectWidth: '',
   aspectHeight: '',
   backgroundDim: null as number | null,
-  holdCover: null as number | null,
+  holdCover: null as boolean | null,
 });
 
 const isAddingFiles = ref(false);
@@ -197,32 +195,78 @@ function generateId() {
 }
 
 async function previewChart(id: string) {
-  const chart = charts.value.find(c => c.id === id);
+  const chart = charts.value.find((c) => c.id === id);
   if (!chart?.chartInfo) return toast(t('chart-info-missing'), 'error');
   try {
     const config = await buildRenderParams();
     await invoke('preview_chart', {
       params: { path: chart.path, info: chart.chartInfo, config: { ...config, autoplay: true } },
     });
-  } catch (error) { toastError(error); }
+  } catch (error) {
+    toastError(error);
+  }
 }
 
 function loadDefaultConfig(): RenderConfig {
   const savedConfig = localStorage.getItem('defaultRenderConfig');
   if (savedConfig) {
-    try { return JSON.parse(savedConfig) as RenderConfig; } catch (e) { console.error('Failed to parse saved config', e); }
+    try {
+      return JSON.parse(savedConfig) as RenderConfig;
+    } catch (e) {
+      console.error('Failed to parse saved config', e);
+    }
   }
   return {
-    resolution: [1920, 1080], ffmpegPreset: 'medium p4 balanced', endingLength: -2.0, disableLoading: true,
-    chartDebug: false, flidX: false, chartRatio: 1, bufferSize: 256, fps: 60, hardwareAccel: true,
-    videoCodec: 'h264', encoder: 'auto', bitrateControl: 'CRF', bitrate: '28', targetAudio: 48000,
-    video: false, audioBit: undefined, audioFormat: 'flac', background: false, aggressive: false,
-    challengeColor: 'golden', challengeRank: 45, disableEffect: false, doubleHint: true, fxaa: false,
-    noteScale: 1, particle: true, playerAvatar: null, playerName: '', playerRks: 15, sampleCount: 1,
-    resPackPath: null, speed: 1, volumeMusic: 1, volumeSfx: 1, combo: 'AUTOPLAY', watermark: '',
-    handSplit: false, noteSpeedFactor: 1.0, ffmpegThread: false, showProgressText: false,
-    showTimeText: false, uiLine: true, uiScore: true, uiCombo: true, uiLevel: true, uiName: true,
-    uiPb: true, uiPause: true, bar: false,
+    resolution: [1920, 1080],
+    ffmpegPreset: 'medium p4 balanced',
+    endingLength: -2.0,
+    disableLoading: true,
+    chartDebug: false,
+    flidX: false,
+    chartRatio: 1,
+    bufferSize: 256,
+    fps: 60,
+    hardwareAccel: true,
+    videoCodec: 'h264',
+    encoder: 'auto',
+    bitrateControl: 'CRF',
+    bitrate: '28',
+    targetAudio: 48000,
+    video: false,
+    audioBit: undefined,
+    audioFormat: 'flac',
+    background: false,
+    aggressive: false,
+    challengeColor: 'golden',
+    challengeRank: 45,
+    disableEffect: false,
+    doubleHint: true,
+    fxaa: false,
+    noteScale: 1,
+    particle: true,
+    playerAvatar: null,
+    playerName: '',
+    playerRks: 15,
+    sampleCount: 1,
+    resPackPath: null,
+    speed: 1,
+    volumeMusic: 1,
+    volumeSfx: 1,
+    combo: 'AUTOPLAY',
+    watermark: '',
+    handSplit: false,
+    noteSpeedFactor: 1.0,
+    ffmpegThread: false,
+    showProgressText: false,
+    showTimeText: false,
+    uiLine: true,
+    uiScore: true,
+    uiCombo: true,
+    uiLevel: true,
+    uiName: true,
+    uiPb: true,
+    uiPause: true,
+    bar: false,
   };
 }
 
@@ -237,15 +281,22 @@ async function getPresets() {
     const presetsMap = (await invoke('get_presets')) as Record<string, any>;
     presets.value = [{ name: 'default' }, ...Object.keys(presetsMap).map((name) => ({ name }))];
     selectedPreset.value = presets.value[0].name;
-  } catch (error) { console.error('Failed to get presets', error); }
+  } catch (error) {
+    console.error('Failed to get presets', error);
+  }
 }
 
 async function processNewPaths(paths: string[]) {
   const uniquePaths = [...new Set(paths)];
   const existingPaths = new Set(charts.value.map((c) => c.path));
   const newPaths = uniquePaths.filter((path) => !existingPaths.has(path));
-  if (newPaths.length === 0) { toast(t('no-charts-found'), 'warning'); return; }
-  for (const path of newPaths) { await addChart(path); }
+  if (newPaths.length === 0) {
+    toast(t('no-charts-found'), 'warning');
+    return;
+  }
+  for (const path of newPaths) {
+    await addChart(path);
+  }
   toast(t('charts-added', { count: newPaths.length }), 'success');
 }
 
@@ -260,7 +311,11 @@ async function addFiles() {
     if (!files) return;
     const paths = (Array.isArray(files) ? files : [files]).map((f) => (typeof f === 'string' ? f : (f as any).path));
     await processNewPaths(paths);
-  } catch (error) { toast(t('add-files-failed'), 'error'); } finally { isAddingFiles.value = false; }
+  } catch (error) {
+    toast(t('add-files-failed'), 'error');
+  } finally {
+    isAddingFiles.value = false;
+  }
 }
 
 async function addFolder() {
@@ -275,7 +330,11 @@ async function addFolder() {
     const validExtensions = ['.json', '.zip', '.pez'];
     const filteredFiles = files.filter((f) => validExtensions.includes(f.toLowerCase().slice(f.lastIndexOf('.'))));
     await processNewPaths(filteredFiles);
-  } catch (error) { toast(t('add-folder-failed'), 'error'); } finally { isAddingFolder.value = false; }
+  } catch (error) {
+    toast(t('add-folder-failed'), 'error');
+  } finally {
+    isAddingFolder.value = false;
+  }
 }
 
 async function addChart(path: string) {
@@ -286,8 +345,17 @@ async function addChart(path: string) {
     const chartInfo = (await invoke('parse_chart', { path })) as ChartInfo;
     let aW = String(chartInfo.aspectRatio);
     let aH = '1.0';
-    for (const asp of [[16, 9], [4, 3], [8, 5], [3, 2]]) {
-      if (Math.abs(asp[0] / asp[1] - chartInfo.aspectRatio) < 1e-4) { aW = String(asp[0]); aH = String(asp[1]); break; }
+    for (const asp of [
+      [16, 9],
+      [4, 3],
+      [8, 5],
+      [3, 2],
+    ]) {
+      if (Math.abs(asp[0] / asp[1] - chartInfo.aspectRatio) < 1e-4) {
+        aW = String(asp[0]);
+        aH = String(asp[1]);
+        break;
+      }
     }
     charts.value[placeholderIndex] = { ...newChart, name: chartInfo.name, level: chartInfo.level, charter: chartInfo.charter, chartInfo, aspectWidth: aW, aspectHeight: aH };
   } catch (error: any) {
@@ -298,10 +366,20 @@ async function addChart(path: string) {
   }
 }
 
-function clearList() { if (confirm(t('clear-list') + '?')) charts.value = []; }
-function clearDone() { charts.value = charts.value.filter(c => c.status !== 'done'); }
-function retryFailed() { charts.value.forEach(c => { if (c.status === 'failed') c.status = 'pending'; }); }
-function removeChart(id: string) { charts.value = charts.value.filter(c => c.id !== id); }
+function clearList() {
+  if (confirm(t('clear-list') + '?')) charts.value = [];
+}
+function clearDone() {
+  charts.value = charts.value.filter((c) => c.status !== 'done');
+}
+function retryFailed() {
+  charts.value.forEach((c) => {
+    if (c.status === 'failed') c.status = 'pending';
+  });
+}
+function removeChart(id: string) {
+  charts.value = charts.value.filter((c) => c.id !== id);
+}
 
 async function buildRenderParams() {
   if (!(await invoke('test_ffmpeg'))) throw new Error(t('ffmpeg-not-found'));
@@ -313,7 +391,10 @@ async function buildRenderParams() {
 
 async function saveConfig() {
   const config = await configViewRef.value?.buildConfig();
-  if (config) { saveDefaultConfig(config); configDialog.value = false; }
+  if (config) {
+    saveDefaultConfig(config);
+    configDialog.value = false;
+  }
 }
 
 async function startRender() {
@@ -340,7 +421,9 @@ async function startRender() {
       }
     }
     if (isRenderingQueue.value) toast(t('batch-completed', { count: pendingCount }), 'success');
-  } catch (error) { toastError(error); } finally {
+  } catch (error) {
+    toastError(error);
+  } finally {
     isRenderingQueue.value = false;
     currentRenderingId.value = null;
     renderMsg.value = '';
@@ -348,43 +431,74 @@ async function startRender() {
   }
 }
 
-function stopRender() { isRenderingQueue.value = false; toast(t('batch-stopped'), 'info'); }
+function stopRender() {
+  isRenderingQueue.value = false;
+  toast(t('batch-stopped'), 'info');
+}
 
 const filteredCharts = computed(() => {
   if (!searchQuery.value.trim()) return charts.value;
   const q = searchQuery.value.toLowerCase();
-  return charts.value.filter(c =>
-    c.name.toLowerCase().includes(q) || c.level.toLowerCase().includes(q) || c.charter.toLowerCase().includes(q)
-  );
+  return charts.value.filter((c) => c.name.toLowerCase().includes(q) || c.level.toLowerCase().includes(q) || c.charter.toLowerCase().includes(q));
 });
 
-const selectedCount = computed(() => charts.value.filter(c => c.selected).length);
+const selectedCount = computed(() => charts.value.filter((c) => c.selected).length);
 const allSelected = computed(() => charts.value.length > 0 && selectedCount.value === charts.value.length);
 const isIndeterminate = computed(() => selectedCount.value > 0 && selectedCount.value < charts.value.length);
 
 function toggleSelectAll() {
   const target = !allSelected.value;
-  charts.value.forEach((chart) => { if (chart.status !== 'rendering') chart.selected = target; });
+  charts.value.forEach((chart) => {
+    if (chart.status !== 'rendering') chart.selected = target;
+  });
 }
 
-event.listen('render-msg', (msg) => { renderMsg.value = msg.payload as string; });
-event.listen('render-progress', (msg) => {
-  const p = msg.payload as { progress: number; fps: number; estimate: number };
-  renderMsg.value = `FPS: ${p.fps} | ${t('eta')}: ${moment.duration(p.estimate, 'seconds').humanize(true, { ss: 1 })}`;
-  renderProgress.value = p.progress * 100;
+// Tauri's `listen` resolves asynchronously, so a component unmounted before it settles
+// must still release the handle — hence the `disposed` guard.
+let disposed = false;
+const unlistenFns: UnlistenFn[] = [];
+
+function track(pending: Promise<UnlistenFn>) {
+  pending.then((unlisten) => (disposed ? unlisten() : unlistenFns.push(unlisten))).catch((e) => console.error('Failed to register listener:', e));
+}
+
+onUnmounted(() => {
+  disposed = true;
+  unlistenFns.forEach((unlisten) => unlisten());
+  unlistenFns.length = 0;
 });
 
-function openEditDialog(id: string) { editingChartId.value = id; editDialog.value = true; }
+track(
+  listen('render-msg', (msg) => {
+    renderMsg.value = msg.payload as string;
+  }),
+);
+track(
+  listen('render-progress', (msg) => {
+    const p = msg.payload as { progress: number; fps: number; estimate: number };
+    renderMsg.value = `FPS: ${p.fps} | ${t('eta')}: ${moment.duration(p.estimate, 'seconds').humanize(true, { ss: 1 })}`;
+    renderProgress.value = p.progress * 100;
+  }),
+);
+
+function openEditDialog(id: string) {
+  editingChartId.value = id;
+  editDialog.value = true;
+}
 
 async function saveChartInfo() {
   if (!form.value || !editingChartId.value) return;
   const { valid } = await form.value.validate();
   if (!valid) return;
-  const chart = charts.value.find(c => c.id === editingChartId.value);
+  const chart = charts.value.find((c) => c.id === editingChartId.value);
   if (!chart) return;
   const aspect = tryParseAspect(chart.aspectWidth, chart.aspectHeight);
   if (aspect && chart.chartInfo) chart.chartInfo.aspectRatio = aspect;
-  if (chart.chartInfo) { chart.name = chart.chartInfo.name; chart.level = chart.chartInfo.level; chart.charter = chart.chartInfo.charter; }
+  if (chart.chartInfo) {
+    chart.name = chart.chartInfo.name;
+    chart.level = chart.chartInfo.level;
+    chart.charter = chart.chartInfo.charter;
+  }
   editDialog.value = false;
 }
 
@@ -395,12 +509,17 @@ function openBulkEditDialog() {
 
 function saveBulkEdit() {
   const aspect = tryParseAspect(bulkEditData.value.aspectWidth, bulkEditData.value.aspectHeight);
-  const selectedCharts = charts.value.filter(c => c.selected && c.chartInfo);
-  selectedCharts.forEach(chart => {
+  const selectedCharts = charts.value.filter((c) => c.selected && c.chartInfo);
+  selectedCharts.forEach((chart) => {
     if (!chart.chartInfo) return;
-    if (aspect) { chart.aspectWidth = bulkEditData.value.aspectWidth; chart.aspectHeight = bulkEditData.value.aspectHeight; chart.chartInfo.aspectRatio = aspect; }
+    if (aspect) {
+      chart.aspectWidth = bulkEditData.value.aspectWidth;
+      chart.aspectHeight = bulkEditData.value.aspectHeight;
+      chart.chartInfo.aspectRatio = aspect;
+    }
     if (bulkEditData.value.backgroundDim !== null) chart.chartInfo.backgroundDim = bulkEditData.value.backgroundDim;
-    if (bulkEditData.value.holdCover !== null) chart.chartInfo.HoldPartialCover = !!bulkEditData.value.holdCover;
+    // v-btn-toggle yields `undefined` when the active button is toggled off, so `!== null` isn't enough.
+    if (typeof bulkEditData.value.holdCover === 'boolean') chart.chartInfo.HoldPartialCover = bulkEditData.value.holdCover;
   });
   bulkEditDialog.value = false;
   toast(t('config-saved'), 'success');
@@ -408,8 +527,9 @@ function saveBulkEdit() {
 
 function tryParseAspect(w?: string, h?: string) {
   if (!w || !h) return undefined;
-  const numW = parseFloat(w), numH = parseFloat(h);
-  return (isNaN(numW) || isNaN(numH)) ? undefined : numW / numH;
+  const numW = parseFloat(w),
+    numH = parseFloat(h);
+  return isNaN(numW) || isNaN(numH) ? undefined : numW / numH;
 }
 
 const STORAGE_KEY = 'batch_render_charts_v2';
@@ -417,12 +537,21 @@ onMounted(() => {
   getPresets();
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
-    try { charts.value = JSON.parse(saved).map((c: any) => ({ ...c, status: c.status === 'rendering' ? 'failed' : c.status })); }
-    catch (e) { }
+    try {
+      charts.value = JSON.parse(saved).map((c: any) => ({ ...c, status: c.status === 'rendering' ? 'failed' : c.status }));
+    } catch (e) {
+      /* empty */
+    }
   }
 });
 
-watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val)); }, { deep: true });
+watch(
+  charts,
+  (val) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
+  },
+  { deep: true },
+);
 </script>
 
 <template>
@@ -431,23 +560,23 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
     <div class="batch-header">
       <div class="header-row">
         <div class="search-wrap">
-          <fv-animated-icon icon="Filter" :font-size="16" class="search-icon" />
-          <input v-model="searchQuery" :placeholder="t('search-placeholder')" class="md3-search" />
+          <v-icon icon="mdi-magnify" size="18" class="search-icon" />
+          <input v-model="searchQuery" :placeholder="t('search-placeholder')" class="blur-glass md3-search" />
         </div>
 
         <div class="header-actions">
-          <fv-button :background="bgColor" :border-radius="30" :foreground="mainColor" :disabled="isAddingFiles" @click="addFiles">
-            <fv-animated-icon icon="FolderHorizontal" :font-size="18" />
+          <button class="md3-btn md3-btn-tonal" :disabled="isAddingFiles" @click="addFiles">
+            <v-icon icon="mdi-file-plus-outline" size="18" />
             <span>{{ t('add-files') }}</span>
-          </fv-button>
-          <fv-button :background="bgColor" :border-radius="30" :foreground="mainColor" :disabled="isAddingFolder" @click="addFolder">
-            <fv-animated-icon icon="FolderHorizontal" :font-size="18" />
+          </button>
+          <button class="md3-btn md3-btn-tonal" :disabled="isAddingFolder" @click="addFolder">
+            <v-icon icon="mdi-folder-plus-outline" size="18" />
             <span>{{ t('add-folder') }}</span>
-          </fv-button>
-          <fv-button :background="bgColor" :border-radius="30" :foreground="mainColor" @click="configDialog = true">
-            <fv-animated-icon icon="Settings" :font-size="18" />
+          </button>
+          <button class="md3-btn md3-btn-tonal" @click="configDialog = true">
+            <v-icon icon="mdi-cog-outline" size="18" />
             <span>{{ t('configure') }}</span>
-          </fv-button>
+          </button>
         </div>
       </div>
     </div>
@@ -455,73 +584,67 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
     <!-- Selection bar -->
     <div class="selection-bar">
       <div class="sel-left">
-        <input type="checkbox" :checked="allSelected" :indeterminate="isIndeterminate" @click="toggleSelectAll" class="md3-checkbox" />
+        <v-checkbox-btn :model-value="allSelected" :indeterminate="isIndeterminate" @click="toggleSelectAll" color="primary" />
         <span class="sel-count">{{ t('selected', { count: selectedCount }) }} / {{ t('total-charts', { count: charts.length }) }}</span>
 
-        <fv-button v-if="selectedCount > 1" class="md3-btn md3-btn-text md3-btn-sm" :border-radius="30" @click="openBulkEditDialog">
-          <fv-animated-icon icon="Sort" :font-size="16" />
+        <button v-if="selectedCount > 1" class="md3-btn md3-btn-text md3-btn-sm" @click="openBulkEditDialog">
+          <v-icon icon="mdi-pencil-box-multiple-outline" size="16" />
           <span>{{ t('bulk-edit') }}</span>
-        </fv-button>
+        </button>
       </div>
       <div class="sel-right">
-        <fv-button v-if="charts.some(c => c.status === 'failed')" :border-radius="30" class="md3-btn md3-btn-text md3-btn-sm" @click="retryFailed">
-          <fv-animated-icon icon="Refresh" :font-size="16" /><span>{{ t('retry-failed') }}</span>
-        </fv-button>
-        <fv-button :disabled="charts.some(c => c.status === 'done')" :border-radius="30" class="md3-btn md3-btn-text md3-btn-sm" @click="clearDone">
-          <fv-animated-icon icon="CheckMark" :font-size="16" /><span>{{ t('clear-done') }}</span>
-        </fv-button>
-        <fv-button :background="bgColor" :foreground="mainColor" :border-radius="30" @click="clearList" :disabled="charts.length === 0">
-          <fv-animated-icon icon="Delete" :font-size="16" /><span>{{ t('clear-list') }}</span>
-        </fv-button>
+        <button v-if="charts.some((c) => c.status === 'failed')" class="md3-btn md3-btn-text md3-btn-sm" @click="retryFailed">
+          <v-icon icon="mdi-refresh" size="16" /><span>{{ t('retry-failed') }}</span>
+        </button>
+        <button v-if="charts.some((c) => c.status === 'done')" class="md3-btn md3-btn-text md3-btn-sm" @click="clearDone">
+          <v-icon icon="mdi-check-all" size="16" /><span>{{ t('clear-done') }}</span>
+        </button>
+        <button class="md3-btn md3-btn-text md3-btn-sm" @click="clearList" :disabled="charts.length === 0">
+          <v-icon icon="mdi-delete-outline" size="16" /><span>{{ t('clear-list') }}</span>
+        </button>
       </div>
     </div>
 
     <!-- Render action -->
     <div class="render-bar">
       <template v-if="isRenderingQueue">
-        <span class="rendering-chip">
-          <fv-AnimatedIcon icon="Refresh" modelValue="bounceRotate" :font-size="14" />
+        <v-chip color="warning" variant="flat" class="rendering-chip">
+          <v-icon start icon="mdi-loading" class="spin-anim" />
           {{ t('rendering') }}
-        </span>
-        <fv-button :background="bgColor" :border-radius="30" :foreground="mainColor" @click="stopRender">
-          <fv-animated-icon icon="Blocked" :font-size="18" /><span>{{ t('stop-render') }}</span>
-        </fv-button>
+        </v-chip>
+        <button class="md3-btn md3-btn-text" @click="stopRender" style="color: var(--sub-color)">
+          <v-icon icon="mdi-stop" size="18" /><span>{{ t('stop-render') }}</span>
+        </button>
       </template>
       <template v-else>
-        <fv-button :background="mainColor" :border-radius="30" :foreground="bgColor" :disabled="selectedCount === 0" @click="startRender">
-          <fv-animated-icon icon="Play" :font-size="18" />
-          <span>{{ t('start-render') }}</span>
-        </fv-button>
-        <span class="render-count">({{ selectedCount }} Tasks)</span>
+        <button class="md3-btn md3-btn-filled" :disabled="selectedCount === 0" @click="startRender">
+          <v-icon icon="mdi-play" size="18" />
+          <span>{{ t('start-render') }} ({{ selectedCount }})</span>
+        </button>
       </template>
     </div>
 
     <!-- List -->
     <div class="chart-list">
       <div v-if="charts.length === 0" class="empty-state">
-        <fv-animated-icon icon="Page" :font-size="64" style="opacity: 0.15;" />
+        <v-icon icon="mdi-text-box-plus-outline" size="64" color="rgba(var(--main-color-rgb), 0.15)" />
         <p>{{ t('no-charts') }}</p>
       </div>
 
       <div v-else class="list-scroll">
-        <div
-          v-for="item in filteredCharts"
-          :key="item.id"
-          class="chart-row"
-          :class="{ 'is-rendering': item.status === 'rendering', 'is-failed': item.status === 'failed' }"
-        >
+        <div v-for="item in filteredCharts" :key="item.id" class="chart-row" :class="{ 'is-rendering': item.status === 'rendering', 'is-failed': item.status === 'failed' }">
           <div v-if="item.status === 'rendering' && item.id === currentRenderingId" class="progress-bg" :style="{ width: `${renderProgress}%` }"></div>
 
           <div class="row-content">
-            <input type="checkbox" v-model="item.selected" :disabled="item.status === 'rendering'" class="md3-checkbox" />
+            <v-checkbox-btn v-model="item.selected" :disabled="item.status === 'rendering'" color="primary" />
 
             <div class="row-info">
               <div class="row-title">
                 <span class="row-name" :title="item.name">{{ item.name }}</span>
-                <span class="level-badge">{{ item.level }}</span>
+                <v-chip size="x-small" variant="outlined" color="primary">{{ item.level }}</v-chip>
               </div>
               <div class="row-sub">
-                <fv-animated-icon icon="MusicNote" :font-size="14" />
+                <v-icon icon="mdi-account-music" size="14" />
                 <span>{{ item.charter }}</span>
                 <template v-if="item.status === 'rendering' && item.id === currentRenderingId">
                   <span class="render-status">{{ renderProgress.toFixed(1) }}% - {{ renderMsg }}</span>
@@ -532,12 +655,23 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
               </div>
             </div>
 
-            <span class="status-chip" :class="'status-' + item.status">{{ t(item.status) }}</span>
+            <v-chip
+              :color="item.status === 'done' ? 'success' : item.status === 'failed' ? 'error' : item.status === 'rendering' ? 'warning' : 'default'"
+              :variant="item.status === 'pending' ? 'tonal' : 'flat'"
+              size="small"
+              >{{ t(item.status) }}</v-chip
+            >
 
             <div class="row-actions">
-              <fv-button :border-radius="30" icon="Sort" :background="bgColor" :foreground="mainColor" :disabled="!item.chartInfo || item.status === 'rendering'" @click="openEditDialog(item.id)">{{ t('edit') }}</fv-button>
-              <fv-button :border-radius="30" icon="Play" :background="bgColor" :foreground="mainColor" :disabled="!item.chartInfo || item.status === 'rendering'" @click="previewChart(item.id)">{{ t('preview') }}</fv-button>
-              <fv-button :border-radius="30" icon="ChromeClose" :background="bgColor" :foreground="subColor" :disabled="item.status === 'rendering'" @click="removeChart(item.id)">{{ t('close') }}</fv-button>
+              <button class="icon-btn" :disabled="!item.chartInfo || item.status === 'rendering'" @click="openEditDialog(item.id)" :title="t('edit')">
+                <v-icon icon="mdi-pencil-outline" size="18" />
+              </button>
+              <button class="icon-btn" :disabled="!item.chartInfo || item.status === 'rendering'" @click="previewChart(item.id)" :title="t('preview')">
+                <v-icon icon="mdi-play-circle-outline" size="18" />
+              </button>
+              <button class="icon-btn icon-btn-danger" :disabled="item.status === 'rendering'" @click="removeChart(item.id)" :title="t('close')">
+                <v-icon icon="mdi-close" size="18" />
+              </button>
             </div>
           </div>
         </div>
@@ -545,133 +679,128 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
     </div>
 
     <!-- Config Dialog -->
-    <div v-if="configDialog" class="dialog-overlay">
-      <div class="md3-dialog-full dialog-fullscreen-inner">
-        <div class="dialog-header border-b">
-          <h3 class="dialog-title">{{ t('configure') }}</h3>
-          <div style="flex: 1;"></div>
-          <fv-button :border-radius="30" icon="ChromeClose" class="dialog-close-btn" @click="configDialog = false" />
-        </div>
-        <div class="pa-0 h-100 dialog-body">
+    <v-dialog v-model="configDialog" fullscreen transition="dialog-bottom-transition">
+      <v-card class="md3-dialog-full h-100">
+        <v-toolbar color="transparent" class="border-b">
+          <v-toolbar-title>{{ t('configure') }}</v-toolbar-title>
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" @click="configDialog = false" />
+        </v-toolbar>
+        <v-card-text class="pa-0 h-100">
           <ConfigView ref="configViewRef" />
-        </div>
-        <div class="pa-4 border-t dialog-footer">
-          <div style="flex: 1;"></div>
-          <fv-button :border-radius="30" :background="bgColor" :foreground="mainColor" @click="configDialog = false">{{ t('close') }}</fv-button>
-          <fv-button :border-radius="30" :background="mainColor" :foreground="bgColor" @click="saveConfig">{{ t('save') }}</fv-button>
-        </div>
-      </div>
-    </div>
+        </v-card-text>
+        <v-card-actions class="pa-4 border-t">
+          <v-spacer />
+          <button class="md3-btn md3-btn-text" @click="configDialog = false">{{ t('close') }}</button>
+          <button class="md3-btn md3-btn-filled" @click="saveConfig">{{ t('save') }}</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Edit Dialog -->
-    <div v-if="editDialog" class="dialog-overlay" @click.self="editDialog = false">
-      <div class="md3-dialog dialog-modal-inner" v-if="editingChart?.chartInfo">
-        <div class="dialog-header border-b">
-          <h3 class="dialog-title">{{ t('chart-info') }}</h3>
-          <div style="flex: 1;"></div>
-          <fv-button :border-radius="30" icon="ChromeClose" class="dialog-close-btn" @click="editDialog = false" />
-        </div>
-        <div class="pa-6 dialog-body">
-          <form ref="form" @submit.prevent>
-            <div class="input-grid">
-              <div class="input-grid-col" style="flex: 2;">
-                <label class="field-label-sm">{{ t('chart-name') }}</label>
-                <input v-model="editingChart.chartInfo!.name" class="blur-glass md3-field" required />
-              </div>
-              <div class="input-grid-col">
-                <label class="field-label-sm">{{ t('level') }}</label>
-                <input v-model="editingChart.chartInfo!.level" class="blur-glass md3-field" required />
-              </div>
-              <div class="input-grid-col">
-                <label class="field-label-sm">{{ t('charter') }}</label>
-                <input v-model="editingChart.chartInfo!.charter" class="blur-glass md3-field" required />
-              </div>
-              <div class="input-grid-col">
-                <label class="field-label-sm">{{ t('composer') }}</label>
-                <input v-model="editingChart.chartInfo!.composer" class="blur-glass md3-field" />
-              </div>
-              <div class="input-grid-col">
-                <label class="field-label-sm">{{ t('illustrator') }}</label>
-                <input v-model="editingChart.chartInfo!.illustrator" class="blur-glass md3-field" />
-              </div>
-            </div>
-            <hr class="hr-divider" />
-            <div class="edit-two-col">
-              <div class="edit-col-left">
+    <v-dialog v-model="editDialog" max-width="600">
+      <v-card class="md3-dialog blur-glass" v-if="editingChart?.chartInfo">
+        <v-toolbar color="transparent" class="border-b">
+          <v-toolbar-title>{{ t('chart-info') }}</v-toolbar-title>
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" @click="editDialog = false" />
+        </v-toolbar>
+        <v-card-text class="pa-6">
+          <v-form ref="form" @submit.prevent>
+            <v-row dense>
+              <v-col cols="8"
+                ><v-text-field :label="t('chart-name')" :rules="[RULES.non_empty]" v-model="editingChart.chartInfo!.name" variant="outlined" density="comfortable"
+              /></v-col>
+              <v-col cols="4"
+                ><v-text-field :label="t('level')" :rules="[RULES.non_empty]" v-model="editingChart.chartInfo!.level" variant="outlined" density="comfortable"
+              /></v-col>
+              <v-col cols="4"
+                ><v-text-field :label="t('charter')" :rules="[RULES.non_empty]" v-model="editingChart.chartInfo!.charter" variant="outlined" density="comfortable"
+              /></v-col>
+              <v-col cols="4"><v-text-field :label="t('composer')" v-model="editingChart.chartInfo!.composer" variant="outlined" density="comfortable" /></v-col>
+              <v-col cols="4"><v-text-field :label="t('illustrator')" v-model="editingChart.chartInfo!.illustrator" variant="outlined" density="comfortable" /></v-col>
+            </v-row>
+            <v-divider class="my-4" />
+            <v-row dense align="center">
+              <v-col cols="12" sm="5">
                 <div class="field-label-sm">{{ t('aspect') }}</div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <input type="number" v-model="editingChart.aspectWidth" class="blur-glass md3-field" style="width: 80px;" />
+                <div class="d-flex align-center gap-2">
+                  <v-text-field type="number" :rules="[RULES.positive]" v-model="editingChart.aspectWidth" hide-details variant="outlined" density="compact" />
                   <span>:</span>
-                  <input type="number" v-model="editingChart.aspectHeight" class="blur-glass md3-field" style="width: 80px;" />
+                  <v-text-field type="number" :rules="[RULES.positive]" v-model="editingChart.aspectHeight" hide-details variant="outlined" density="compact" />
                 </div>
-              </div>
-              <div class="edit-col-right">
-                <label class="field-label-sm">{{ t('dim') }}</label>
-                <fv-slider thumb-label="always" :min="0" :max="1" :step="0.01" v-model="editingChart.chartInfo!.backgroundDim" class="mt-4" />
-              </div>
-              <div class="edit-col-full">
-                <div style="display: flex; align-items: center; justify-content: space-between;">
-                  <span class="field-label-sm">{{ t('hold_cover') }}</span>
-                  <input type="checkbox" :checked="editingChart.chartInfo!.HoldPartialCover" @change="editingChart.chartInfo!.HoldPartialCover = ($event.target as HTMLInputElement).checked" class="md3-checkbox" />
-                </div>
-              </div>
-              <div class="edit-col-full">
-                <label class="field-label-sm">{{ t('tip') }}</label>
-                <input v-model="editingChart.chartInfo!.tip" class="blur-glass md3-field" />
-              </div>
-            </div>
-          </form>
-        </div>
-        <div class="pa-4 border-t dialog-footer">
-          <div style="flex: 1;"></div>
-          <fv-button :border-radius="30" :background="bgColor" :foreground="mainColor" @click="editDialog = false">{{ t('close') }}</fv-button>
-          <fv-button :border-radius="30" :background="mainColor" :foreground="bgColor" @click="saveChartInfo">{{ t('save') }}</fv-button>
-        </div>
-      </div>
-    </div>
+              </v-col>
+              <v-col cols="12" sm="7">
+                <v-slider :label="t('dim')" thumb-label="always" :min="0" :max="1" :step="0.01" v-model="editingChart.chartInfo!.backgroundDim" hide-details class="mt-4" color="primary" />
+              </v-col>
+              <v-col cols="12">
+                <v-switch color="primary" :label="t('hold_cover')" v-model="editingChart.chartInfo!.HoldPartialCover" hide-details />
+              </v-col>
+              <v-col cols="12">
+                <v-text-field :label="t('tip')" v-model="editingChart.chartInfo!.tip" variant="outlined" density="comfortable" hide-details class="mt-2" />
+              </v-col>
+            </v-row>
+          </v-form>
+        </v-card-text>
+        <v-card-actions class="pa-4 border-t">
+          <v-spacer />
+          <button class="md3-btn md3-btn-text" @click="editDialog = false">{{ t('close') }}</button>
+          <button class="md3-btn md3-btn-filled" @click="saveChartInfo">{{ t('save') }}</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Bulk Edit Dialog -->
-    <div v-if="bulkEditDialog" class="dialog-overlay" @click.self="bulkEditDialog = false">
-      <div class="md3-dialog dialog-modal-inner">
-        <div class="dialog-header border-b">
-          <h3 class="dialog-title">{{ t('bulk-edit-title') }}</h3>
-          <div style="flex: 1;"></div>
-          <fv-button :border-radius="30" icon="ChromeClose" class="dialog-close-btn" @click="bulkEditDialog = false" />
-        </div>
-        <div class="pa-6 dialog-body">
-          <div class="alert-info">
-            <fv-animated-icon icon="Info" :font-size="16" />
-            <span>{{ t('bulk-edit-hint') }}</span>
-          </div>
-          <form ref="bulkForm" @submit.prevent>
+    <v-dialog v-model="bulkEditDialog" max-width="500">
+      <v-card class="md3-dialog blur-glass">
+        <v-toolbar color="transparent" class="border-b">
+          <v-toolbar-title>{{ t('bulk-edit-title') }}</v-toolbar-title>
+          <v-spacer />
+          <v-btn icon="mdi-close" variant="text" @click="bulkEditDialog = false" />
+        </v-toolbar>
+        <v-card-text class="pa-6">
+          <v-alert color="info" variant="tonal" class="mb-4" icon="mdi-information-outline">
+            {{ t('bulk-edit-hint') }}
+          </v-alert>
+          <v-form @submit.prevent>
             <div class="field-label-sm mb-1">{{ t('aspect') }}</div>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
-              <input type="number" placeholder="Original" v-model="bulkEditData.aspectWidth" class="blur-glass md3-field" style="flex: 1;" />
+            <div class="d-flex align-center gap-2 mb-4">
+              <v-text-field type="number" placeholder="Original" v-model="bulkEditData.aspectWidth" hide-details variant="outlined" density="comfortable" />
               <span>:</span>
-              <input type="number" placeholder="Original" v-model="bulkEditData.aspectHeight" class="blur-glass md3-field" style="flex: 1;" />
+              <v-text-field type="number" placeholder="Original" v-model="bulkEditData.aspectHeight" hide-details variant="outlined" density="comfortable" />
             </div>
             <div class="field-label-sm mb-1">{{ t('dim') }}</div>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-              <fv-slider :min="0" :max="1" :step="0.01" :model-value="bulkEditData.backgroundDim ?? 0" @update:model-value="bulkEditData.backgroundDim = $event" style="flex: 1;" />
-              <fv-button :border-radius="30" v-if="bulkEditData.backgroundDim !== null" icon="ChromeClose" class="icon-btn" @click="bulkEditData.backgroundDim = null" />
-            </div>
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 16px;">
+            <v-slider
+              thumb-label
+              :min="0"
+              :max="1"
+              :step="0.01"
+              :model-value="bulkEditData.backgroundDim ?? 0"
+              @update:model-value="bulkEditData.backgroundDim = $event"
+              hide-details
+              color="primary"
+              class="mb-2">
+              <template v-slot:append>
+                <v-btn icon="mdi-close-circle" size="small" variant="text" color="error" v-if="bulkEditData.backgroundDim !== null" @click="bulkEditData.backgroundDim = null" />
+              </template>
+            </v-slider>
+            <div class="d-flex align-center justify-space-between mt-4">
               <span class="field-label-sm">{{ t('hold_cover') }}</span>
-              <div class="btn-group">
-                <fv-button :border-radius="30" type="button" class="group-btn" :class="{ 'is-active': bulkEditData.holdCover === null }" @click="bulkEditData.holdCover = null">Keep</fv-button>
-                <fv-button :border-radius="30" type="button" class="group-btn" :class="{ 'is-active': bulkEditData.holdCover === 1 }" @click="bulkEditData.holdCover = 1">On</fv-button>
-                <fv-button :border-radius="30" type="button" class="group-btn" :class="{ 'is-active': bulkEditData.holdCover === 0 }" @click="bulkEditData.holdCover = 0">Off</fv-button>
-              </div>
+              <v-btn-toggle v-model="bulkEditData.holdCover" color="primary" variant="outlined" density="compact">
+                <v-btn :value="null">Keep</v-btn>
+                <v-btn :value="true">On</v-btn>
+                <v-btn :value="false">Off</v-btn>
+              </v-btn-toggle>
             </div>
-          </form>
-        </div>
-        <div class="pa-4 border-t dialog-footer">
-          <div style="flex: 1;"></div>
-          <fv-button :border-radius="30" :background="bgColor" :foreground="mainColor" @click="bulkEditDialog = false">{{ t('close') }}</fv-button>
-          <fv-button :border-radius="30" :background="mainColor" :foreground="bgColor" @click="saveBulkEdit">{{ t('save') }}</fv-button>
-        </div>
-      </div>
-    </div>
+          </v-form>
+        </v-card-text>
+        <v-card-actions class="pa-4 border-t">
+          <v-spacer />
+          <button class="md3-btn md3-btn-text" @click="bulkEditDialog = false">{{ t('close') }}</button>
+          <button class="md3-btn md3-btn-filled" @click="saveBulkEdit">{{ t('save') }}</button>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -684,8 +813,54 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   padding: 20px;
   box-sizing: border-box;
   font-family: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  color: var(--main-color);
 }
 
+/* ===== MD3 Buttons ===== */
+.md3-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  white-space: nowrap;
+  font-family: inherit;
+}
+.md3-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.md3-btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.md3-btn-text {
+  background: transparent;
+  color: rgba(var(--main-color-rgb), 0.7);
+}
+.md3-btn-text:hover:not(:disabled) {
+  background: rgba(var(--main-color-rgb), 0.08);
+}
+.md3-btn-tonal {
+  background: rgba(var(--main-color-rgb), 0.12);
+  color: var(--main-color);
+}
+.md3-btn-tonal:hover:not(:disabled) {
+  background: rgba(var(--main-color-rgb), 0.2);
+}
+.md3-btn-filled {
+  background: var(--main-color);
+  color: var(--bg-color);
+  font-weight: 600;
+}
+.md3-btn-filled:hover:not(:disabled) {
+  box-shadow: 0 2px 8px rgba(var(--main-color-rgb), 0.3);
+}
 
 /* ===== Header ===== */
 .batch-header {
@@ -735,7 +910,7 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
 }
 .md3-search:focus {
   outline: none;
-  border-color: rgba(var(--main-color-rgb),0.5);
+  border-color: rgba(var(--main-color-rgb), 0.5);
 }
 .md3-search::placeholder {
   color: rgba(var(--main-color-rgb), 0.35);
@@ -756,7 +931,8 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   flex-shrink: 0;
 }
 
-.sel-left, .sel-right {
+.sel-left,
+.sel-right {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -780,13 +956,25 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   animation: pulse-glow 2s infinite;
 }
 @keyframes pulse-glow {
-  0% { box-shadow: 0 0 0 0 rgba(var(--main-color-rgb), 0.4); }
-  70% { box-shadow: 0 0 0 8px rgba(var(--main-color-rgb), 0); }
-  100% { box-shadow: 0 0 0 0 rgba(var(--main-color-rgb), 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--main-color-rgb), 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(var(--main-color-rgb), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--main-color-rgb), 0);
+  }
 }
 
-.spin-anim { animation: spin 1.5s linear infinite; }
-@keyframes spin { 100% { transform: rotate(360deg); } }
+.spin-anim {
+  animation: spin 1.5s linear infinite;
+}
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
 
 /* ===== Chart List ===== */
 .chart-list {
@@ -842,9 +1030,10 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
 
 .progress-bg {
   position: absolute;
-  top: 0; left: 0;
+  top: 0;
+  left: 0;
   height: 100%;
-  background: linear-gradient(90deg, rgba(var(--main-color-rgb),0.08), rgba(var(--main-color-rgb),0.18));
+  background: linear-gradient(90deg, rgba(var(--main-color-rgb), 0.08), rgba(var(--main-color-rgb), 0.18));
   z-index: 0;
   transition: width 0.3s linear;
 }
@@ -908,6 +1097,32 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
   flex-shrink: 0;
 }
 
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  color: rgba(var(--main-color-rgb), 0.6);
+  transition: all 0.15s ease;
+}
+.icon-btn:hover:not(:disabled) {
+  background: rgba(var(--main-color-rgb), 0.08);
+  color: var(--main-color);
+}
+.icon-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.icon-btn-danger:hover:not(:disabled) {
+  background: rgba(var(--sub-color-rgb), 0.15);
+  color: var(--sub-color);
+}
+
 .field-label-sm {
   font-size: 12px;
   font-weight: 600;
@@ -920,225 +1135,63 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
 .md3-dialog {
   background: transparent !important;
   backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
   border: 1px solid rgba(var(--main-color-rgb), 0.08) !important;
   border-radius: 28px !important;
 }
 
 .md3-dialog-full {
-  background: transparent !important;
-  backdrop-filter: blur(24px) !important;
+  background: rgba(var(--bg-color-rgb), 0.55) !important;
+  backdrop-filter: blur(40px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(160%) !important;
 }
 
-.border-b { border-bottom: 1px solid rgba(var(--main-color-rgb), 0.06) !important; }
-.border-t { border-top: 1px solid rgba(var(--main-color-rgb), 0.06) !important; }
-
-/* ===== Spacing utilities (replacing Vuetify) ===== */
-.pa-0 { padding: 0 !important; }
-.pa-4 { padding: 16px !important; }
-.pa-6 { padding: 24px !important; }
-.h-100 { height: 100% !important; }
-.mb-1 { margin-bottom: 4px !important; }
-.mb-4 { margin-bottom: 16px !important; }
-.mt-4 { margin-top: 16px !important; }
-.mt-2 { margin-top: 8px !important; }
-
-/* ===== Dialogs (custom overlay) ===== */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.border-b {
+  border-bottom: 1px solid rgba(var(--main-color-rgb), 0.06) !important;
 }
-.dialog-fullscreen-inner {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.dialog-modal-inner {
-  max-width: 600px;
-  width: 90%;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.dialog-header {
-  display: flex;
-  align-items: center;
-  padding: 12px 20px;
-  flex-shrink: 0;
-}
-.dialog-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: rgba(var(--main-color-rgb), 0.9);
-  margin: 0;
-}
-.dialog-close-btn {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: transparent;
-  border-radius: 50%;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-.dialog-close-btn:hover {
-  background: rgba(var(--main-color-rgb), 0.08);
-}
-.dialog-body {
-  flex: 1;
-  overflow-y: auto;
-}
-.dialog-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+.border-t {
+  border-top: 1px solid rgba(var(--main-color-rgb), 0.06) !important;
 }
 
-/* ===== Custom Checkbox ===== */
-.md3-checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: var(--sub-color, var(--main-color));
-  flex-shrink: 0;
+/* ===== Spacing utilities ===== */
+.pa-0 {
+  padding: 0 !important;
 }
-
-/* ===== Level Badge (replaces v-chip for level) ===== */
-.level-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  border: 1px solid rgba(var(--main-color-rgb),0.4);
-  color: var(--main-color);
-  background: transparent;
-  flex-shrink: 0;
+.pa-4 {
+  padding: 16px !important;
 }
-
-/* ===== Status Chip (replaces v-chip for status) ===== */
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 500;
-  flex-shrink: 0;
+.pa-6 {
+  padding: 24px !important;
 }
-.status-chip.status-pending {
-  background: rgba(var(--main-color-rgb), 0.08);
-  color: rgba(var(--main-color-rgb), 0.6);
+.h-100 {
+  height: 100% !important;
 }
-.status-chip.status-rendering {
-  background: rgba(var(--main-color-rgb), 0.15);
-  color: var(--main-color);
+.mb-1 {
+  margin-bottom: 4px !important;
 }
-.status-chip.status-done {
-  background: rgba(var(--main-color-rgb), 0.15);
-  color: var(--main-color);
+.mb-4 {
+  margin-bottom: 16px !important;
 }
-.status-chip.status-failed {
-  background: rgba(var(--sub-color-rgb), 0.15);
-  color: var(--sub-color);
+.mt-4 {
+  margin-top: 16px !important;
 }
-
-/* ===== Input Grid (replaces v-row/v-col) ===== */
-.input-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.input-grid-col {
-  flex: 1;
-  min-width: 120px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* ===== Edit Dialog Two Column Layout ===== */
-.edit-two-col {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 12px;
-}
-.edit-col-left {
-  flex: 0 0 100%;
-}
-.edit-col-right {
-  flex: 1;
-  min-width: 200px;
-}
-.edit-col-full {
-  flex: 0 0 100%;
-}
-
-/* ===== Divider ===== */
-.hr-divider {
-  border: none;
-  border-top: 1px solid rgba(var(--main-color-rgb), 0.06);
-  margin: 16px 0;
-}
-
-/* ===== Alert Info (replaces v-alert) ===== */
-.alert-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: rgba(33, 150, 243, 0.08);
-  border: 1px solid rgba(33, 150, 243, 0.15);
-  border-radius: 12px;
-  color: rgba(var(--main-color-rgb), 0.7);
-  font-size: 13px;
-  margin-bottom: 16px;
-}
-
-/* ===== Button Group (replaces v-btn-toggle) ===== */
-.btn-group {
-  display: inline-flex;
-  border-radius: 20px;
-  overflow: hidden;
-  border: 1px solid rgba(var(--main-color-rgb),0.3);
-}
-.group-btn {
-  padding: 6px 16px;
-  border: none;
-  background: transparent;
-  color: rgba(var(--main-color-rgb), 0.6);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  font-family: inherit;
-}
-.group-btn:hover {
-  background: rgba(var(--main-color-rgb),0.08);
-}
-.group-btn.is-active {
-  background: rgba(var(--main-color-rgb),0.15);
-  color: var(--main-color);
+.mt-2 {
+  margin-top: 8px !important;
 }
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
-  .batch-layout { padding: 12px; }
-  .header-actions { flex-wrap: wrap; }
-  .header-actions .md3-btn span { display: none; }
-  .sel-right .md3-btn span { display: none; }
+  .batch-layout {
+    padding: 12px;
+  }
+  .header-actions {
+    flex-wrap: wrap;
+  }
+  .header-actions .md3-btn span {
+    display: none;
+  }
+  .sel-right .md3-btn span {
+    display: none;
+  }
 }
 </style>

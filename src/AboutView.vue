@@ -1,65 +1,15 @@
-<template>
-  <div class="about-container" ref="containerRef">
-    <!-- Canvas 雪花层 -->
-    <canvas ref="canvasRef" class="snow-canvas"></canvas>
-
-    <!-- 极简的时间线背景线 -->
-    <div class="static-glass background"></div>
-    <div class="about-content">
-      <!-- Logo 和版本号，带进入动画 -->
-      <div class="app-header">
-        <fv-img src="/phi-tklogo.png" alt="Phi TKC" v-glass class="glass fluent-glass app-logo-img" />
-		<p v-glass class="glass fluent-glass version-badge">v{{appVersion}}</p>
-      </div>
-      <!-- 信息卡片，纵向排列，依次滑入 -->
-      <div class="info-cards">
-        <div v-glass class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" ripple>
-          <div class="card-content">
-            <div class="static-glass card-icon">
-              <fv-AnimatedIcon :font-size="28" icon="Globe" />
-            </div>
-            <div class="card-text">
-              <h3 class="card-title">GitHub</h3>
-              <p class="card-subtitle">View source code</p>
-            </div>
-            <div class="card-link">
-              <fv-AnimatedIcon :fontSize="20" icon="Link" />
-            </div>
-          </div>
-        </div>
-        <div v-glass class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openLicense" ripple>
-          <div class="card-content">
-            <div class="static-glass card-icon">
-              <fv-AnimatedIcon :fontSize="28" icon="PrintAllPages" />
-            </div>
-            <div class="card-text">
-              <h3 class="card-title">License</h3>
-              <p class="card-subtitle">{{ t('license') }}</p>
-            </div>
-            <div class="card-link">
-              <fv-AnimatedIcon :fontSize="20" icon="Link" />
-            </div>
-          </div>
-        </div>
-        <div v-glass class="glass fluent-glass info-card" :style="{ '--i': 2 }">
-          <div class="card-content">
-            <div class="static-glass card-icon">
-              <fv-AnimatedIcon :fontSize="28" icon="Package" />
-            </div>
-            <div class="card-text">
-              <h3 class="card-title">Version</h3>
-              <p class="card-subtitle">v{{ appVersion }}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-      <!-- 底部版权（传入动态年份） -->
-      <div v-glass class="glass fluent-glass about-footer">
-        		<p class="footer-sec">{{ t('footer.copyright', { year: currentYear }) }}</p>
-      </div>
-    </div>
-  </div>
-</template>
+<i18n>
+en:
+  app: Phi TKC
+  license: Licensed by GPLv3
+  footer:
+    copyright: © {year} Phi TKC. All rights reserved.
+zh-CN:
+  app: Phi TKC
+  license: 基于 GPLv3 协议授权
+  footer:
+    copyright: © {year} Phi TKC. 保留所有权利。
+</i18n>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue';
@@ -68,24 +18,10 @@ import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-shell';
 
 const { t } = useI18n();
+
+// Dynamic footer year, Phi-TKC style.
 const currentYear = ref(new Date().getFullYear());
-const appVersion = ref('1.0.0');
-
-// Canvas 引用
-const containerRef = ref<HTMLElement | null>(null);
-const canvasRef = ref<HTMLCanvasElement | null>(null);
-
-let animationFrameId: number | null = null;
-let particles: Particle[] = [];
-let ctx: CanvasRenderingContext2D | null = null;
-
-interface Particle {
-  x: number;
-  y: number;
-  radius: number;
-  speedY: number;
-  speedX: number;
-}
+const appVersion = ref('0.1.63');
 
 const fetchVersion = async () => {
   try {
@@ -101,11 +37,29 @@ const openGitHub = () => {
   });
 };
 
+// Phi-TKC-only: the License card is clickable.
 const openLicense = () => {
   open('https://github.com/CMDBookDevelope/Phi-TKC/blob/main/LICENSE').catch((e) => {
-    console.error('Failed to open GitHub:', e);
+    console.error('Failed to open LICENSE:', e);
   });
 };
+
+// ===== Canvas snow =====
+const containerRef = ref<HTMLElement | null>(null);
+const canvasRef = ref<HTMLCanvasElement | null>(null);
+
+let animationFrameId: number | null = null;
+let particles: Particle[] = [];
+let ctx: CanvasRenderingContext2D | null = null;
+let particleColor = '';
+
+interface Particle {
+  x: number;
+  y: number;
+  radius: number;
+  speedY: number;
+  speedX: number;
+}
 
 // 初始化 Canvas 和粒子
 const initCanvas = () => {
@@ -128,14 +82,17 @@ const initCanvas = () => {
   // 缩放绘图上下文以匹配设备像素比
   ctx.scale(dpr, dpr);
 
-  // 粒子数量：根据容器面积动态调整（但固定为 40 个，足够视觉丰富且性能良好）
+  // 雪花颜色取自主题变量，避免硬编码
+  particleColor = getComputedStyle(document.documentElement).getPropertyValue('--main-color').trim();
+
+  // 粒子数量：根据容器面积动态调整（上限 40，视觉丰富且性能良好）
   const count = Math.min(40, Math.floor((rect.width * rect.height) / 15000) + 20);
   particles = [];
   for (let i = 0; i < count; i++) {
     particles.push({
       x: Math.random() * rect.width,
       y: Math.random() * rect.height,
-      radius: 2 + Math.random() * 2, // 2~5px
+      radius: 2 + Math.random() * 2, // 2~4px
       speedY: 0.5 + Math.random() * 1.5,
       speedX: -0.3 + Math.random() * 0.6, // 轻微水平飘动
     });
@@ -157,8 +114,8 @@ const animate = () => {
   // 清空画布（透明背景，让下层内容显示）
   ctx.clearRect(0, 0, width, height);
 
-  // 绘制所有雪花（无透明度，纯色）
-  ctx.fillStyle = '#AFDAEF';
+  // 绘制所有雪花
+  ctx.fillStyle = particleColor;
   for (const p of particles) {
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
@@ -174,7 +131,7 @@ const animate = () => {
     if (p.y > height + 20) {
       p.y = -10;
       p.x = Math.random() * width;
-      p.radius = 2 + Math.random() * 6;
+      p.radius = 2 + Math.random() * 2;
       p.speedY = 0.5 + Math.random() * 1.5;
       p.speedX = -0.3 + Math.random() * 0.6;
     }
@@ -209,21 +166,81 @@ onUnmounted(() => {
 });
 </script>
 
-<i18n>
-en:
-  app: Phi TKC
-  license: Licensed by GPLv3
-  footer:
-    copyright: © {year} Phi TKC. All rights reserved.
-zh-CN:
-  app: Phi TKC
-  license: 基于 GPLv3 协议授权
-  footer:
-    copyright: © {year} Phi TKC. 保留所有权利。
-</i18n>
+<template>
+  <div class="about-container" ref="containerRef">
+    <!-- Canvas 雪花层 -->
+    <canvas ref="canvasRef" class="snow-canvas"></canvas>
+
+    <div class="about-content">
+      <!-- 应用头部：Logo 和版本标签 -->
+      <div class="app-header">
+        <v-img
+          src="/phi-tklogo.png"
+          alt="Phi TKC"
+          class="glass fluent-glass app-logo-img"
+          v-glass
+        />
+        <div class="glass fluent-glass version-badge" v-glass>
+          <v-icon size="16" icon="mdi-tag-outline" class="version-icon" />
+          <span class="version-text">v{{ appVersion }}</span>
+        </div>
+      </div>
+
+      <!-- 信息卡片，纵向排列，依次滑入 -->
+      <div class="info-cards">
+        <div class="glass fluent-glass info-card" :style="{ '--i': 0 }" @click="openGitHub" v-glass>
+          <div class="card-content">
+            <div class="static-glass card-icon">
+              <v-icon size="28" icon="mdi-github" />
+            </div>
+            <div class="card-text">
+              <h3 class="card-title">GitHub</h3>
+              <p class="card-subtitle">View source code</p>
+            </div>
+            <div class="card-link">
+              <v-icon size="20" icon="mdi-open-in-new" />
+            </div>
+          </div>
+        </div>
+
+        <div class="glass fluent-glass info-card" :style="{ '--i': 1 }" @click="openLicense" v-glass>
+          <div class="card-content">
+            <div class="static-glass card-icon">
+              <v-icon size="28" icon="mdi-license" />
+            </div>
+            <div class="card-text">
+              <h3 class="card-title">License</h3>
+              <p class="card-subtitle">{{ t('license') }}</p>
+            </div>
+            <div class="card-link">
+              <v-icon size="20" icon="mdi-open-in-new" />
+            </div>
+          </div>
+        </div>
+
+        <div class="glass fluent-glass info-card" :style="{ '--i': 2 }" v-glass>
+          <div class="card-content">
+            <div class="static-glass card-icon">
+              <v-icon size="28" icon="mdi-package-variant-closed" />
+            </div>
+            <div class="card-text">
+              <h3 class="card-title">Version</h3>
+              <p class="card-subtitle">v{{ appVersion }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部版权（传入动态年份） -->
+      <div class="glass fluent-glass about-footer" v-glass>
+        <p class="footer-sec">{{ t('footer.copyright', { year: currentYear }) }}</p>
+      </div>
+    </div>
+  </div>
+</template>
 
 <style scoped>
-/* 容器：居中布局，暗色背景 */
+/* 容器：居中布局，背景由 App.vue 提供，故保持透明 */
 .about-container {
   width: 100%;
   height: 100vh;
@@ -236,7 +253,7 @@ zh-CN:
   position: relative;
   overflow: hidden;
   padding: 24px;
-  background-color: #ffffff00;
+  background-color: transparent;
 }
 
 /* Canvas 雪花层：覆盖容器，不干扰交互 */
@@ -247,7 +264,7 @@ zh-CN:
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 0; /* 放在内容后面，但若想雪花浮在内容上可改为 z-index: 2，但不影响点击 */
+  z-index: 0;
   display: block;
 }
 
@@ -257,48 +274,53 @@ zh-CN:
   z-index: 1;
   display: flex;
   flex-direction: column;
-  align-items: left;
+  align-items: center;
   gap: 40px;
   width: 100%;
   max-width: 450px;
 }
+
 /* 应用头部：Logo 和版本标签 */
 .app-header {
   display: flex;
   flex-direction: column;
-  align-items: left;
+  align-items: center;
   gap: 16px;
   opacity: 0;
   transform: translateY(-20px);
   animation: headerAppear 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
   animation-delay: 0.2s;
 }
+
 @keyframes headerAppear {
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
+
 .app-logo-img {
   width: 120px;
-  max-width: 70vw;
-  height: auto;
-  object-fit: contain;
+  height: 120px;
+  border-radius: 20px;
+  transition: transform 0.3s ease-in-out;
 }
+
 .app-logo-img:hover {
-  border-radius: 16px;
+  transform: translateY(-4px) scale(1.03);
 }
+
 .version-badge {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px 14px;
-  width: 66px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
   font-size: 0.85rem;
+  color: var(--main-color);
   opacity: 0.85;
-  color: var(--main-color)
 }
+
 /* 信息卡片容器：纵向排列 */
 .info-cards {
   display: flex;
@@ -306,30 +328,39 @@ zh-CN:
   gap: 14px;
   width: 100%;
 }
+
 /* 卡片基础样式与进入动画 */
 .info-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(var(--main-color-rgb), 0.08);
   overflow: hidden;
   cursor: pointer;
   opacity: 0;
   transform: translateX(-30px);
   animation: cardSlideIn 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  animation-delay: .2s;
+  --i: 0;
+  animation-delay: calc(0.15s * var(--i) + 0.6s);
   transition:
     transform 0.25s ease-in-out,
     box-shadow 0.25s ease-in-out,
     border-color 0.25s ease-in-out;
 }
+
 /* 偶数卡片从右侧滑入，增加节奏变化 */
-.info-card:nth-child(none) {
+.info-card:nth-child(even) {
   transform: translateX(30px);
 }
+
 @keyframes cardSlideIn {
   to {
     opacity: 1;
     transform: translateX(0);
   }
 }
+
+.info-card:hover {
+  transform: translateY(-3px) scale(1.02);
+}
+
 /* 卡片内部布局 */
 .card-content {
   display: flex;
@@ -337,6 +368,7 @@ zh-CN:
   padding: 18px 20px;
   gap: 16px;
 }
+
 .card-icon {
   width: 50px;
   height: 50px;
@@ -345,23 +377,31 @@ zh-CN:
   justify-content: center;
   flex-shrink: 0;
   border-radius: 16px;
+  color: var(--main-color);
 }
+
 .card-text {
   flex: 1;
   min-width: 0;
 }
+
 .card-title {
   font-size: 1.05rem;
   font-weight: 600;
   color: var(--main-color);
   margin: 0 0 4px 0;
 }
+
 .card-subtitle {
   font-size: 0.85rem;
   color: var(--main-color);
   opacity: 0.65;
+  margin: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
 .card-link {
   color: var(--main-color);
   opacity: 0.65;
@@ -369,34 +409,38 @@ zh-CN:
     transform 0.2s ease-in-out,
     color 0.2s ease-in-out;
 }
+
 .info-card:hover .card-link {
   transform: translateX(4px);
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--main-color);
+  opacity: 1;
 }
+
 /* 底部版权 */
 .about-footer {
   margin-top: 8px;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  color: var(--main-color);
   animation: fadeIn 0.5s ease forwards;
   animation-delay: 1.4s;
-  align-items: center;
-  padding: 4px 0px;
-  width: 200px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.85);
 }
+
 @keyframes fadeIn {
   to {
     opacity: 1;
   }
 }
+
 .footer-sec {
   font-size: 0.8rem;
   color: var(--main-color);
   opacity: 0.45;
-  margin:0;
+  margin: 0;
   text-align: center;
 }
+
 /* 响应式微调 */
 @media (max-width: 768px) {
   .about-container {
@@ -404,11 +448,13 @@ zh-CN:
   }
   .app-logo-img {
     width: 100px;
+    height: 100px;
   }
   .card-content {
     padding: 14px 16px;
   }
 }
+
 @media (max-width: 480px) {
   .about-content {
     gap: 28px;

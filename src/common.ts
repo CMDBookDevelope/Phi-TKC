@@ -1,37 +1,65 @@
-import { i18n } from './main'
-export type ToastIntent = 'success' | 'info' | 'warning'
-export const SUPPORTED_LOCALES = ['en', 'zh-CN', 'zh-TW']
+import { toast as sonnerToast } from 'vuetify-sonner';
+
+import { SUPPORTED_LOCALES, i18n } from './main';
+
+import moment from 'moment';
+
+import 'moment/dist/locale/zh-cn';
+import 'moment/dist/locale/zh-hk';
+
 export function anyFilter() {
   return {
     name: i18n.global.t('any-filter'),
     extensions: ['*'],
-  }
-}
-export function isString(s: unknown): s is string {
-  return typeof s === 'string'
-}
-export function isNumeric(num: any) {
-  return (typeof num === 'number' || (typeof num === 'string' && num.trim() !== '')) && !isNaN(num as number)
-}
-// 表单校验规则
-export const RULES = {
-  non_empty: (v: string) => v.trim().length > 0 || i18n.global.t('rules.non-empty'),
-  positive: (v: string) => (isNumeric(v) && Number(v) >= 0) || i18n.global.t('rules.positive'),
-  positiveInt: (v: string) => {
-    if (!isNumeric(v)) return i18n.global.t('rules.positive-int')
-    const n = Number(v)
-    return Math.abs(n - Math.round(n)) < 1e-4 && n > 0 || i18n.global.t('rules.positive-int')
-  },
-}
-export function setTitle(title: string) {
-  document.title = title ? `${title} - Phi-TKC` : 'Phi-TKC'
-}
-// 语言切换
-export function changeLocale(locale: string) {
-  if (locale.startsWith('en')) locale = 'en'
-  if (!SUPPORTED_LOCALES.includes(locale)) locale = 'en'
-  if (locale === 'zh-TW') i18n.global.locale.value = 'zh-CN'
-  else i18n.global.locale.value = locale as 'en' | 'zh-CN'
-  localStorage.setItem('locale', locale)
+  };
 }
 
+export function isString(s: unknown): s is string {
+  return typeof s === 'string';
+}
+
+export const RULES = {
+  // Vuetify's `clearable` sets the model to null, so accept nullish values here.
+  non_empty: (value: string | null | undefined) => (value ?? '').trim().length > 0 || i18n.global.t('rules.non-empty'),
+  positive: (value: string) => (isNumeric(value) && Number(value) >= 0) || i18n.global.t('rules.positive'),
+  positiveInt: (value: string) => (isNumeric(value) && Math.abs(Number(value) - Math.round(Number(value))) < 1e-4 && Number(value) > 0) || i18n.global.t('rules.positive-int'),
+};
+
+export function isNumeric(num: any) {
+  return (typeof num === 'number' || (typeof num === 'string' && num.trim() !== '')) && !isNaN(num as number);
+}
+
+export function setTitle(title: string) {
+  document.title = title.length ? title + ' - Phi-TKC' : 'Phi-TKC';
+}
+
+export function changeLocale(locale: string) {
+  if (locale.startsWith('en')) locale = 'en';
+  if (!SUPPORTED_LOCALES.includes(locale)) locale = 'en';
+  i18n.global.locale.value = (locale === 'zh-TW' ? 'zh-CN' : locale) as typeof i18n.global.locale.value;
+  localStorage.setItem('locale', locale);
+  const momentLocale =
+    {
+      'zh-CN': 'zh-cn',
+      'zh-TW': 'zh-hk',
+      en: 'en-us',
+    }[locale] ?? 'en-us';
+  moment.locale(momentLocale);
+}
+
+export function toast(message: string, kind?: 'success' | 'info' | 'warning' | 'error') {
+  sonnerToast(message, {
+    duration: 2000,
+    cardProps: {
+      color: kind,
+      // @ts-ignore
+      style: 'width: var(--width)',
+    },
+  });
+}
+
+export function toastError(error: any) {
+  console.error(error);
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.length) toast(msg, 'error');
+}

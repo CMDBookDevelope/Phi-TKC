@@ -1,25 +1,14 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { bgColor, mainColor, subColor } from '@/colorStore';
-
 defineProps<{ tooltip: string; btnClass?: string[] | string }>();
-
-const show = ref(false);
 </script>
 
 <template>
-  <fv-callout
-  v-model="show"
-  effect="hover"
-  position="bottomLeft"
-  max-width="250px"
-  :callout-bg="bgColor"
-  border-radius="16px"
-  >
-    <fv-animated-icon icon="Info" model-value="scaleDown" />
-    <template v-slot:main>
-      <fv-animated-icon icon="Info" model-value="scaleDown" />
-      <a>{{ tooltip }}</a>
+  <v-tooltip location="bottom" max-width="250px">
+    <template v-slot:activator="{ props }">
+      <v-btn :class="btnClass" icon v-bind="props" :ripple="false" variant="plain">
+        <v-icon color="var(--main-color)"> mdi-information-outline </v-icon>
+      </v-btn>
     </template>
-  </fv-callout>
+    <span>{{ tooltip }}</span>
+  </v-tooltip>
 </template>

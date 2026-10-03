@@ -4,79 +4,93 @@
   padding: 0;
   user-select: none; /* ban选中 */
   -webkit-user-select: none; /* Safari */
-  -moz-user-select: none;    /* Firefox */
-  -ms-user-select: none;     /* IE/Edge */
+  -moz-user-select: none; /* Firefox */
+  -ms-user-select: none; /* IE/Edge */
 }
-:root{
+
+:root {
+  /* Defaults; App.vue overwrites these from the color store at runtime. */
   --main-color: #39c8bb;
   --bg-color: #222222;
   --sub-color: #938cbb;
+  --main-color-rgb: 57, 200, 187;
+  --bg-color-rgb: 34, 34, 34;
+  --sub-color-rgb: 147, 140, 187;
 }
 
-html, body, #app {
+html,
+body,
+#app {
   height: 100%;
   overflow: hidden;
-  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font-family: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
   background: #00000000;
   color: var(--main-color);
 }
+
 /* 选中白名单 */
-input, textarea, [contenteditable="true"], .copyable {
-  user-select: text;
-  -webkit-user-select: text;
-  -moz-user-select: text;
-  -ms-user-select: text;
-}
-/* 可复制文本（textarea 行为）：错误信息等允许选中复制 */
+input,
+textarea,
+[contenteditable='true'],
 .copyable {
   user-select: text;
   -webkit-user-select: text;
   -moz-user-select: text;
   -ms-user-select: text;
+}
+
+/* 可复制文本（textarea 行为）：错误信息等允许选中复制 */
+.copyable {
   cursor: text;
 }
-/* VFluent 亚克力玻璃卡片通用类 */
+
+/* ===== 毛玻璃通用类 ===== */
 .fluent-glass {
   background: rgba(var(--bg-color-rgb), 0.2);
-  transition: box-shadow .2s ease-in-out,
-              -webkit-backdrop-filter .2s ease-in-out,box-shadow .2s ease-in-out !important;
+  transition:
+    box-shadow 0.2s ease-in-out,
+    -webkit-backdrop-filter 0.2s ease-in-out,
+    box-shadow 0.2s ease-in-out !important;
   box-shadow: 0 8px 24px rgba(var(--bg-color-rgb), 0.1);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
   border-radius: 16px;
-  border: 1px solid rgba(var(--main-color-rgb), 0.03); 
+  border: 1px solid rgba(var(--main-color-rgb), 0.03);
 }
 .fluent-glass:hover {
   border-color: rgba(var(--main-color-rgb), 0.8);
-  box-shadow: 0 8px 24px rgba(var(--bg-color-rgb),0.35);
+  box-shadow: 0 8px 24px rgba(var(--bg-color-rgb), 0.35);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-radius: 16px;
-  border: 1px solid rgba(var(--bg-color-rgb), 0.18); 
+  border: 1px solid rgba(var(--bg-color-rgb), 0.18);
 }
 .static-glass {
   background: rgba(var(--bg-color-rgb), 0.2);
-  transition: box-shadow .2s ease-in-out,
-              -webkit-backdrop-filter .2s ease-in-out,box-shadow .2s ease-in-out;
-  box-shadow: 0 8px 24px rgba(255,255,255,0.1);
+  transition:
+    box-shadow 0.2s ease-in-out,
+    -webkit-backdrop-filter 0.2s ease-in-out,
+    box-shadow 0.2s ease-in-out;
+  box-shadow: 0 8px 24px rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
 }
 .blur-glass {
   background: rgba(var(--bg-color-rgb), 0.2);
-  box-shadow: 0 8px 24px rgba(var(--main-color-rgb),0.1);
+  box-shadow: 0 8px 24px rgba(var(--main-color-rgb), 0.1);
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
-  border: 1px solid rgba(var(--main-color-rgb), 0.2); 
+  border: 1px solid rgba(var(--main-color-rgb), 0.2);
 }
 .clear-glass {
   background: rgba(var(--bg-color-rgb), 0.08);
-  box-shadow: 0 8px 24px rgba(var(--main-color-rgb),0.1);
+  box-shadow: 0 8px 24px rgba(var(--main-color-rgb), 0.1);
   backdrop-filter: blur(1px);
   -webkit-backdrop-filter: blur(1px);
-  border: 1px solid rgba(var(--bg-color-rgb), 0.2); 
+  border: 1px solid rgba(var(--bg-color-rgb), 0.2);
 }
 
+/* 鼠标跟随高光：由全局 v-glass 指令写入 --highlight-* */
 .glass {
   position: relative;
   z-index: 0;
@@ -89,52 +103,219 @@ input, textarea, [contenteditable="true"], .copyable {
   position: absolute;
   width: 800px; /* 高光直径 */
   height: 800px;
-  background: radial-gradient(circle, 
-  rgba(var(--bg-color-rgb), 0.35) 0%, 
-  rgba(var(--bg-color-rgb), 0.01) 30%, 
-  rgba(var(--bg-color-rgb), 0) 100%);
+  background: radial-gradient(
+    circle,
+    rgba(var(--bg-color-rgb), 0.35) 0%,
+    rgba(var(--bg-color-rgb), 0.01) 30%,
+    rgba(var(--bg-color-rgb), 0) 100%
+  );
   border-radius: 50%;
   pointer-events: none; /* 防止遮挡鼠标事件 */
   transform: translate(-50%, -50%);
-  opacity: 0; /* 初始透明 */
   transition: opacity 0.2s ease; /* 平滑显示/隐藏 */
-}
-
-.glass::after {
   left: var(--highlight-x, 50%);
   top: var(--highlight-y, 50%);
-  opacity: var(--highlight-opacity, 0);
+  opacity: var(--highlight-opacity, 0); /* 初始透明，由 v-glass 指令切换 */
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  transition: all 0.2s ease; /* 平滑显示/隐藏 */
-  background: rgba(var(--main-color-rgb),0.15);
+  transition: all 0.2s ease;
+  background: rgba(var(--main-color-rgb), 0.15);
   border-radius: 1px;
   backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(5px);
 }
 ::-webkit-scrollbar-thumb:hover {
-  transition: all 0.2s ease; /* 平滑显示/隐藏 */
-  background: rgba(var(--main-color-rgb),0.25);
+  transition: all 0.2s ease;
+  background: rgba(var(--main-color-rgb), 0.25);
 }
+
 /* 工具文本类 */
-.text-sm { font-size: 12px; color: rgba(var(--main-color-rgb),0.5); }
-.text-base { font-size: 14px; }
-.text-title { font-size: 18px; font-weight: 600; }
-.flex-row { display: flex; align-items: center; gap: 8px; }
-.flex-col { display: flex; flex-direction: column; gap: 8px; }
+.text-sm {
+  font-size: 12px;
+  color: rgba(var(--main-color-rgb), 0.5);
+}
+.text-base {
+  font-size: 14px;
+}
+.text-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+.flex-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.flex-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 /* Chrome / Edge / Safari 去除数字上下箭头 */
-input[type="number"]::-webkit-inner-spin-button,
-input[type="number"]::-webkit-outer-spin-button {
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
 /* Firefox 去除数字控制器 */
-input[type="number"] {
+input[type='number'] {
   -moz-appearance: textfield;
+}
+
+/* ==========================================================================
+   Vuetify overrides
+   The views are glass panels; Vuetify's MD3 surfaces would otherwise paint an
+   opaque layer on top of them and break the translucent look.
+   ========================================================================== */
+
+:root {
+  --md3-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md3-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md3-ease-decelerate: cubic-bezier(0, 0, 0, 1);
+}
+
+/* Match Vuetify's own font stack to the app shell. */
+.v-application {
+  --v-font-family: 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif !important;
+  font-family: var(--v-font-family);
+  background: transparent !important;
+}
+
+.v-main {
+  background: transparent !important;
+}
+.v-main__wrap {
+  background: transparent !important;
+}
+
+/* Cards: stay transparent so `.fluent-glass` / `.blur-glass` supply the surface. */
+.v-card {
+  background: transparent !important;
+  color: var(--main-color);
+}
+.v-card--variant-flat {
+  border: none;
+}
+
+/* Text fields. The views used to style raw <input>s with `.blur-glass`; now that they
+   are Vuetify fields, the frosted backdrop has to live on `.v-field` instead. */
+.v-field {
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+}
+.v-field--variant-filled {
+  background: rgba(var(--bg-color-rgb), 0.35) !important;
+  border-radius: 12px !important;
+  color: var(--main-color);
+}
+.v-field--variant-filled .v-field__overlay {
+  background: transparent !important;
+}
+.v-field--variant-filled:hover {
+  background: rgba(var(--bg-color-rgb), 0.45) !important;
+}
+.v-field--variant-filled.v-field--focused {
+  background: rgba(var(--bg-color-rgb), 0.55) !important;
+}
+.v-field--variant-outlined .v-field__outline__start,
+.v-field--variant-outlined .v-field__outline__end,
+.v-field--variant-outlined .v-field__outline__notch {
+  border-color: rgba(var(--main-color-rgb), 0.25) !important;
+}
+.v-field--variant-outlined.v-field--focused .v-field__outline__start,
+.v-field--variant-outlined.v-field--focused .v-field__outline__end,
+.v-field--variant-outlined.v-field--focused .v-field__outline__notch {
+  border-color: var(--main-color) !important;
+}
+
+.v-label {
+  color: rgba(var(--main-color-rgb), 0.7) !important;
+  opacity: 1 !important;
+}
+.v-field__input {
+  color: var(--main-color) !important;
+}
+.v-field__input::placeholder {
+  color: rgba(var(--main-color-rgb), 0.4) !important;
+}
+
+/* Dialogs / overlays */
+.v-dialog .v-overlay__content > .v-card,
+.v-dialog .v-overlay__content > form > .v-card {
+  background: rgba(var(--bg-color-rgb), 0.94) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(var(--main-color-rgb), 0.2) !important;
+  border-radius: 24px !important;
+}
+.v-overlay--active .v-overlay__scrim {
+  background: rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Menus / tooltips */
+.v-menu > .v-overlay__content > .v-list,
+.v-menu > .v-overlay__content > .v-card {
+  background: rgba(var(--bg-color-rgb), 0.94) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(var(--main-color-rgb), 0.2) !important;
+}
+.v-tooltip > .v-overlay__content {
+  background: rgba(var(--bg-color-rgb), 0.96) !important;
+  color: var(--main-color) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+}
+
+/* Lists */
+.v-list {
+  background: transparent !important;
+  color: var(--main-color);
+}
+.v-list-item {
+  border-radius: 12px !important;
+  margin: 2px 8px !important;
+}
+.v-list-item:hover {
+  background: rgba(var(--main-color-rgb), 0.1) !important;
+}
+
+/* Chips */
+.v-chip--variant-tonal {
+  background: rgba(var(--main-color-rgb), 0.14) !important;
+  color: var(--main-color) !important;
+}
+
+/* Tabs / buttons */
+.v-tab {
+  border-radius: 12px !important;
+  text-transform: none !important;
+}
+.v-btn {
+  text-transform: none !important;
+  letter-spacing: 0.1px !important;
+}
+
+/* Progress */
+.v-progress-linear__background,
+.v-progress-linear__determinate {
+  border-radius: 4px !important;
+}
+
+/* Snackbar */
+.v-snackbar__wrapper {
+  border-radius: 16px !important;
+  background: rgba(var(--bg-color-rgb), 0.95) !important;
+  backdrop-filter: blur(12px) !important;
+}
+
+/* Dividers */
+.v-divider {
+  border-color: rgba(var(--main-color-rgb), 0.15) !important;
 }

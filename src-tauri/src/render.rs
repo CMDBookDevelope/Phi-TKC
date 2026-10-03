@@ -662,9 +662,14 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf,  exit_
                 o_offset, audio_delay
             );
         }
-        let sfx_click_ptr = &sfx_click as *const _;
-        let sfx_drag_ptr = &sfx_drag as *const _;
-        let sfx_flick_ptr = &sfx_flick as *const _;
+        // Indexed by `NoteKind::order()` (Hold=0, Drag=1, Click=2, Flick=3) — keep this
+        // table in sync with that mapping or the sound effects will be swapped.
+        let sfx_lut = [
+            &sfx_click as *const _,
+            &sfx_drag as *const _,
+            &sfx_click as *const _,
+            &sfx_flick as *const _,
+        ];
         unsafe {
             let lines_ptr = chart.lines.as_ptr();
             let lines_len = chart.lines.len();
@@ -675,11 +680,7 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf,  exit_
                 for j in 0..notes_len {
                     let note = &*notes_ptr.add(j);
                     if !note.fake {
-                        let sfx = match note.kind {
-                            NoteKind::Click | NoteKind::Hold { .. } => &*sfx_click_ptr,
-                            NoteKind::Drag => &*sfx_drag_ptr,
-                            NoteKind::Flick => &*sfx_flick_ptr,
-                        };
+                        let sfx = &*sfx_lut[note.kind.order() as usize];
                         let time = o_offset + note.time as f64;
                         place(time, sfx, volume_sfx);
                     }
@@ -1746,6 +1747,12 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf,  exit_
     let mut current_pbo = 0;
     let mut previous_pbo = 0;
 
+    // Rolling 50 ms FPS window. The whole-render average overstates throughput on
+    // short renders, so report the last measured window instead.
+    let mut fps_update_timer = Instant::now();
+    let mut fps_frame_count = 0u64;
+    let mut realtime_fps = 0u64;
+
     for frame in 0..total_frames {
         pb.inc(1);
         if frame % frames10 == 0 || frame == total_frames - 1 {
@@ -1821,6 +1828,14 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf,  exit_
         previous_pbo = current_pbo;
         current_pbo = (current_pbo + 1) % n;
 
+        fps_frame_count += 1;
+        let fps_elapsed = fps_update_timer.elapsed().as_secs_f64();
+        if fps_elapsed >= 0.05 {
+            realtime_fps = (fps_frame_count as f64 / fps_elapsed).round() as u64;
+            fps_frame_count = 0;
+            fps_update_timer = Instant::now();
+        }
+
         // Send Frame event for GUI progress tracking
         if log_mode == false {
             println!("{}", serde_json::to_string(&IPCEvent::Frame).unwrap());
@@ -1850,16 +1865,10 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf,  exit_
     proc.wait()?;
     if log_mode == true {
         log::info!("Render Time: {:.2?}", render_start_time.elapsed());
-        log::info!(
-            "Average FPS: {:.2}",
-            total_frames as f64 / render_start_time.elapsed().as_secs_f64()
-        );
+        log::info!("Realtime FPS: {}", realtime_fps);
     } else {
         println!("Render Time: {:.2?}", render_start_time.elapsed());
-        println!(
-            "Average FPS: {:.2}",
-            total_frames as f64 / render_start_time.elapsed().as_secs_f64()
-        );
+        println!("Realtime FPS: {}", realtime_fps);
     }
 
     unsafe {

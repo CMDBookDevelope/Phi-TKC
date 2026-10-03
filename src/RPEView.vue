@@ -19,13 +19,13 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
-import { mainColor, bgColor, subColor } from '@/colorStore'
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
+import { toast, toastError } from './common'
 import type { RPEChart } from './model'
 import router from './router'
 
@@ -37,7 +37,7 @@ const getRPECharts = async () => {
   try {
     charts.value = (await invoke('get_rpe_charts')) as RPEChart[] | null
   } catch (e) {
-    showToast(e, 'error')
+    toastError(e)
     charts.value = null
   }
 }
@@ -50,7 +50,7 @@ const bindRPE = async () => {
     toast(t('binded'), 'success')
     await getRPECharts()
   } catch (e) {
-    showToast(e, 'error')
+    toastError(e)
   }
 }
 
@@ -60,7 +60,7 @@ const unbindRPE = async () => {
     toast(t('unbinded'), 'success')
     charts.value = null
   } catch (e) {
-    showToast(e, 'error')
+    toastError(e)
   }
 }
 
@@ -73,44 +73,37 @@ onMounted(() => {
   <div class="rpe-container">
     <!-- Unbinded state -->
     <template v-if="!charts">
-      <div class="glass fluent-glass empty-state">
+      <div class="empty-state glass fluent-glass" v-glass>
         <h2 class="empty-title">{{ t('not-binded') }}</h2>
-        <fv-button :background="mainColor" :foreground="bgColor" :border-radius="20" @click="bindRPE">
-          <fv-AnimatedIcon :font-size=16 icon="Link" modelValue="bounceRotate" :customize-animation="true" />
+        <v-btn color="primary" @click="bindRPE">
+          <v-icon icon="mdi-link-variant" size="18" class="mr-1" />
           <span>{{ t('bind') }}</span>
-        </fv-button>
+        </v-btn>
       </div>
     </template>
 
     <!-- Binded state -->
     <template v-else>
       <div class="rpe-header">
-        <fv-button :background="bgColor" :foreground="subColor" :border-radius="20" @click="unbindRPE">
-          <fv-AnimatedIcon :font-size=16 icon="Cancel" modelValue="bounceRotate" :customize-animation="true" />
+        <v-btn variant="text" class="unbind-btn" @click="unbindRPE">
+          <v-icon icon="mdi-link-off" size="18" class="mr-1" />
           <span>{{ t('unbind') }}</span>
-        </fv-button>
+        </v-btn>
       </div>
 
       <div class="chart-list">
-        <div
-          v-for="chart in charts"
-          :key="chart.id"
-          class="chart-card"
-        >
+        <div v-for="chart in charts" :key="chart.id" class="chart-card glass fluent-glass" v-glass>
           <div class="chart-cover">
-            <div
-              class="cover-image"
-              :style="{ backgroundImage: 'url(' + convertFileSrc(chart.illustration) + ')' }"
-            ></div>
+            <div class="cover-image" :style="{ backgroundImage: 'url(' + convertFileSrc(chart.illustration) + ')' }"></div>
           </div>
           <div class="chart-content">
             <h3 class="chart-name">{{ chart.name }}</h3>
             <p class="chart-id">{{ chart.id }}</p>
             <div class="chart-action">
-              <fv-button :background="mainColor" :foreground="bgColor" :border-radius="20" @click="router.push({ name: 'render', query: { chart: chart.path } })">
-                <fv-AnimatedIcon :font-size=16 icon="Play" modelValue="bounceRotate" :customize-animation="true" />
+              <v-btn color="primary" @click="router.push({ name: 'render', query: { chart: chart.path } })">
+                <v-icon icon="mdi-play-circle-outline" size="18" class="mr-1" />
                 <span>{{ t('render') }}</span>
-              </fv-button>
+              </v-btn>
             </div>
           </div>
         </div>
@@ -140,10 +133,11 @@ onMounted(() => {
   flex: 1;
   gap: 24px;
 }
+
 .empty-title {
   font-size: 22px;
   font-weight: 600;
-  color: rgba(var(--main-color-rgb), 0.7);
+  color: rgba(var(--main-color-rgb), 0.75);
   margin: 0;
   text-align: center;
 }
@@ -155,6 +149,10 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+.unbind-btn {
+  color: rgba(var(--sub-color-rgb), 0.9) !important;
+}
+
 /* ===== Chart List ===== */
 .chart-list {
   display: flex;
@@ -164,27 +162,23 @@ onMounted(() => {
   flex: 1;
 }
 
-/* ===== Chart Card ===== */
 .chart-card {
   display: flex;
   flex-direction: row;
-  background: rgba(25, 25, 25, 0.85);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(var(--main-color-rgb), 0.08);
-  border-radius: 20px;
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
+
 .chart-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-  border-color: rgba(var(--main-color-rgb), 0.12);
 }
+
 .chart-cover {
   width: 35%;
   min-height: 180px;
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(var(--bg-color-rgb), 0.2);
 }
+
 .cover-image {
   width: 100%;
   height: 100%;
@@ -192,6 +186,7 @@ onMounted(() => {
   background-repeat: no-repeat;
   background-size: cover;
 }
+
 .chart-content {
   width: 65%;
   padding: 20px;
@@ -199,18 +194,21 @@ onMounted(() => {
   flex-direction: column;
   gap: 8px;
 }
+
 .chart-name {
   font-size: 18px;
   font-weight: 600;
-  color: rgba(var(--main-color-rgb), 0.9);
+  color: var(--main-color);
   margin: 0;
 }
+
 .chart-id {
   font-size: 12px;
-  color: rgba(var(--main-color-rgb), 0.4);
+  color: rgba(var(--main-color-rgb), 0.45);
   margin: 0;
   font-family: 'Consolas', monospace;
 }
+
 .chart-action {
   margin-top: auto;
   display: flex;
@@ -219,9 +217,18 @@ onMounted(() => {
 
 /* ===== Responsive ===== */
 @media (max-width: 600px) {
-  .rpe-container { padding: 16px; }
-  .chart-card { flex-direction: column; }
-  .chart-cover { width: 100%; min-height: 160px; }
-  .chart-content { width: 100%; }
+  .rpe-container {
+    padding: 16px;
+  }
+  .chart-card {
+    flex-direction: column;
+  }
+  .chart-cover {
+    width: 100%;
+    min-height: 160px;
+  }
+  .chart-content {
+    width: 100%;
+  }
 }
 </style>

@@ -18,8 +18,8 @@ en:
   error: Error
   output: Output
 
-  show-output: Output
-  show-in-folder: Open
+  show-output: Show Output
+  show-in-folder: Open Folder
 
 zh-CN:
   empty: 空空如也
@@ -40,23 +40,27 @@ zh-CN:
   error: 错误
   output: 输出
 
-  show-output: 输出
-  show-in-folder: 打开
+  show-output: 查看输出
+  show-in-folder: 打开文件夹
 
 </i18n>
 
 <script setup lang="ts">
-import { mainColor, bgColor } from '@/colorStore'
-import { ref, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Task, TaskStatus } from './model';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import moment from 'moment';
+import { toastError } from './common';
 
 const { t } = useI18n();
 
 const tasks = ref<Task[]>();
+
+const ACTIVE_STATUSES = ['pending', 'loading', 'mixing', 'rendering'];
+const POLL_ACTIVE_MS = 300;
+const POLL_IDLE_MS = 2000;
 
 async function updateList() {
   tasks.value = await invoke<Task[]>('get_tasks');
@@ -64,8 +68,32 @@ async function updateList() {
 
 await updateList();
 
-const updateTask = setInterval(updateList, 700);
-onUnmounted(() => clearInterval(updateTask));
+// Adaptive polling: a fixed interval can stack calls when IPC is slower than the tick,
+// so chain the next tick only after the previous one settles.
+let stopped = false;
+let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleNextPoll() {
+  if (stopped) return;
+  const busy = tasks.value?.some((task) => ACTIVE_STATUSES.includes(task.status.type)) ?? false;
+  pollTimer = setTimeout(poll, busy ? POLL_ACTIVE_MS : POLL_IDLE_MS);
+}
+
+async function poll() {
+  try {
+    await updateList();
+  } catch (e) {
+    console.error('Failed to refresh tasks:', e);
+  }
+  scheduleNextPoll();
+}
+
+scheduleNextPoll();
+
+onUnmounted(() => {
+  stopped = true;
+  if (pollTimer !== undefined) clearTimeout(pollTimer);
+});
 
 function formatDuration(seconds: number) {
   const duration = moment.duration(Math.ceil(seconds), 'seconds');
@@ -84,7 +112,7 @@ function describeStatus(status: TaskStatus): string {
     case 'loading': return t('status.loading');
     case 'mixing': return t('status.mixing');
     case 'rendering': {
-      const progressDisplay = status.progress >= 0.999 ? '100.00' : (status.progress * 100).toFixed(2);
+      const progressDisplay = status.progress;
       return t('status.rendering', {
         progress: progressDisplay,
         fps: status.fps,
@@ -106,17 +134,26 @@ function statusColor(statusType: string): string {
 }
 
 const errorDialog = ref(false), errorDialogMessage = ref('');
+const outputDialog = ref(false), outputDialogMessage = ref('');
+const detailDialog = ref(false), selectedTask = ref<Task | null>(null);
 const contextMenu = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const contextMenuTask = ref<Task | null>(null);
 
 async function showInFolder(path: string) {
-  try { await invoke('show_in_folder', { path }); } catch (e) { showToast(e, 'error'); }
+  try { await invoke('show_in_folder', { path }); } catch (e) { toastError(e); }
 }
 
 async function showFolder() {
-  try { await invoke('show_folder'); } catch (e) { showToast(e, 'error'); }
+  try { await invoke('show_folder'); } catch (e) { toastError(e); }
+}
+
+function showOutput(task: Task) {
+  if (task.status.type === 'done') {
+    outputDialogMessage.value = task.status.output;
+    outputDialog.value = true;
+  }
 }
 
 const showContextMenu = (event: MouseEvent, task: Task) => {
@@ -132,7 +169,14 @@ const closeContextMenu = () => {
   contextMenuTask.value = null;
 };
 
-document.addEventListener('click', closeContextMenu);
+const showDetail = (task: Task) => {
+  selectedTask.value = task;
+  detailDialog.value = true;
+  closeContextMenu();
+};
+
+onMounted(() => document.addEventListener('click', closeContextMenu));
+onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 </script>
 
 <template>
@@ -140,15 +184,15 @@ document.addEventListener('click', closeContextMenu);
     <!-- Header -->
     <div class="tasks-header">
       <h2 class="tasks-title">{{ t('output') }}</h2>
-      <fv-button :background="bgColor" :foreground="mainColor" :border-radius="20" @click="showFolder()">
-        <fv-animated-icon icon="FolderOpen" :font-size="16" />
+      <v-btn color="primary" variant="tonal" @click="showFolder()">
+        <v-icon icon="mdi-folder-open-outline" size="18" class="mr-1" />
         <span>{{ t('show-in-folder') }}</span>
-      </fv-button>
+      </v-btn>
     </div>
 
     <!-- Empty state -->
     <div v-if="!tasks || !tasks.length" class="empty-state">
-      <fv-animated-icon icon="Mail" :font-size="64" style="opacity: 0.2;" />
+      <v-icon icon="mdi-inbox-outline" size="64" />
       <p>{{ t('empty') }}</p>
     </div>
 
@@ -181,64 +225,126 @@ document.addEventListener('click', closeContextMenu);
           <p class="task-path" :title="task.path">{{ task.path }}</p>
 
           <div class="task-status">
-            <fv-spinner
+            <v-progress-circular
               v-if="['loading', 'mixing', 'pending'].includes(task.status.type)"
-              size="small"
+              indeterminate :color="statusColor(task.status.type)" size="20" width="2"
             />
-            <div class="mini-progress-ring" v-else-if="task.status.type === 'rendering'"
-              :style="{ '--progress': (task.status.progress * 100) + '%' }">
-            </div>
+            <v-progress-circular
+              v-else-if="task.status.type === 'rendering'"
+              :model-value="task.status.progress * 100"
+              :color="statusColor(task.status.type)" size="20" width="2"
+            />
             <span class="status-text">{{ describeStatus(task.status) }}</span>
           </div>
 
-          <div class="css-progress-bar" v-if="task.status.type === 'rendering'">
-            <div class="css-progress-fill" :style="{ width: (task.status.progress * 100) + '%' }"></div>
-          </div>
+          <v-progress-linear
+            v-if="task.status.type === 'rendering'"
+            :model-value="task.status.progress * 100"
+            :color="statusColor(task.status.type)" height="3" rounded
+          />
 
           <div class="task-actions">
             <template v-if="['loading', 'mixing', 'rendering', 'pending'].includes(task.status.type)">
-              <fv-button :background="bgColor" :foreground="mainColor" :border-radius="20" @click="invoke('cancel_task', { id: task.id })">
-                <fv-animated-icon icon="ChromeClose" :font-size="16" />
+              <v-btn variant="text" size="small" color="primary" @click="invoke('cancel_task', { id: task.id })">
+                <v-icon icon="mdi-cancel" size="16" class="mr-1" />
                 <span>{{ t('cancel') }}</span>
-              </fv-button>
+              </v-btn>
             </template>
             <template v-else-if="task.status.type === 'failed'">
-              <fv-button :background="bgColor" :foreground="mainColor" :border-radius="20" @click="errorDialogMessage = task.status.error; errorDialog = true;">
-                <fv-animated-icon icon="Warning" :font-size="16" />
+              <v-btn variant="text" size="small" color="primary" @click="errorDialogMessage = task.status.error; errorDialog = true;">
+                <v-icon icon="mdi-alert-circle-outline" size="16" class="mr-1" />
                 <span>{{ t('details') }}</span>
-              </fv-button>
+              </v-btn>
             </template>
             <template v-else-if="task.status.type === 'done'">
-              <fv-button :background="bgColor" :foreground="mainColor" :border-radius="20" @click="showInFolder(task.output)">
-                <fv-animated-icon icon="FolderOpen" :font-size="16" />
+              <v-btn variant="text" size="small" color="primary" @click="showOutput(task)">
+                <v-icon icon="mdi-text-box-outline" size="16" class="mr-1" />
+                <span>{{ t('show-output') }}</span>
+              </v-btn>
+              <v-btn variant="text" size="small" color="primary" @click="showInFolder(task.output)">
+                <v-icon icon="mdi-folder-open-outline" size="16" class="mr-1" />
                 <span>{{ t('show-in-folder') }}</span>
-              </fv-button>
+              </v-btn>
             </template>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Error/Detail dialog -->
-    <div v-if="errorDialog" class="ctx-backdrop" @click="errorDialog = false">
-      <div class="ctx-menu" style="left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 500px; width: 90%;">
-        <div class="copyable" style="padding: 12px 16px; font-size: 14px; color: var(--sub-color); white-space: pre-wrap; max-height: 60vh; overflow: auto;">{{ errorDialogMessage }}</div>
-        <div style="padding: 8px 16px; text-align: right; border-top: 1px solid rgba(255,255,255,0.06);">
-          <fv-button :background="bgColor" :foreground="mainColor" :border-radius="20" @click="errorDialog = false">{{ t('confirm') }}</fv-button>
-        </div>
-      </div>
-    </div>
+    <!-- Error dialog -->
+    <v-dialog v-model="errorDialog" width="auto" min-width="400px" persistent>
+      <v-card class="error-dialog">
+        <v-card-title class="d-flex align-center">
+          <v-icon color="error" class="mr-2">mdi-alert</v-icon>
+          <span>{{ t('error') }}</span>
+        </v-card-title>
+        <v-divider />
+        <v-card-text>
+          <pre class="error-message copyable">{{ errorDialogMessage }}</pre>
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" color="primary" @click="errorDialog = false">{{ t('confirm') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Output dialog -->
+    <v-dialog v-model="outputDialog" width="auto" min-width="400px">
+      <v-card>
+        <v-card-title>{{ t('output') }}</v-card-title>
+        <v-card-text>
+          <pre class="output-pre copyable">{{ outputDialogMessage }}</pre>
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="tonal" color="primary" @click="outputDialog = false">{{ t('confirm') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Context menu -->
-    <div v-if="contextMenu" class="ctx-backdrop" @click="closeContextMenu">
-      <div class="ctx-menu" :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }">
-        <div class="ctx-item" @click="errorDialogMessage = describeStatus(contextMenuTask!.status); errorDialog = true; closeContextMenu();">
-          <fv-animated-icon icon="Info" :font-size="16" />
-          <span>{{ t('details') }}</span>
-        </div>
-      </div>
-    </div>
+    <v-menu v-model="contextMenu" :target="[contextMenuX, contextMenuY]">
+      <v-list class="ctx-menu">
+        <v-list-item @click="showDetail(contextMenuTask!)">
+          <template v-slot:prepend>
+            <v-icon>mdi-information</v-icon>
+          </template>
+          <v-list-item-title>{{ t('details') }}</v-list-item-title>
+        </v-list-item>
+      </v-list>
+    </v-menu>
 
+    <!-- Detail dialog -->
+    <v-dialog v-model="detailDialog" width="auto" min-width="500px">
+      <v-card v-if="selectedTask">
+        <v-card-title>{{ t('details') }}</v-card-title>
+        <v-divider />
+        <v-card-text>
+          <div class="detail-list">
+            <div class="detail-row"><span class="detail-label">名称</span><span>{{ selectedTask.name }}</span></div>
+            <div class="detail-row"><span class="detail-label">路径</span><span>{{ selectedTask.path }}</span></div>
+            <div class="detail-row"><span class="detail-label">状态</span><span>{{ describeStatus(selectedTask.status) }}</span></div>
+            <div class="detail-row" v-if="selectedTask.status.type === 'rendering'">
+              <span class="detail-label">进度</span><span>{{ Math.round(selectedTask.status.progress * 100) }}%</span>
+            </div>
+            <div class="detail-row" v-if="selectedTask.status.type === 'rendering'">
+              <span class="detail-label">帧率</span><span>{{ selectedTask.status.fps }} FPS</span>
+            </div>
+            <div class="detail-row" v-if="selectedTask.status.type === 'done' && selectedTask.status.duration">
+              <span class="detail-label">耗时</span><span>{{ formatDuration(selectedTask.status.duration) }}</span>
+            </div>
+            <div class="detail-row" v-if="selectedTask.status.type === 'done' && selectedTask.output">
+              <span class="detail-label">输出</span><span class="break-all">{{ selectedTask.output }}</span>
+            </div>
+            <div class="detail-row" v-if="selectedTask.status.type === 'failed' && selectedTask.status.error">
+              <span class="detail-label">错误</span><span class="error-text">{{ selectedTask.status.error }}</span>
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="tonal" color="primary" @click="detailDialog = false">{{ t('confirm') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -265,7 +371,7 @@ document.addEventListener('click', closeContextMenu);
 .tasks-title {
   font-size: 24px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--main-color);
   margin: 0;
 }
 
@@ -277,7 +383,7 @@ document.addEventListener('click', closeContextMenu);
   justify-content: center;
   flex: 1;
   gap: 16px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--main-color-rgb), 0.4);
   font-size: 16px;
 }
 
@@ -294,16 +400,19 @@ document.addEventListener('click', closeContextMenu);
 .task-card {
   display: flex;
   flex-direction: row;
-  border-radius: 16px;
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   height: 180px;
 }
 
+.task-card:hover {
+  transform: translateY(-2px);
+}
+
 .task-cover {
   width: 35%;
   flex-shrink: 0;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(var(--bg-color-rgb), 0.2);
 }
 .cover-image {
   width: 100%;
@@ -331,7 +440,7 @@ document.addEventListener('click', closeContextMenu);
 .task-name {
   font-size: 16px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--main-color);
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -341,7 +450,7 @@ document.addEventListener('click', closeContextMenu);
 }
 .task-path {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(var(--main-color-rgb), 0.45);
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -356,7 +465,7 @@ document.addEventListener('click', closeContextMenu);
 }
 .status-text {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(var(--main-color-rgb), 0.7);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -374,11 +483,10 @@ document.addEventListener('click', closeContextMenu);
 }
 .chip-info { background: rgba(var(--main-color-rgb), 0.15); color: var(--main-color); }
 .chip-primary { background: rgba(var(--main-color-rgb), 0.2); color: var(--main-color); }
-.chip-success { background: rgba(var(--main-color-rgb), 0.15); color: var(--main-color); }
-.chip-warning { background: rgba(var(--main-color-rgb), 0.15); color: var(--main-color); }
+.chip-warning { background: rgba(var(--sub-color-rgb), 0.15); color: var(--sub-color); }
 .chip-error { background: rgba(var(--sub-color-rgb), 0.15); color: var(--sub-color); }
 
-/* ===== Done Badge (version-badge style) ===== */
+/* Done Badge (version-badge style) */
 .chip-success {
   background: transparent;
   border: 1px solid var(--main-color);
@@ -387,30 +495,6 @@ document.addEventListener('click', closeContextMenu);
   border-radius: 12px;
 }
 
-/* ===== Progress ===== */
-.css-progress-bar {
-  width: 100%;
-  height: 3px;
-  background: rgba(var(--bg-color-rgb), 0.08);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.css-progress-fill {
-  height: 100%;
-  background: var(--main-color);
-  border-radius: 2px;
-  transition: width 0.3s linear;
-}
-.mini-progress-ring {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  border-top-color: var(--main-color);
-  animation: spin 1s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
 /* ===== Actions ===== */
 .task-actions {
   display: flex;
@@ -418,41 +502,74 @@ document.addEventListener('click', closeContextMenu);
   margin-top: auto;
 }
 
-/* ===== Context Menu ===== */
-.ctx-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
+/* ===== Error dialog ===== */
+.error-dialog {
+  border-color: rgba(var(--sub-color-rgb), 0.3) !important;
 }
-.ctx-menu {
-  position: fixed;
-  background: rgba(28, 28, 28, 0.95);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 4px;
-  min-width: 160px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-}
-.ctx-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
+
+.error-message {
+  color: var(--sub-color);
+  font-family: monospace;
+  background: rgba(var(--bg-color-rgb), 0.4);
+  padding: 12px;
   border-radius: 12px;
-  cursor: pointer;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 14px;
-  transition: background 0.15s;
+  max-height: 60vh;
+  overflow: auto;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
-.ctx-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+
+/* ===== Output dialog ===== */
+.output-pre {
+  background: rgba(var(--bg-color-rgb), 0.3);
+  padding: 12px;
+  border-radius: 12px;
+  font-family: monospace;
+  font-size: 13px;
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* ===== Detail list ===== */
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-row {
+  display: flex;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(var(--main-color-rgb), 0.08);
+  font-size: 14px;
+  color: var(--main-color);
+}
+
+.detail-row:last-child { border-bottom: none; }
+
+.detail-label {
+  width: 72px;
+  flex-shrink: 0;
+  color: rgba(var(--main-color-rgb), 0.5);
+  font-weight: 500;
+}
+
+.break-all { word-break: break-all; }
+
+.error-text {
+  color: var(--sub-color);
+  font-family: monospace;
+  font-size: 13px;
+  background: rgba(var(--sub-color-rgb), 0.1);
+  padding: 6px 10px;
+  border-radius: 8px;
 }
 
 /* ===== Responsive ===== */
 @media (max-width: 600px) {
   .tasks-container { padding: 16px; }
-  .task-card { flex-direction: column; }
+  .task-card { flex-direction: column; height: auto; }
   .task-cover { width: 100%; min-height: 140px; }
   .task-info { width: 100%; }
 }

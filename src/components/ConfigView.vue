@@ -62,6 +62,9 @@ en:
   preset-deleted: Preset deleted
   preset-replaced: Preset replaced
   preset-cannot-use-default: Cannot use 'default'
+  preset-new: New
+  preset-save: Save
+  preset-delete: Delete
   default-preset: Default
   back: Back
   head-categories:
@@ -71,6 +74,22 @@ en:
     effect: Effect
     player: Player
     debug: Debug
+  section:
+    output: Resolution & Frame Rate
+    encoder: Encoder
+    bitrate: Bitrate
+    performance: Performance
+    volume: Volume
+    audio: Audio Format
+    speed: Chart Scale & Speed
+    text: Text & Results
+    respack: Resource Pack
+    note-scale: Note Scale
+    effects: Effect Toggles
+    ui: UI Display
+    player: Player Info
+    challenge: Challenge Mode
+    debug: Debug Options
 
 zh-CN:
   resolution: 分辨率
@@ -82,11 +101,11 @@ zh-CN:
   encoder-qsv: Intel QSV
   encoder-amf: AMD AMF
   encoder-vulkan: Vulkan
-  encoder-cpu: CPU软编码
+  encoder-cpu: CPU 软编码
   fps: 帧率
   hw-accel: 硬件加速
   hw-accel-tips: 提升速度，略微降低质量
-  fxaa: FXAA抗锯齿
+  fxaa: FXAA 抗锯齿
   fxaa-tips: 会导致画面模糊
   sample-count: 采样数
   sample-count-tips: 非1启用MSAA
@@ -94,7 +113,7 @@ zh-CN:
   bitrate: 码率/CRF
   ffmpeg-thread: 线程优化
   video-format: 视频格式
-  video-format-flac-error: FLAC音频下不可用
+  video-format-flac-error: FLAC 音频下不可用
   player-avatar: 头像
   player-name: 名称
   player-rks: RKS
@@ -104,7 +123,7 @@ zh-CN:
   respack: 资源包
   respack-default: '[默认]'
   note-scale: 音符缩放
-  render: UI显示
+  render: UI 显示
   double-hint: 双押提示
   aggressive: 激进优化
   aggressive-tips: 可能导致音符消失
@@ -121,7 +140,7 @@ zh-CN:
   chart_ratio: 谱面缩放
   buffer_size: 缓冲区
   target_audio: 采样率
-  combo: COMBO文本
+  combo: COMBO 文本
   watermark: 水印
   flid_x: 镜像
   background: 仅背景显示
@@ -134,114 +153,96 @@ zh-CN:
   preset-created: 预设已创建
   preset-deleted: 预设已删除
   preset-replaced: 预设已替换
-  preset-cannot-use-default: 不能使用default
+  preset-cannot-use-default: 不能使用 default
+  preset-new: 新建
+  preset-save: 保存
+  preset-delete: 删除
   default-preset: 默认
   back: 返回
-  head-categories: 
+  head-categories:
     output: 输出
     record: 录制
     game: 游戏
     effect: 效果
     player: 玩家
     debug: 调试
+  section:
+    output: 分辨率与帧率
+    encoder: 编码器
+    bitrate: 码率
+    performance: 性能
+    volume: 音量
+    audio: 音频格式
+    speed: 谱面缩放与流速
+    text: 文本与结算
+    respack: 资源包
+    note-scale: 音符缩放
+    effects: 效果开关
+    ui: UI 显示
+    player: 个人信息
+    challenge: 课题模式
+    debug: 调试选项
 </i18n>
 
 <script setup lang="ts">
-import { mainColor, bgColor, subColor } from '../colorStore'
-import { ref, watch, computed } from 'vue';
+import { ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 const { t } = useI18n();
 
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { anyFilter } from '../common';
-import type { RenderConfig } from '../model';
+import { VForm } from 'vuetify/components';
+import { toast, anyFilter, toastError } from '@/common';
+import type { RenderConfig } from '@/model';
 import TipSwitch from './TipSwitch.vue';
-import { ElMessage } from 'element-plus'
-import type { FormInstance } from 'element-plus'
-const form = ref<FormInstance>()
 
-const props = defineProps<{ initAspectRatio?: number }>();
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+defineProps<{ initAspectRatio?: number }>();
+// Phi-TKC's preset list, plus the 1920x1080 default (which was missing from it).
+const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2133', '2388x1668', '1600x1080', '7680x5760'];
+const FFMPEG_PRESETS = [
+  { value: 'veryfast', title: 'VeryFast' },
+  { value: 'faster', title: 'Faster' },
+  { value: 'fast', title: 'Fast' },
+  { value: 'medium', title: 'Medium' },
+  { value: 'slow', title: 'Slow' },
+  { value: 'slower', title: 'Slower' },
+  { value: 'veryslow', title: 'VerySlow' },
+];
 
-const volumePercent = computed({
-  get() {
-    // 滑块值转百分比
-    return Math.round(volumeMusic.value * 100)
-  },
-  set(val: number) {
-    // 百分比转回滑块真实值
-    volumeMusic.value = val / 100
-  }
-})
-
-const volumeSfxPercent = computed({
-  get() {
-    // 滑块值转百分比
-    return Math.round(volumeSfx.value * 100)
-  },
-  set(val: number) {
-    // 百分比转回滑块真实值
-    volumeSfx.value = val / 100
-  }
-})
-
-const RESOLUTIONS = [
-  { key: '1280x960', text: '1280x960' },
-  { key: '1920x1440', text: '1920x1440' },
-  { key: '2560x1920', text: '2560x1920' },
-  { key: '3840x2560', text: '3840x2560' },
-  { key: '2844x2133', text: '2844x2133' },
-  { key: '2388x1668', text: '2388x1668' },
-  { key: '1600x1080', text: '1600x1080' },
-  { key: '7680x5760', text: '7680x5760' }
-]
-;
-const FFMPEG_PRESETS = ['veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'];
+const VIDEO_FORMAT = [
+  { value: 'mp4', title: 'MP4' },
+  { value: 'mov', title: 'MOV' },
+];
 const VIDEO_CODECS = [
-  { key: 'h264', text: 'H.264' },
-  { key: 'hevc', text: 'HEVC' },
-  { key: 'av1', text: 'AV1' },
+  { value: 'h264', title: 'H.264' },
+  { value: 'hevc', title: 'HEVC' },
+  { value: 'av1', title: 'AV1' },
 ];
 const ENCODERS = [
-  { key: 'auto', text: '自动选择' },
-  { key: 'nvenc', text: 'NVIDIA NVENC' },
-  { key: 'qsv', text: 'Intel QSV' },
-  { key: 'amf', text: 'AMD AMF' },
-  { key: 'vulkan', text: 'Vulkan' },
-  { key: 'cpu', text: 'CPU 软编码' },
+  { value: 'auto', title: '自动选择', desc: '自动检测最佳编码器' },
+  { value: 'nvenc', title: 'NVIDIA NVENC', desc: 'NVIDIA GPU 硬件加速' },
+  { value: 'qsv', title: 'Intel QSV', desc: 'Intel Quick Sync Video' },
+  { value: 'amf', title: 'AMD AMF', desc: 'AMD Advanced Media Framework' },
+  { value: 'vulkan', title: 'Vulkan', desc: '跨平台 GPU 编码' },
+  { value: 'cpu', title: 'CPU 软编码', desc: 'libx264/libx265/libaom-av1' },
 ];
-const AUDIO_FORMATS = [
-  {text: 'flac', key: 'flac'},
-  {text: 'mp3',key: 'mp3'},
-  {text: 'aac',key: 'aac'},
-  {text: 'opus',key: 'opus'},
-  {text: 'wav', key: 'wav'}
-];
-const AUDIO_BITS = [
-  {text: '16', key: 16},
-  {text: '24',key: 24},
-  {text: '32',key: 32},
-  {text: '48',key: 48},
-];
-const SAMPLE_RATES = [
-  {text: '44.1kHz', key: 44100},
-  {text: '48kHz',key: 48000},
-  {text: '96kHz',key: 96000},
-  {text: '192kHz',key: 192000},
-  {text: '384kHz',key: 384000},
-  {text: '768kHz',key: 768000},
-];
+const AUDIO_FORMATS = ['flac', 'mp3', 'aac', 'opus', 'wav'];
+// The Rust side only accepts 16/24/32 — a 48 option here would be rejected at render time.
+const AUDIO_BITS = [16, 24, 32];
+const SAMPLE_RATES = [44100, 48000, 96000, 192000, 384000, 768000];
 const STD_CHALLENGE_COLORS = ['white', 'green', 'blue', 'red', 'golden', 'rainbow'];
 
+const form = ref<VForm>();
 const activeCategory = ref('output');
 
 const categories = [
-  { key: 'output', icon: 'Video', label: t('head-categories.output') },
-  { key: 'recording', icon: 'Record', label: t('head-categories.record') },
-  { key: 'game', icon: 'Game', label: t('head-categories.game') },
-  { key: 'graphics', icon: 'Color', label: t('head-categories.effect') },
-  { key: 'player', icon: 'Contact', label: t('head-categories.player') },
-  { key: 'debug', icon: 'Bug', label: t('head-categories.debug') },
+  { key: 'output', icon: 'mdi-video-outline', labelKey: 'head-categories.output' },
+  { key: 'recording', icon: 'mdi-music-note', labelKey: 'head-categories.record' },
+  { key: 'game', icon: 'mdi-gamepad-variant-outline', labelKey: 'head-categories.game' },
+  { key: 'graphics', icon: 'mdi-palette-outline', labelKey: 'head-categories.effect' },
+  { key: 'player', icon: 'mdi-account-outline', labelKey: 'head-categories.player' },
+  { key: 'debug', icon: 'mdi-bug-outline', labelKey: 'head-categories.debug' },
 ];
 
 const resolution = ref('1920x1080');
@@ -250,7 +251,7 @@ const sampleCount = ref('1');
 const videoCodec = ref('h264');
 const encoder = ref('auto');
 const ffmpegPreset = ref('medium');
-const videoFormat = ref('mp4');
+
 const bitrateControl = ref('CRF');
 const bitrate = ref('28');
 const hwAccel = ref(true);
@@ -293,12 +294,13 @@ const flidX = ref(false);
 const handSplit = ref(false);
 const disableLoading = ref(false);
 
+const videoFormat = ref('mp4');
 const video = ref(false);
 watch([audioFormat, video], ([newAudio, newVideo]) => {
   if (newAudio === 'flac' && newVideo) {
     video.value = false;
     videoFormat.value = 'mp4';
-    showToast(t('video-format-flac-error'), 'error');
+    toast(t('video-format-flac-error'), 'error');
   }
 });
 watch(videoFormat, (val) => {
@@ -306,18 +308,17 @@ watch(videoFormat, (val) => {
 });
 
 interface Respack {
-  text: string;
-  key: string;
+  name: string;
   path: string | null;
   index: number;
 }
-const DEFAULT_RESPACK: Respack = { text: t('respack-default'), key:t('respack-default'), path: null, index: 0 };
+const DEFAULT_RESPACK: Respack = { name: t('respack-default'), path: null, index: 0 };
 const respacks = ref([DEFAULT_RESPACK]);
 const respack = ref(DEFAULT_RESPACK);
 async function updateRespacks() {
   const list = (await invoke('get_respacks')) as { name: string; path: string }[];
-  respacks.value = [DEFAULT_RESPACK, ...list.map((obj, i) => ({ text: obj.name, key: obj.name, path: obj.path, index: i + 1 }))];
-  respack.value = respacks.value.find((x) => x.text === respack.value.text) || respacks.value[0];
+  respacks.value = [DEFAULT_RESPACK, ...list.map((obj, i) => ({ name: obj.name, path: obj.path, index: i + 1 }))];
+  respack.value = respacks.value.find((x) => x.name === respack.value.name) || respacks.value[0];
 }
 updateRespacks();
 
@@ -382,14 +383,6 @@ const DEFAULT_PRESET: Preset = {
     bar: false,
   },
 };
-
-const presetOptions = computed(() => {
-  return presets.value.map(p => ({
-    text: p.name,
-    key: p.key,
-    config: p.config
-  }))
-})
 const presets = ref([DEFAULT_PRESET]);
 const preset = ref(DEFAULT_PRESET);
 
@@ -416,75 +409,19 @@ async function openRespackFolder() {
   try {
     await invoke('open_respack_folder');
   } catch (e) {
-    showToast(e, 'error');
+    toastError(e);
   }
-}
-
-// Helper: combobox may return {key,text} object instead of plain string
-function getResolutionString(): string {
-  const val = resolution.value as any;
-  return typeof val === 'string' ? val : (val?.key || val?.text || '1920x1080');
-}
-
-// Preview computations
-const aspectPreview = computed(() => {
-  const [w, h] = getResolutionString().split('x').map(Number);
-  if (!w || !h || isNaN(w) || isNaN(h)) return { w: 16, h: 9, label: '16:9' };
-  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-  const g = gcd(w, h);
-  return { w: w / g, h: h / g, label: `${w / g}:${h / g}` };
-});
-
-const pixelGrid = computed(() => {
-  const [w, h] = getResolutionString().split('x').map(Number);
-  if (!w || !h || isNaN(w) || isNaN(h)) return { cols: 32, rows: 18, dots: 576 };
-  const scale = Math.min(48 / w, 36 / h, 0.025);
-  const cols = Math.max(8, Math.round(w * scale));
-  const rows = Math.max(6, Math.round(h * scale));
-  return { cols, rows, dots: cols * rows };
-});
-
-const presetSpeed = computed(() => {
-  const speeds: Record<string, number> = { veryfast: 95, faster: 85, fast: 70, medium: 50, slow: 35, slower: 20, veryslow: 8 };
-  return speeds[ffmpegPreset.value] ?? 50;
-});
-
-const presetQuality = computed(() => 100 - presetSpeed.value);
-
-const challengeColorHex = computed(() => {
-  const colors: Record<string, string> = {
-    white: '#e0e0e0',
-    green: '#4caf50',
-    blue: '#2196f3',
-    red: '#f44336',
-    golden: '#ffc107',
-    rainbow: 'linear-gradient(90deg, #f44336, #ff9800, #ffeb3b, #4caf50, #2196f3, #9c27b0)',
-  };
-  const idx = t('challenge-colors').split(',').indexOf(challengeColor.value);
-  return colors[STD_CHALLENGE_COLORS[idx]] || colors.golden;
-});
-
-// Combobox may return {key,text} object — extract the key
-function getKey(val: any): string {
-  return typeof val === 'string' ? val : (val?.key || String(val || ''));
-}
-function getNumKey(val: any): number | undefined {
-  if (val === undefined || val === null) return undefined;
-  return typeof val === 'number' ? val : (val?.key != null ? Number(val.key) : Number(val));
 }
 
 async function buildConfig(): Promise<RenderConfig | null> {
-  // Element Plus 表单校验，返回布尔值
-  const valid = true
-  if (!valid) {
-    showToast(t('has-error'), 'error')
-    return null
+  if (!(await form.value!.validate()).valid) {
+    toast(t('has-error'), 'error');
+    return null;
   }
-
-  const [w, h] = getResolutionString().split('x').map(Number);
+  const [w, h] = resolution.value.split('x').map(Number);
   return {
     resolution: [w, h],
-    ffmpegPreset: getKey(ffmpegPreset.value),
+    ffmpegPreset: ffmpegPreset.value,
     endingLength: parseFloat(endingLength.value),
     disableLoading: disableLoading.value,
     chartDebug: chartDebug.value,
@@ -493,17 +430,17 @@ async function buildConfig(): Promise<RenderConfig | null> {
     bufferSize: bufferSize.value,
     fps: parseInt(fps.value),
     hardwareAccel: hwAccel.value,
-    videoCodec: getKey(videoCodec.value),
-    encoder: getKey(encoder.value),
-    bitrateControl: getKey(bitrateControl.value),
+    videoCodec: videoCodec.value,
+    encoder: encoder.value,
+    bitrateControl: bitrateControl.value,
     bitrate: bitrate.value,
-    targetAudio: getNumKey(targetAudio.value) || 48000,
+    targetAudio: targetAudio.value,
     background: background.value,
     handSplit: handSplit.value,
     noteSpeedFactor: noteSpeedFactor.value,
     video: video.value,
-    audioBit: getKey(audioFormat.value) === 'wav' ? getNumKey(audioBit.value) : undefined,
-    audioFormat: getKey(audioFormat.value),
+    audioBit: audioFormat.value === 'wav' ? audioBit.value : undefined,
+    audioFormat: audioFormat.value,
     bar: bar.value,
     aggressive: aggressive.value,
     challengeColor: STD_CHALLENGE_COLORS[t('challenge-colors').split(',').indexOf(challengeColor.value)],
@@ -535,7 +472,6 @@ async function buildConfig(): Promise<RenderConfig | null> {
     uiPause: render.value.includes(renderList.value[8]),
   };
 }
-
 
 function applyConfig(c: RenderConfig) {
   resolution.value = c.resolution.join('x');
@@ -598,25 +534,25 @@ async function createPreset() {
   const name = prompt(t('preset-create-title'));
   if (!name) return;
   if (name === 'default') {
-    showToast(t('preset-cannot-use-default'), 'error');
+    toast(t('preset-cannot-use-default'), 'error');
     return;
   }
   try {
     await invoke('add_preset', { name, config });
     await updatePresets();
     preset.value = presets.value.find((x) => x.key === name) || presets.value[0];
-    showToast(t('preset-created'), 'success');
+    toast(t('preset-created'), 'success');
   } catch (e) {
-    showToast(e, 'error');
+    toastError(e);
   }
 }
 async function deletePreset() {
   try {
     await invoke('remove_preset', { name: preset.value.key });
     await updatePresets();
-    showToast(t('preset-deleted'), 'success');
+    toast(t('preset-deleted'), 'success');
   } catch (e) {
-    showToast(e, 'error');
+    toastError(e);
   }
 }
 async function replacePreset() {
@@ -626,29 +562,21 @@ async function replacePreset() {
     await invoke('remove_preset', { name: preset.value.key });
     await invoke('add_preset', { name: preset.value.key, config });
     await updatePresets();
-    showToast(t('preset-replaced'), 'success');
+    toast(t('preset-replaced'), 'success');
   } catch (e) {
-    showToast(e, 'error');
+    toastError(e);
   }
 }
 </script>
 
 <template>
-  <form id="form" class="config-root" @submit.prevent method="post">
+  <v-form ref="form" class="config-root" @submit.prevent>
     <!-- Category chips -->
-    <div class="clear-glass cat-bar">
-      <fv-button
-      v-for="cat in categories"
-      :key="cat.key"
-      type="button"
-      @click="activeCategory = cat.key"
-      :icon="cat.icon"
-      :foreground="activeCategory === cat.key ? bgColor : mainColor"
-      :background="activeCategory === cat.key ? mainColor : bgColor"
-      :border-radius="16"
-      >
-        <span>{{ cat.label }}</span>
-      </fv-button>
+    <div class="cat-bar clear-glass">
+      <button v-for="cat in categories" :key="cat.key" type="button" class="cat-chip" :class="{ 'is-active': activeCategory === cat.key }" @click="activeCategory = cat.key">
+        <v-icon :icon="cat.icon" size="18" />
+        <span>{{ t(cat.labelKey) }}</span>
+      </button>
     </div>
 
     <!-- Two-column body: settings + preview -->
@@ -658,88 +586,51 @@ async function replacePreset() {
         <div class="settings-scroll">
           <!-- OUTPUT -->
           <div v-show="activeCategory === 'output'" class="settings-stack">
-            <div class="fluent-glass md3-card">
-              <div class="field-row">
-                <div class="card-label">{{ t('resolution') }}</div>
-                <fv-combobox
-                v-model="resolution" 
-                :options="(RESOLUTIONS as any)" 
-                :placeholder="t('resolution')"
-                class="combo-boxes"
-                :border-radius="7"
-                :border-width="2"
-                />
-                <div class="card-label">{{ t('fps') }}</div>
-                <input v-model="fps"
-                type="number"
-                class="blur-glass input-field"
-                />
-                <div class="card-label">{{ t('sample-count') }}</div>
-                <input v-model="sampleCount"
-                type="number"
-                class="blur-glass input-field"
-                />
-                </div>
-            </div>
-            <div class="fluent-glass md3-card">
-              <div class="field-row">
-                <div class="card-label">{{t('video-codec')}}</div>
-                <fv-combobox
-                  v-model="videoCodec" 
-                  :options="(VIDEO_CODECS as any)" 
-                  :placeholder="t('video-codec')"
-                  class="combo-boxes"
-                  :border-radius="7"
-                  :border-width="2"
-                />
-                <div class="card-label">{{t('encoder-select')}}</div>
-                <fv-combobox
-                  v-model="encoder" 
-                  :options="(ENCODERS as any)" 
-                  :placeholder="t('encoder-select')"
-                  class="combo-boxes"
-                  :border-radius="7"
-                  :border-width="2"
-                />
-              </div>
-              <div class="field-row">
-                <div class="card-label">{{t('ffmpeg-preset')}}</div>
-                <fv-combobox
-                  v-model="ffmpegPreset"
-                  :options="(FFMPEG_PRESETS.map(p => ({text: p, key: p})) as any)"
-                  :placeholder="t('ffmpeg-preset')"
-                  class="combo-boxes"
-                  :border-radius="7"
-                  :border-width="2"
-                />
-                <div class="card-label">{{t('video-format')}}</div>
-                <fv-combobox
-                  v-model="videoFormat"
-                  :options="([{text: 'mp4', key: 'mp4'}, {text: 'mov', key: 'mov'}] as any)"
-                  :placeholder="t('video-format')"
-                  class="combo-boxes"
-                  :border-radius="7"
-                  :border-width="2"
-                />
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.output') }}</div>
+              <div class="field-row"><v-combobox v-model="resolution" :items="RESOLUTIONS" :label="t('resolution')" density="compact" variant="outlined" hide-details /></div>
+              <div class="field-row two-col">
+                <v-text-field v-model="fps" :label="t('fps')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="sampleCount" :label="t('sample-count')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
-            <div class="fluent-glass md3-card">
-              <div class="field-row">
-                <div class="card-label">{{t('bitrate-control')}}</div>
-                <fv-combobox
-                  v-model="bitrateControl" 
-                  :options="([{text: 'CRF', key: 'CRF'}, {text: 'CBR', key: 'CBR'}] as any)"
-                  :placeholder="t('bitrate-control')"
-                  class="combo-boxes"
-                  :border-radius="7"
-                  :border-width="2"
-                />
-                <input v-model="bitrate" :placeholder="t('bitrate')" class="blur-glass input-field" />
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.encoder') }}</div>
+              <div class="field-row two-col">
+                <v-select
+                  v-model="videoCodec"
+                  :items="VIDEO_CODECS"
+                  item-title="title"
+                  item-value="value"
+                  :label="t('video-codec')"
+                  density="compact"
+                  variant="outlined"
+                  hide-details />
+                <v-select
+                  v-model="encoder"
+                  :items="ENCODERS"
+                  item-title="title"
+                  item-value="value"
+                  :label="t('encoder-select')"
+                  density="compact"
+                  variant="outlined"
+                  hide-details />
+              </div>
+              <div class="field-row two-col">
+                <v-select v-model="ffmpegPreset" :items="FFMPEG_PRESETS" :label="t('ffmpeg-preset')" density="compact" variant="outlined" hide-details />
+                <v-select v-model="videoFormat" :items="VIDEO_FORMAT" :label="t('video-format')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
-            <div class="fluent-glass md3-card">
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.bitrate') }}</div>
+              <div class="field-row two-col">
+                <v-select v-model="bitrateControl" :items="['CRF', 'CBR']" :label="t('bitrate-control')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="bitrate" :label="t('bitrate')" density="compact" variant="outlined" hide-details />
+              </div>
+            </div>
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.performance') }}</div>
               <div class="switch-grid">
-                <div class="card-label">{{t('hw-accel')}}</div>
                 <TipSwitch v-model="hwAccel" :label="t('hw-accel')" :tooltip="t('hw-accel-tips')" density="compact" color="primary" />
                 <TipSwitch v-model="fxaa" :label="t('fxaa')" :tooltip="t('fxaa-tips')" density="compact" color="primary" />
                 <TipSwitch v-model="ffmpegThread" :label="t('ffmpeg-thread')" density="compact" color="primary" />
@@ -748,172 +639,99 @@ async function replacePreset() {
           </div>
 
           <!-- RECORDING -->
-          <div v-show="activeCategory === 'recording'" class="settings-stack-s">
-            <div class="fluent-glass md3-card-s">
+          <div v-show="activeCategory === 'recording'" class="settings-stack">
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.volume') }}</div>
               <div class="slider-row">
-                <fv-AnimatedIcon icon="MusicNote"/>
-                <div class="card-label" style="margin: 0px !important; margin-left: 5px !important;">{{ t('volume-music') }}</div>
-                <fv-slider
-                  v-model="volumePercent"
-                  :mininum="0"
-                  :maxinum="200"
-                  :unit="1"
-                  :color="mainColor"
-                  :icon-wrapper-background="bgColor"
-                  class="slider"
-                />
-                <span class="slider-val">{{ volumePercent }}%</span>
+                <v-icon icon="mdi-music-note" size="18" />
+                <span class="slider-label">{{ t('volume-music') }}</span>
+                <v-slider v-model="volumeMusic" :min="0" :max="2" :step="0.01" hide-details color="primary" />
+                <span class="slider-val">{{ Math.round(volumeMusic * 100) }}%</span>
               </div>
               <div class="slider-row">
-                <fv-AnimatedIcon icon="Volume"/>
-                <div class="card-label" style="margin: 0px !important; margin-left: 5px !important;">{{ t('volume-sfx') }}</div>
-                <fv-slider
-                  v-model="volumeSfxPercent"
-                  :mininum="0"
-                  :maxinum="200"
-                  :unit="1"
-                  :color="mainColor"
-                  :icon-wrapper-background="bgColor"
-                  class="slider"
-                />
-                <span class="slider-val">{{ volumeSfxPercent }}%</span>
+                <v-icon icon="mdi-volume-high" size="18" />
+                <span class="slider-label">{{ t('volume-sfx') }}</span>
+                <v-slider v-model="volumeSfx" :min="0" :max="2" :step="0.01" hide-details color="primary" />
+                <span class="slider-val">{{ Math.round(volumeSfx * 100) }}%</span>
               </div>
             </div>
-            <div class="fluent-glass md3-card">
-              <div class="field-row">
-                <div class="card-label">{{ t('audio-format') }}</div>
-                <fv-combobox
-                  v-model="audioFormat" 
-                  :options="(AUDIO_FORMATS as any)" 
-                  :placeholder="t('audio-format')"
-                  class="combo-boxes"
-                  :border-radius="7"
-                  :border-width="2"
-                />
-                <div class="card-label">{{ t('audio-bit-depth') }}</div>
-                <fv-combobox
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.audio') }}</div>
+              <div class="field-row two-col">
+                <v-select v-model="audioFormat" :items="AUDIO_FORMATS" :label="t('audio-format')" density="compact" variant="outlined" hide-details />
+                <v-select
                   v-model="audioBit"
-                  :options="(AUDIO_BITS as any)" 
-                  :placeholder="t('audio-bit-depth')"
-                  class="combo-boxes"
-                  :border-radius="7"
-                  :border-width="2"
-                />
-                <div class="card-label">{{ t('buffer_size') }}</div>
-                <fv-combobox
-                  v-model="targetAudio"
-                  :options="(SAMPLE_RATES as any)"
-                  :placeholder="t('buffer_size')"
-                  class="combo-boxes"
-                  :border-radius="7"
-                  :border-width="2"
-                />
+                  :items="AUDIO_BITS"
+                  :label="t('audio-bit-depth')"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  :disabled="audioFormat !== 'wav'" />
+              </div>
+              <div class="field-row two-col">
+                <v-select v-model="targetAudio" :items="SAMPLE_RATES" :label="t('target_audio')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="bufferSize" :label="t('buffer_size')" type="number" density="compact" variant="outlined" hide-details />
               </div>
             </div>
           </div>
 
           <!-- GAME -->
           <div v-show="activeCategory === 'game'" class="settings-stack">
-            <div class="fluent-glass md3-card-s" style="min-height: 100%;">
-              <div class="slider-header">
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.speed') }}</div>
+              <div class="slider-block">
+                <div class="slider-header">
                   <span>{{ t('chart_ratio') }}</span
                   ><span class="slider-val">{{ chartRatio.toFixed(2) }}</span>
                 </div>
-              <div class="slider-row">
-                <fv-slider
-                  v-model="chartRatio"
-                  :mininum="0.05"
-                  :maxinum="1"
-                  :unit="0.01"
-                  :color="mainColor"
-                  :icon-wrapper-background="bgColor"
-                  class="slider"
-                />
+                <v-slider v-model="chartRatio" :min="0.05" :max="1" :step="0.01" hide-details color="primary" />
               </div>
-              <div class="slider-header">
+              <div class="slider-block">
+                <div class="slider-header">
                   <span>{{ t('note-speed-factor') }}</span
                   ><span class="slider-val">{{ noteSpeedFactor.toFixed(2) }}</span>
-              </div>
-              <div class="slider-row">
-                <fv-slider
-                  v-model="noteSpeedFactor"
-                  :mininum="0.1"
-                  :maxinum="2"
-                  :unit="0.01"
-                  :color="mainColor"
-                  :icon-wrapper-background="bgColor"
-                  class="slider"
-                />
+                </div>
+                <v-slider v-model="noteSpeedFactor" :min="0.1" :max="2" :step="0.01" hide-details color="primary" />
               </div>
               <div class="switch-grid">
-                <div class="card-label">{{t('bar')}}</div>
-                <fv-toggle-switch
-                  v-model="bar"
-                  :borderColor="mainColor"
-                  :ringBackground="mainColor"
-                  :switchOnBackground="subColor"
-                  :onForeground="subColor"
-                  :offForeground="mainColor"
-                  class="switch"
-                />
+                <v-switch v-model="background" :label="t('background')" density="compact" color="primary" hide-details />
+                <v-switch v-model="bar" :label="t('bar')" density="compact" color="primary" hide-details />
               </div>
             </div>
-            <div class="fluent-glass md3-card">
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.text') }}</div>
               <div class="field-row two-col">
-                <div class="card-label">{{ t('combo') }}</div>
-                <input v-model="combo" :placeholder="t('combo')" class="blur-glass input-field" />
-                <div class="card-label">{{ t('watermark') }}</div>
-                <input v-model="watermark" :placeholder="t('watermark')" class="blur-glass input-field" />
-                <div class="card-label">{{ t('ending-length') }}</div>
-                <input v-model="endingLength" :placeholder="t('ending-length')" class="blur-glass input-field" />
+                <v-text-field v-model="combo" :label="t('combo')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="watermark" :label="t('watermark')" density="compact" variant="outlined" hide-details />
+              </div>
+              <div class="field-row">
+                <v-text-field v-model="endingLength" :label="t('ending-length')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
           </div>
 
           <!-- GRAPHICS -->
           <div v-show="activeCategory === 'graphics'" class="settings-stack">
-            <div class="fluent-glass md3-card">
-              <div class="respack-row" style="align-items: baseline; margin-top: 15px;">
-                <div class="card-label">{{ t('respack') }}</div>
-                <fv-combobox
-                v-model="respack" 
-                :options="(respacks as any)" 
-                :placeholder="t('respack')"
-                class="combo-boxes"
-                :border-radius="7"
-                :border-width="2"
-                />
-                <fv-button
-                  v-model="respack"
-                  type="button"
-                  @click="updateRespacks"
-                  icon="Refresh"
-                  :foreground="mainColor"
-                  :border-radius="16"
-                  :background="bgColor"
-                  class="blur-glass"
-                  style="border-radius: 16px; margin-left: 10px;"
-                >刷新</fv-button>
-                <button type="button" class="icon-btn-respack" @click="openRespackFolder"><fv-animated-icon icon="FolderHorizontal" :font-size="18" /></button>
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.respack') }}</div>
+              <div class="respack-row">
+                <v-select v-model="respack" :items="respacks" item-title="name" :label="t('respack')" density="compact" variant="outlined" hide-details class="flex-grow-1" />
+                <v-btn icon="mdi-refresh" size="small" variant="text" @click="updateRespacks" />
+                <v-btn icon="mdi-folder-open" size="small" variant="text" @click="openRespackFolder" />
               </div>
             </div>
-            <div class="fluent-glass md3-card">
-              <div class="slider-row">
-                <div class="card-label" style="min-width: 60px;">{{ t('note-scale') }}</div>
-                <fv-slider
-                  v-model="noteScale"
-                  :mininum="0"
-                  :maxinum="5"
-                  :unit="0.05"
-                  :color="mainColor"
-                  :icon-wrapper-background="bgColor"
-                  class="slider"
-                />
-                <span class="slider-val">{{ noteScale.toFixed(2) }}</span>
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.note-scale') }}</div>
+              <div class="slider-block">
+                <div class="slider-header">
+                  <span>{{ t('note-scale') }}</span
+                  ><span class="slider-val">{{ noteScale.toFixed(2) }}</span>
+                </div>
+                <v-slider v-model="noteScale" :min="0" :max="5" :step="0.05" hide-details color="primary" />
               </div>
             </div>
-            <div class="fluent-glass md3-card">
-              <div class="card-label">效果开关</div>
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.effects') }}</div>
               <div class="switch-grid">
                 <TipSwitch v-model="doubleHint" :label="t('double-hint')" density="compact" color="primary" />
                 <TipSwitch v-model="aggressive" :label="t('aggressive')" :tooltip="t('aggressive-tips')" density="compact" color="primary" />
@@ -921,11 +739,11 @@ async function replacePreset() {
                 <TipSwitch v-model="disableEffect" :label="t('disable-effect')" density="compact" color="primary" />
               </div>
             </div>
-            <div class="fluent-glass md3-card">
-              <div class="card-label">UI 显示</div>
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.ui') }}</div>
               <div class="ui-grid">
                 <div v-for="(item, index) in renderList" :key="index" class="ui-chip" :class="{ 'is-on': render.includes(item) }" @click="toggleRender(item)">
-                  <fv-animated-icon icon="CheckMark" :font-size="16" />
+                  <v-icon :icon="render.includes(item) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline'" size="16" />
                   <span>{{ item }}</span>
                 </div>
               </div>
@@ -934,121 +752,70 @@ async function replacePreset() {
 
           <!-- PLAYER -->
           <div v-show="activeCategory === 'player'" class="settings-stack">
-            <div class="fluent-glass md3-card" style="flex-direction: column;">
-              <div class="card-label">个人信息</div>
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.player') }}</div>
               <div class="avatar-row">
-                <fv-Persona :src="playerAvatar ? playerAvatar : ''" :size="56" :name="playerName ? playerName : ''" class="blur-glass persona">
-                  <template v-slot:name>
-                      <span>{{ playerName }}</span>
-                  </template>
-                </fv-Persona>
-                <fv-button
-                  type="button"
-                  @click="chooseAvatar"
-                  icon="Add"
-                  :foreground="mainColor"
-                  :background="bgColor"
-                  :border-radius="16"
-                  >
-                    <span>{{ t('player-avatar') }}</span>
-                  </fv-button>
+                <v-avatar size="56" color="surface-variant">
+                  <v-img v-if="playerAvatar" :src="playerAvatar" />
+                  <v-icon v-else icon="mdi-account" size="32" />
+                </v-avatar>
+                <v-btn @click="chooseAvatar" variant="outlined" size="small">{{ t('player-avatar') }}</v-btn>
               </div>
-              <div class="field-row">
-                <input v-model="playerName" :placeholder="t('player-name')" class="blur-glass input-field" />
-                <input v-model="playerRks" type="number" :placeholder="t('player-rks')" class="blur-glass input-field" />
+              <div class="field-row two-col">
+                <v-text-field v-model="playerName" :label="t('player-name')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="playerRks" :label="t('player-rks')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
-            <div class="fluent-glass md3-card">
-              <div class="card-label">课题模式</div>
-              <div class="field-row">
-                <input v-model="challengeRank" type="number" :placeholder="t('challenge-rank')" class="blur-glass input-field" />
-                <fv-combobox
-                v-model="challengeColor" 
-                :options="(t('challenge-colors').split(',').map(s => ({text: s, key: s})) as any)"
-                :placeholder="t('challenge-colors')"
-                class="combo-boxes"
-                :border-radius="7"
-                :border-width="2"
-                />
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.challenge') }}</div>
+              <div class="field-row two-col">
+                <v-text-field v-model="challengeRank" :label="t('challenge-rank')" density="compact" variant="outlined" hide-details />
+                <v-select v-model="challengeColor" :items="t('challenge-colors').split(',')" :label="t('challenge-color')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
           </div>
 
           <!-- DEBUG -->
           <div v-show="activeCategory === 'debug'" class="settings-stack">
-            <div class="fluent-glass md3-card">
-              <div class="card-label">调试选项</div>
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('section.debug') }}</div>
               <div class="switch-grid">
-                <TipSwitch v-model="chartDebug" :label="t('chart_debug')" density="compact" color="primary" hide-details />
-                <TipSwitch v-model="flidX" :label="t('flid_x')" density="compact" color="primary" hide-details />
-                <TipSwitch v-model="handSplit" :label="t('hand-split')" density="compact" color="primary" hide-details />
+                <v-switch v-model="chartDebug" :label="t('chart_debug')" density="compact" color="primary" hide-details />
+                <v-switch v-model="flidX" :label="t('flid_x')" density="compact" color="primary" hide-details />
+                <v-switch v-model="handSplit" :label="t('hand-split')" density="compact" color="primary" hide-details />
                 <TipSwitch v-model="disableLoading" :label="t('disable-loading')" :tooltip="t('disable-loading-tips')" density="compact" color="warning" />
               </div>
             </div>
           </div>
         </div>
       </div>
-
-      <!-- Preview panel disabled
-      <div class="preview-col">
-        <div class="preview-panel">
-          <Transition name="preview-fade" mode="out-in">
-            <div key="default" class="preview-content preview-default">
-              <div style="font-size: 48px; opacity: 0.15;">👁️</div>
-              <p class="preview-hint">悬停选项查看预览</p>
-            </div>
-          </Transition>
-        </div>
-      </div>
-      -->
     </div>
 
     <!-- Preset bar -->
-    <div class="preset-bar">
-        <fv-combobox
-          v-model="preset" 
-          :options="(presetOptions as any)" 
-          :placeholder="t('presets')"
-          class="combo-boxes"
-          :border-radius="7"
-          :border-width="2"
-          return-object
-          @update:model-value="
-            (val: Preset) => {
-              preset = val;
-              applyConfig(val.config);
-            }"
-        />
+    <div class="preset-bar clear-glass">
+      <v-select
+        :model-value="preset"
+        @update:model-value="
+          (val: Preset) => {
+            preset = val;
+            applyConfig(val.config);
+          }
+        "
+        :items="presets"
+        item-title="name"
+        :label="t('presets')"
+        density="compact"
+        variant="outlined"
+        hide-details
+        return-object
+        class="preset-select" />
       <div class="preset-actions">
-        <fv-button
-          type="button"
-          @click="createPreset"
-          icon="Add"
-          :foreground="mainColor"
-          :background="bgColor"
-          :border-radius="16"
-        >新建</fv-button>
-        <fv-button
-          type="button"
-          :disabled="preset.key === 'default'"
-          @click="replacePreset"
-          icon="Add"
-          :foreground="mainColor"
-          :background="bgColor"
-          :border-radius="16"
-        >保存</fv-button>
-        <fv-button
-          type="button"
-          :disabled="preset.key === 'default'"
-          @click="deletePreset"
-          icon="Add"
-          :foreground="mainColor"
-          :background="bgColor"
-          :border-radius="16"
-        >删除</fv-button>
+        <v-btn variant="tonal" color="primary" size="small" prepend-icon="mdi-plus" @click="createPreset">{{ t('preset-new') }}</v-btn>
+        <v-btn variant="tonal" color="warning" size="small" prepend-icon="mdi-content-save" :disabled="preset.key === 'default'" @click="replacePreset">{{ t('preset-save') }}</v-btn>
+        <v-btn variant="tonal" color="error" size="small" prepend-icon="mdi-delete" :disabled="preset.key === 'default'" @click="deletePreset">{{ t('preset-delete') }}</v-btn>
       </div>
     </div>
-  </form>
+  </v-form>
 </template>
 
 <style scoped>
@@ -1057,14 +824,42 @@ async function replacePreset() {
   flex-direction: column;
   width: 100%;
   height: 100%;
+  background: transparent;
+  font-family: inherit;
 }
 
 .cat-bar {
-  border-radius: 16px;
   display: flex;
   gap: 8px;
   padding: 10px 16px;
+  margin: 0 16px;
   flex-shrink: 0;
+  overflow-x: auto;
+}
+.cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid rgba(var(--main-color-rgb), 0.15);
+  border-radius: 20px;
+  background: transparent;
+  color: rgba(var(--main-color-rgb), 0.55);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+.cat-chip:hover {
+  background: rgba(var(--main-color-rgb), 0.08);
+  color: rgba(var(--main-color-rgb), 0.85);
+}
+.cat-chip.is-active {
+  background: rgba(var(--main-color-rgb), 0.15);
+  border-color: rgba(var(--main-color-rgb), 0.4);
+  color: var(--main-color);
 }
 
 .config-body {
@@ -1078,176 +873,48 @@ async function replacePreset() {
 
 /* LEFT column */
 .settings-col {
-  vertical-align: center;
-  align-items: center;
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
 }
 .settings-scroll {
-  height: 90%;
   flex: 1;
   overflow-y: auto;
   padding-right: 4px;
 }
 .settings-stack {
-  height: 100%;
-  display: flex;
-  flex-direction: row;
-  gap: 10px;
-}
-.settings-stack-s {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-/* RIGHT preview column */
-.preview-col {
-  width: 320px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-}
-.preview-panel {
-  flex: 1;
-  background: transparent;
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(var(--main-color-rgb), 0.08);
-  border-radius: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  position: relative;
-}
-
-.preview-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 24px;
-  width: 100%;
-}
-.preview-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(var(--main-color-rgb),0.8);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  align-self: flex-start;
-}
-.preview-default {
-  opacity: 0.6;
-}
-.preview-hint {
-  color: rgba(255, 255, 255, 0.35);
-  font-size: 14px;
-  margin: 8px 0 0;
-}
-
-/* Preview transition */
-.preview-fade-enter-active {
-  transition:
-    opacity 0.25s ease,
-    transform 0.25s ease;
-}
-.preview-fade-leave-active {
-  transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
-}
-.preview-fade-enter-from {
-  opacity: 0;
-  transform: translateY(8px);
-}
-.preview-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
 }
 
 /* ===== Cards ===== */
 .md3-card {
-  align-items: baseline;
   padding: 18px;
-  min-height: 350px;
-  height: 100%;
-  max-width: 100%;
-  display: flex;
-  flex-direction: row;
-  gap: 12px;
-  cursor: default;
-  background: transparent;
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(var(--main-color-rgb), 0.12);
-  border-radius: 16px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-  color: var(--main-color) !important;
-}
-.md3-card:hover {
-  background: rgba(var(--main-color-rgb), 0.04);
-  border-color: rgba(var(--main-color-rgb), 0.25);
-}
-.md3-card-s {
-  padding: 18px;
-  height: 120px;
-  max-width: 50%;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 12px;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   cursor: default;
-  background: transparent;
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(var(--main-color-rgb), 0.08);
-  border-radius: 16px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  color: var(--main-color) !important;
-}
-.md3-card-s:hover {
-  background: rgba(var(--main-color-rgb), 0.04);
-  border-color: rgba(var(--main-color-rgb), 0.2);
 }
 .card-label {
-  min-width: 40px;
-  margin: 5px;
-  margin-top: 10px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  color: var(--main-color);
+  color: rgba(var(--main-color-rgb), 0.7);
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 
 .field-row {
   display: flex;
-  flex-direction: column;
   gap: 10px;
 }
-.input-field {
-  height: 36px;
-  width: 300px;
-  border-top: 1px solid rgba(var(--main-color-rgb), 0.3);
-  border-left: 1px solid rgba(var(--main-color-rgb), 0.25);
-  border-right: 1px solid rgba(var(--main-color-rgb), 0.1);
-  border-bottom: 1px solid rgba(var(--main-color-rgb), 0.05);
-  padding: 12px 16px;
-  border-radius: 7px;
-  font-size: 14px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  color: var(--main-color) !important;
-}
-.input-field:focus {
-  outline: none;
-  border-top: 1px solid rgba(var(--sub-color-rgb), 0.3);
-  border-left: 1px solid rgba(var(--sub-color-rgb), 0.25);
-  border-right: 1px solid rgba(var(--sub-color-rgb), 0.1);
-  border-bottom: 1px solid rgba(var(--sub-color-rgb), 0.05);
-  box-shadow: 0 0 0 3px rgba(var(--sub-color-rgb), 0.15);
-}
-.input-field::placeholder {
-  color: rgba(var(--main-color-rgb), 0.3);
+.field-row.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
 }
 .switch-grid {
   display: grid;
@@ -1259,11 +926,33 @@ async function replacePreset() {
   display: flex;
   align-items: center;
   gap: 10px;
+  color: rgba(var(--main-color-rgb), 0.7);
 }
+
+.slider-label {
+  min-width: 56px;
+  font-size: 13px;
+  color: rgba(var(--main-color-rgb), 0.55);
+}
+.slider-val {
+  min-width: 40px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--main-color);
+  font-family: 'Consolas', monospace;
+}
+
 .slider-block {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.slider-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: rgba(var(--main-color-rgb), 0.6);
 }
 
 .respack-row {
@@ -1279,7 +968,7 @@ async function replacePreset() {
 
 .ui-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 6px;
 }
 .ui-chip {
@@ -1287,22 +976,22 @@ async function replacePreset() {
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
-  background: rgba(50, 50, 50, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(var(--bg-color-rgb), 0.5);
+  border: 1px solid rgba(var(--main-color-rgb), 0.1);
   border-radius: 12px;
   cursor: pointer;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--main-color-rgb), 0.5);
   transition: all 0.2s;
   user-select: none;
   white-space: nowrap;
 }
 .ui-chip:hover {
-  background: rgba(60, 60, 60, 0.6);
+  background: rgba(var(--main-color-rgb), 0.08);
 }
 .ui-chip.is-on {
-  background: rgba(var(--main-color-rgb),0.12);
-  border-color: rgba(var(--main-color-rgb),0.3);
+  background: rgba(var(--main-color-rgb), 0.12);
+  border-color: rgba(var(--main-color-rgb), 0.3);
   color: var(--main-color);
 }
 
@@ -1311,7 +1000,7 @@ async function replacePreset() {
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin: 0 16px;
   flex-shrink: 0;
 }
 .preset-select {
@@ -1323,644 +1012,12 @@ async function replacePreset() {
   gap: 8px;
 }
 
-/* ===== PREVIEW VISUALIZATIONS ===== */
-
-/* Pixel grid demo */
-.pixel-grid-wrap {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  padding: 12px 0;
-}
-.pixel-grid {
-  display: grid;
-  gap: 2px;
-  width: fit-content;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-.pixel-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 1px;
-  background: var(--main-color);
-  opacity: 0;
-  animation: pixelFadeIn 0.6s ease forwards;
-}
-@keyframes pixelFadeIn {
-  0% {
-    opacity: 0;
-    transform: scale(0);
-  }
-  100% {
-    opacity: 0.7;
-    transform: scale(1);
-  }
-}
-.pixel-dot:nth-child(odd) {
-  animation-delay: 0.1s;
-}
-.pixel-dot:nth-child(3n) {
-  animation-delay: 0.2s;
-}
-.pixel-dot:nth-child(5n) {
-  animation-delay: 0.3s;
-}
-
-/* Performance bars */
-.perf-bars {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.perf-bar-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.perf-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-  min-width: 36px;
-}
-.perf-bar {
-  flex: 1;
-  height: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 4px;
-  overflow: hidden;
-}
-.perf-fill {
-  height: 100%;
-  border-radius: 4px;
-  transition: width 0.4s ease;
-}
-.perf-speed {
-  background: linear-gradient(90deg, #4caf50, #8bc34a);
-}
-.perf-quality {
-  background: linear-gradient(90deg, #2196f3, var(--main-color));
-}
-.perf-val {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
-  min-width: 32px;
-  text-align: right;
-  font-family: 'Consolas', monospace;
-}
-
-/* Bitrate gauge */
-.bitrate-demo {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-}
-.bitrate-gauge {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.gauge-svg {
-  width: 160px;
-  height: 80px;
-}
-.gauge-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--main-color);
-  font-family: 'Consolas', monospace;
-  margin-top: -8px;
-}
-.gauge-unit {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
-}
-
-/* Toggle demo */
-.toggles-demo {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-}
-.toggle-demo-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  background: rgba(40, 40, 40, 0.6);
-  border-radius: 12px;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 13px;
-  transition: all 0.2s;
-}
-.toggle-demo-item.active {
-  background: rgba(var(--main-color-rgb),0.1);
-  color: var(--main-color);
-}
-.toggle-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  transition: background 0.2s;
-}
-.toggle-demo-item.active .toggle-dot {
-  background: var(--main-color);
-  box-shadow: 0 0 8px rgba(var(--main-color-rgb),0.5);
-}
-
-/* Wave demo */
-.wave-demo {
-  width: 100%;
-}
-.wave-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 80px;
-  padding: 4px 0;
-}
-.wave-bar {
-  flex: 1;
-  background: linear-gradient(180deg, var(--main-color), #4a7adf);
-  border-radius: 2px;
-  min-height: 4px;
-  transition: height 0.3s ease;
-  animation: wavePulse 1.5s ease-in-out infinite alternate;
-}
-.wave-bar-sfx {
-  background: linear-gradient(180deg, #e91e63, #ad1457);
-}
-@keyframes wavePulse {
-  0% {
-    opacity: 0.7;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-.wave-label {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 4px;
-  display: block;
-}
-
-/* Audio quality bars */
-.audio-quality-bars {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.aq-bar-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.aq-label {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
-  min-width: 36px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-.aq-label.is-active {
-  color: var(--main-color);
-}
-.aq-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.aq-fill {
-  height: 100%;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.15);
-  transition: width 0.4s ease;
-}
-.aq-fill.is-active {
-  background: var(--main-color);
-}
-
-/* Chart preview */
-.chart-preview-box {
-  width: 100%;
-  height: 140px;
-  background: linear-gradient(180deg, rgba(20, 20, 30, 0.9), rgba(10, 10, 20, 0.95));
-  border-radius: 12px;
-  position: relative;
-  overflow: hidden;
-  transition: transform 0.3s ease;
-  transform-origin: center center;
-}
-.chart-judge-line {
-  position: absolute;
-  bottom: 20px;
-  left: 10%;
-  right: 10%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(var(--main-color-rgb),0.6), rgba(233, 30, 99, 0.6), rgba(var(--main-color-rgb),0.6), transparent);
-  box-shadow: 0 0 8px rgba(var(--main-color-rgb),0.3);
-}
-.chart-note {
-  position: absolute;
-  width: 36px;
-  height: 36px;
-  object-fit: contain;
-  filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.4));
-  animation: noteFall linear infinite;
-}
-.chart-note-1 {
-  left: 30%;
-  animation-delay: 0s;
-}
-.chart-note-2 {
-  left: 55%;
-  animation-delay: 0.6s;
-}
-.chart-note-3 {
-  left: 75%;
-  animation-delay: 1.2s;
-}
-@keyframes noteFall {
-  0% {
-    top: -30px;
-    opacity: 0;
-  }
-  10% {
-    opacity: 1;
-  }
-  85% {
-    opacity: 1;
-  }
-  100% {
-    top: calc(100% - 30px);
-    opacity: 0;
-  }
-}
-
-/* Text preview */
-.text-demo {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-}
-.combo-preview {
-  font-size: 32px;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.9);
-  letter-spacing: 2px;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-}
-.watermark-preview {
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.3);
-  font-style: italic;
-}
-.ending-preview {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.05);
-  padding: 6px 14px;
-  border-radius: 8px;
-}
-
-/* Note scale demo */
-.note-scale-demo {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-.note-img {
-  object-fit: contain;
-  filter: drop-shadow(0 0 12px rgba(99, 102, 241, 0.4));
-  transition: all 0.3s ease;
-}
-.note-scale-label {
-  font-size: 14px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
-  font-family: 'Consolas', monospace;
-}
-
-/* Effects preview */
-.effects-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-}
-.fx-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  background: rgba(40, 40, 40, 0.6);
-  border-radius: 12px;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 13px;
-  position: relative;
-  overflow: hidden;
-  min-height: 44px;
-}
-.fx-item.off {
-  opacity: 0.4;
-}
-.fx-particles {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.particle {
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  background: rgba(var(--main-color-rgb),0.6);
-  border-radius: 50%;
-  animation: particleFloat 2s ease-in-out infinite;
-}
-@keyframes particleFloat {
-  0% {
-    transform: translateY(0) scale(1);
-    opacity: 0.8;
-  }
-  50% {
-    transform: translateY(-12px) scale(1.3);
-    opacity: 0.4;
-  }
-  100% {
-    transform: translateY(0) scale(1);
-    opacity: 0.8;
-  }
-}
-.fx-glow {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 30% 50%, rgba(var(--main-color-rgb),0.15), transparent 60%);
-  pointer-events: none;
-}
-.fx-double {
-  display: flex;
-  gap: 6px;
-}
-.hint-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #e91e63;
-  box-shadow: 0 0 6px rgba(233, 30, 99, 0.5);
-}
-
-/* UI phone mock */
-.ui-phone-mock {
-  width: 120px;
-  height: 200px;
-  background: rgba(10, 10, 10, 0.9);
-  border: 2px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  position: relative;
-  overflow: hidden;
-}
-.phone-screen {
-  width: 100%;
-  height: 100%;
-  position: relative;
-}
-.phone-ui-line {
-  position: absolute;
-  bottom: 30px;
-  left: 10%;
-  right: 10%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(var(--main-color-rgb),0.5), transparent);
-}
-.phone-ui-score {
-  position: absolute;
-  top: 12px;
-  right: 8px;
-  font-size: 8px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.7);
-  font-family: 'Consolas', monospace;
-}
-.phone-ui-combo {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 10px;
-  font-weight: 800;
-  color: rgba(255, 255, 255, 0.5);
-}
-.phone-ui-name {
-  position: absolute;
-  top: 12px;
-  left: 8px;
-  font-size: 7px;
-  color: rgba(255, 255, 255, 0.5);
-}
-.phone-ui-pb {
-  position: absolute;
-  bottom: 8px;
-  left: 8px;
-  right: 8px;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-}
-.pb-fill {
-  height: 100%;
-  background: var(--main-color);
-  border-radius: 2px;
-}
-
-/* Player card */
-.player-card-preview {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  background: rgba(40, 40, 40, 0.6);
-  padding: 14px 18px;
-  border-radius: 16px;
-  width: 100%;
-}
-.player-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.player-name-pv {
-  font-size: 16px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
-.player-rks-pv {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-  font-family: 'Consolas', monospace;
-}
-
-/* Challenge badge */
-.challenge-badge {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 3px solid var(--badge-color, #ffc107);
-  box-shadow: 0 0 20px color-mix(in srgb, var(--badge-color, #ffc107) 40%, transparent);
-  transition: all 0.3s ease;
-}
-.badge-rank {
-  font-size: 28px;
-  font-weight: 800;
-  color: var(--badge-color, #ffc107);
-}
-
-/* Debug demo */
-.debug-demo {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-}
-.debug-grid {
-  width: 100%;
-  height: 80px;
-  background-image: linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 20px 20px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-.debug-mirror {
-  width: 60px;
-  height: 60px;
-  background: rgba(40, 40, 40, 0.6);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.3s ease;
-}
-.debug-mirror.flipped {
-  transform: scaleX(-1);
-}
-.mirror-arrow {
-  font-size: 24px;
-  color: rgba(255, 255, 255, 0.5);
-}
-.debug-split {
-  display: flex;
-  gap: 4px;
-}
-.split-left {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: rgba(33, 150, 243, 0.4);
-}
-.split-right {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: rgba(233, 30, 99, 0.4);
-}
-.debug-skip {
-  font-size: 12px;
-  font-weight: 700;
-  color: rgba(var(--main-color-rgb),0.7);
-  background: rgba(var(--main-color-rgb),0.1);
-  padding: 6px 14px;
-  border-radius: 8px;
-}
-
-/* Meta info */
-.preview-meta {
-  display: flex;
-  gap: 16px;
-  width: 100%;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-.meta-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-.meta-label {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
-  text-transform: uppercase;
-}
-.meta-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
-  font-family: 'Consolas', monospace;
-}
-.combo-boxes:deep(*) {
-  background: transparent !important;
-  color: var(--main-color) !important;
-}
-.combo-boxes {
-  border-top: 1px solid rgba(var(--main-color-rgb), 0.3);
-  border-left: 1px solid rgba(var(--main-color-rgb), 0.25);
-  border-right: 1px solid rgba(var(--main-color-rgb), 0.1);
-  border-bottom: 1px solid rgba(var(--main-color-rgb), 0.05);
-  transition: all .2s ease;
-}
-.combo-boxes:hover {
-  border-top: 1px solid rgba(var(--sub-color-rgb), 0.3);
-  border-left: 1px solid rgba(var(--sub-color-rgb), 0.25);
-  border-right: 1px solid rgba(var(--sub-color-rgb), 0.1);
-  border-bottom: 1px solid rgba(var(--sub-color-rgb), 0.05);
-}
-
-.slider {
-  cursor: pointer;
-}
-
-.persona:deep(*) {
-  background: transparent !important;
-  color: var(--main-color) !important;
-}
-.persona {
-  border-radius: 300px;
-  border: 1px solid rgba(var(--main-color-rgb), 0.2);
-}
-
-/* ===== Responsive ===== */
 @media (max-width: 900px) {
   .config-body {
     flex-direction: column;
   }
-  .preview-col {
-    width: 100%;
-    height: 200px;
-    flex-shrink: 0;
-  }
-  .preview-panel {
-    border-radius: 16px;
-  }
 }
 @media (max-width: 600px) {
-  .preview-col {
-    display: none;
-  }
   .ui-grid {
     grid-template-columns: repeat(2, 1fr);
   }

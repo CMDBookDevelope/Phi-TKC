@@ -1,24 +1,42 @@
-import './assets/main.css'
-import { createApp } from 'vue'
-import { createI18n } from 'vue-i18n'
-import router from './router'
-import { changeLocale } from './common'
-// 引入VFluent3
-import VueFluent from '@creatorsn/vfluent3'
-// 必须引入全局样式
-import '@creatorsn/vfluent3/style.css'
-import App from "./App.vue"
-import ColorSwatch from './components/ColorSwatch.vue'
+import './assets/main.css';
+import '@mdi/font/css/materialdesignicons.css';
 
-export const SUPPORTED_LOCALES = ['en', 'zh-CN', 'zh-TW']
-let locale = localStorage.getItem('locale')
+import { createApp } from 'vue';
+
+import { createI18n } from 'vue-i18n';
+
+import { changeLocale } from './common';
+
+import App from './App.vue';
+import router from './router';
+
+import { createVuetify } from 'vuetify';
+import * as components from 'vuetify/components';
+import { VStepper, VStepperActions, VStepperHeader, VStepperItem } from 'vuetify/components';
+import * as directives from 'vuetify/directives';
+import { aliases, mdi } from 'vuetify/iconsets/mdi';
+import 'vuetify/styles';
+
+import theme from './theme';
+
+export const SUPPORTED_LOCALES = ['en', 'zh-CN', 'zh-TW'];
+
+let locale = localStorage.getItem('locale');
+if (!locale) {
+  locale = 'en';
+  for (const alt of navigator.languages) {
+    if (SUPPORTED_LOCALES.includes(alt)) {
+      locale = alt;
+      break;
+    }
+  }
+}
 
 const i18n = createI18n({
   locale: 'en',
   fallbackLocale: 'en',
   messages: {
     en: {
-      // 新增导航菜单翻译
       render: 'Render',
       rpe: 'RPE',
       tasks: 'Tasks',
@@ -34,9 +52,17 @@ const i18n = createI18n({
       },
       'has-error': 'There are errors in the configuration',
       'any-filter': 'All files',
+      // Router titles are resolved through `i18n.global.t`, so they must live in the
+      // global message set — SFC <i18n> blocks are locally scoped and invisible here.
+      // `title-default` is intentionally absent: `missing()` maps it to '' → plain "Phi-TKC".
+      'title-render': 'Render',
+      'title-rpe': 'RPE',
+      'title-tasks': 'Tasks',
+      'title-batch-render': 'Batch Render',
+      'title-setting': 'Settings',
+      'title-about': 'About',
     },
     'zh-CN': {
-      // 中文导航翻译
       render: '渲染',
       rpe: 'RPE配置',
       tasks: '任务队列',
@@ -52,73 +78,104 @@ const i18n = createI18n({
       },
       'has-error': '配置中有错误',
       'any-filter': '所有文件',
+      'title-render': '渲染',
+      'title-rpe': 'RPE',
+      'title-tasks': '任务',
+      'title-batch-render': '批量渲染',
+      'title-setting': '设置',
+      'title-about': '关于',
     },
   },
   legacy: false,
   missing(_locale, key) {
-    if (key.startsWith('title-')) return ''
-    return key
+    if (key.startsWith('title-')) return '';
+    return key;
   },
-})
+});
+changeLocale(locale);
 
-if (!locale) {
-  locale = 'en'
-  for (const alt of navigator.languages) {
-    if (SUPPORTED_LOCALES.includes(alt)) {
-      locale = alt
-      break
-    }
-  }
-}
-changeLocale(locale)
+const vuetify = createVuetify({
+  components: {
+    ...components,
+    VStepper,
+    VStepperActions,
+    VStepperHeader,
+    VStepperItem,
+  },
+  directives,
+  theme: {
+    defaultTheme: 'customTheme',
+    themes: {
+      customTheme: theme,
+    },
+  },
+  icons: {
+    defaultSet: 'mdi',
+    aliases,
+    sets: {
+      mdi,
+    },
+  },
+  defaults: {
+    VCard: { rounded: 'lg', flat: true },
+    VBtn: { rounded: 'xl' },
+    VTextField: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
+    VSelect: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
+    VCombobox: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
+    VTextarea: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
+    VAutocomplete: { variant: 'filled', rounded: 'lg', density: 'comfortable' },
+    VChip: { rounded: 'lg' },
+    VDialog: { scrollable: true },
+    VList: { rounded: 'lg' },
+    VSlider: { color: 'primary' },
+    VSwitch: { color: 'primary', inset: true },
+    VCheckboxBtn: { color: 'primary' },
+    VProgressLinear: { rounded: true },
+    VProgressCircular: { color: 'primary' },
+  },
+});
 
-const app = createApp(App)
-app.component('ColorSwatch', ColorSwatch)
-// 全局安装VFluent
-app.use(VueFluent)
-app.use(i18n)
-app.use(router)
+const app = createApp(App);
+app.use(i18n).use(router).use(vuetify);
 
-// 注册全局 v-glass 自定义指令：鼠标跟随高光效果
+// Registers the global v-glass directive: a mouse-following specular highlight.
+// `.glass::after` in assets/main.css consumes the custom properties it writes.
 app.directive('glass', {
   mounted(el: HTMLElement) {
-    // 鼠标移动：更新高光位置
     const handleMove = (e: MouseEvent) => {
-      const rect = el.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-      el.style.setProperty('--highlight-x', `${x}px`)
-      el.style.setProperty('--highlight-y', `${y}px`)
-      el.style.setProperty('--highlight-opacity', '1')
-    }
-    // 鼠标离开：隐藏高光
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      el.style.setProperty('--highlight-x', `${x}px`);
+      el.style.setProperty('--highlight-y', `${y}px`);
+      el.style.setProperty('--highlight-opacity', '1');
+    };
     const handleLeave = () => {
-      el.style.setProperty('--highlight-opacity', '0')
-    }
+      el.style.setProperty('--highlight-opacity', '0');
+    };
 
-    el.addEventListener('mousemove', handleMove)
-    el.addEventListener('mouseleave', handleLeave)
-    
-    // 存储事件处理器，卸载时用于清理
-    ;(el as any).__glassHandlers = { handleMove, handleLeave }
+    el.addEventListener('mousemove', handleMove);
+    el.addEventListener('mouseleave', handleLeave);
+
+    // Stored on the element so `unmounted` can detach the exact handlers.
+    (el as any).__glassHandlers = { handleMove, handleLeave };
   },
   unmounted(el: HTMLElement) {
-    const handlers = (el as any).__glassHandlers
+    const handlers = (el as any).__glassHandlers;
     if (handlers) {
-      el.removeEventListener('mousemove', handlers.handleMove)
-      el.removeEventListener('mouseleave', handlers.handleLeave)
+      el.removeEventListener('mousemove', handlers.handleMove);
+      el.removeEventListener('mouseleave', handlers.handleLeave);
     }
-  }
-})
+  },
+});
 
-app.mount('#app')
+app.mount('#app');
 
-export { i18n }
+export { i18n };
 
-// 或通过监听 contextmenu 事件（JS 层面）
+// Phi-TKC keeps the browser's default context menu and devtools shortcuts disabled.
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
-// 禁用 F12 / Ctrl+Shift+I / Ctrl+Shift+J / Ctrl+U / Ctrl+R
 document.addEventListener('keydown', (e) => {
   const ctrl = e.ctrlKey || e.metaKey;
   const shift = e.shiftKey;

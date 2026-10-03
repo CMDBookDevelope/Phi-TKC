@@ -1,28 +1,23 @@
 <script setup lang="ts">
 import TooltipIcon from './TooltipIcon.vue';
-import { mainColor, bgColor, subColor } from '@/colorStore';
 
 defineProps<{ label: string; tooltip?: string }>();
 </script>
 
 <template>
-  <a style="font-size: 12px; font-weight: 400;">{{ label }}</a>
-  <fv-toggle-switch
-    :borderColor="mainColor"
-    :ringBackground="mainColor"
-    :switchOnBackground="subColor"
-    :onForeground="subColor"
-    :offForeground="mainColor"
-    class="switch"
-  />
-  <TooltipIcon v-if="tooltip" :tooltip="tooltip"></TooltipIcon>
+  <!-- Single root, so the parent's `v-model` falls through to `v-switch` via $attrs.
+       (A multi-root template silently drops it, which left every switch in
+       ConfigView non-functional.) -->
+  <v-switch color="primary" class="mx-2 d-flex justify-center tk-switch">
+    <template v-slot:label>
+      {{ label }}
+      <TooltipIcon v-if="tooltip" :tooltip="tooltip"></TooltipIcon>
+    </template>
+  </v-switch>
 </template>
 
 <style scoped>
-.switch {
-  height: 28px;
-  cursor: pointer;
-  position: relative;
-  transition: all 0.25s ease;
+.tk-switch :deep(.v-label) {
+  color: rgba(var(--main-color-rgb), 0.85);
 }
 </style>
