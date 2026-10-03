@@ -527,7 +527,7 @@ watch(charts, (val) => { localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
                   <span class="render-status">{{ renderProgress.toFixed(1) }}% - {{ renderMsg }}</span>
                 </template>
                 <template v-else-if="item.error">
-                  <span class="error-status" :title="item.error">{{ item.error }}</span>
+                  <span class="error-status copyable" :title="item.error">{{ item.error }}</span>
                 </template>
               </div>
             </div>

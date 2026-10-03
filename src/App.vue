@@ -5,7 +5,7 @@
       v-for="msg in toastMessages"
       :key="msg.id"
       class="toast-item"
-      :class="msg.type"
+      :class="[msg.type, { copyable: msg.type === 'error' }]"
     >
       {{ msg.text }}
     </div>

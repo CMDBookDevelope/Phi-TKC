@@ -21,11 +21,19 @@ html, body, #app {
   color: var(--main-color);
 }
 /* 选中白名单 */
-input, textarea, [contenteditable="true"] {
+input, textarea, [contenteditable="true"], .copyable {
   user-select: text;
   -webkit-user-select: text;
   -moz-user-select: text;
   -ms-user-select: text;
+}
+/* 可复制文本（textarea 行为）：错误信息等允许选中复制 */
+.copyable {
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  cursor: text;
 }
 /* VFluent 亚克力玻璃卡片通用类 */
 .fluent-glass {

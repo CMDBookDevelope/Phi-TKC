@@ -222,7 +222,7 @@ document.addEventListener('click', closeContextMenu);
     <!-- Error/Detail dialog -->
     <div v-if="errorDialog" class="ctx-backdrop" @click="errorDialog = false">
       <div class="ctx-menu" style="left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 500px; width: 90%;">
-        <div style="padding: 12px 16px; font-size: 14px; color: var(--sub-color); white-space: pre-wrap; max-height: 60vh; overflow: auto;">{{ errorDialogMessage }}</div>
+        <div class="copyable" style="padding: 12px 16px; font-size: 14px; color: var(--sub-color); white-space: pre-wrap; max-height: 60vh; overflow: auto;">{{ errorDialogMessage }}</div>
         <div style="padding: 8px 16px; text-align: right; border-top: 1px solid rgba(255,255,255,0.06);">
           <fv-button :background="bgColor" :foreground="mainColor" :border-radius="20" @click="errorDialog = false">{{ t('confirm') }}</fv-button>
         </div>

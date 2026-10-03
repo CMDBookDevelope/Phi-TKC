@@ -32,8 +32,7 @@
       "signingIdentity": null
     },
     "resources": [
-      "assets",
-      "WebView2Loader.dll"
+      "assets"
     ],
     "shortDescription": "",
     "linux": {
