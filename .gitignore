@@ -2,3 +2,16 @@
 /dist/
 /.vscode/
 /.vs/
+
+# ===== AI 工具相关文件（不提交）=====
+.claude/
+.codex/
+.cursor/
+.cursorrules
+.windsurf/
+.continue/
+.specstory/
+.aider*
+CLAUDE.md
+GEMINI.md
+.github/copilot-instructions.md
