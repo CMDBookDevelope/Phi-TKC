@@ -388,6 +388,27 @@ mod hw_detect {
     }
 }
 
+// Mobile has no external ffmpeg / desktop hardware encoders, so every probe is false.
+// Rendering itself is gated off in the UI on these platforms (see MOBILE.md).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+mod hw_detect {
+    pub fn detect_nvidia() -> bool {
+        false
+    }
+
+    pub fn detect_intel_qsv() -> bool {
+        false
+    }
+
+    pub fn detect_amd() -> bool {
+        false
+    }
+
+    pub fn detect_vulkan() -> bool {
+        false
+    }
+}
+
 pub async fn build_player(config: &RenderConfig) -> Result<BasicPlayer> {
     Ok(BasicPlayer {
         avatar: if let Some(path) = &config.player_avatar {

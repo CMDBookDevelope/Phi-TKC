@@ -1,0 +1,35 @@
+# The prpr-avc FFmpeg static libraries for Apple targets
+# (Phi-TK-render-lib @ render-lib, prpr-avc/static-lib/aarch64-apple-*) are built with
+# the VideoToolbox hardware decoder enabled, so their object files reference symbols
+# from CoreVideo / VideoToolbox / CoreMedia / CoreFoundation.
+#
+# prpr-avc's build.rs only emits `-lz`, so those frameworks must be linked here or the
+# final binary fails with undefined symbols. Unreferenced frameworks are dropped by the
+# linker, so this is safe even if a given build does not need all of them.
+#
+# Note: cargo discovers config files by walking up from its working directory, so a
+# file here applies whether cargo is invoked from the repo root or from src-tauri/.
+
+[target.aarch64-apple-darwin]
+rustflags = [
+  "-Clink-arg=-framework",
+  "-Clink-arg=CoreFoundation",
+  "-Clink-arg=-framework",
+  "-Clink-arg=CoreMedia",
+  "-Clink-arg=-framework",
+  "-Clink-arg=CoreVideo",
+  "-Clink-arg=-framework",
+  "-Clink-arg=VideoToolbox",
+]
+
+[target.aarch64-apple-ios]
+rustflags = [
+  "-Clink-arg=-framework",
+  "-Clink-arg=CoreFoundation",
+  "-Clink-arg=-framework",
+  "-Clink-arg=CoreMedia",
+  "-Clink-arg=-framework",
+  "-Clink-arg=CoreVideo",
+  "-Clink-arg=-framework",
+  "-Clink-arg=VideoToolbox",
+]

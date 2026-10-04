@@ -176,6 +176,14 @@ pub async fn run() -> Result<()> {
     #[cfg(target_os = "windows")]
     let asset_dir = exe_dir.join("assets");
 
+    // macOS bundles resources into `.app/Contents/Resources`; iOS/Android copy them into
+    // the app bundle as well, so ask Tauri where they live instead of guessing from exe_dir.
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    let asset_dir = resolver
+        .resource_dir()
+        .map(|dir| dir.join("assets"))
+        .unwrap_or_else(|_| exe_dir.join("assets"));
+
     if !asset_dir.exists() {
         eprintln!("错误：资源目录不存在 - {:?}", asset_dir);
         bail!("资源目录未找到，请检查安装路径");
@@ -191,7 +199,16 @@ pub async fn run() -> Result<()> {
 
 #[tauri::command]
 fn is_the_only_instance() -> bool {
-    LOCK_FILE.get().is_some()
+    // Mobile apps have no multi-instance concept, and a failed `flock` in the sandbox would
+    // make the frontend call `exit_program()` and kill the app on launch.
+    #[cfg(mobile)]
+    {
+        true
+    }
+    #[cfg(not(mobile))]
+    {
+        LOCK_FILE.get().is_some()
+    }
 }
 
 #[tauri::command]
