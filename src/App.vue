@@ -39,11 +39,22 @@ import { VSonner } from 'vuetify-sonner';
 
 import { mainColor, bgColor, subColor, loadCustomColors } from './colorStore';
 import { routeComponent } from './appState';
+import { isMobile } from './platform';
+import MobileUnsupported from './components/MobileUnsupported.vue';
 
 const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 const vuetifyTheme = useTheme();
+
+// Mobile (iOS/iPadOS/Android): the nav rail becomes a temporary overlay drawer
+// opened from the app bar.
+const mobile = isMobile();
+const navOpen = ref(false);
+
+// Routes whose features cannot work on mobile (see MOBILE.md) — the page is
+// replaced with an explanation instead of failing at runtime.
+const mobileUnsupportedRoutes = ['render', 'rpe', 'batch-render'];
 
 const navItems = [
   { key: 'render', icon: 'mdi-play-circle-outline', activeIcon: 'mdi-play-circle' },
@@ -55,6 +66,7 @@ const navItems = [
 
 const navigateTo = (name: string) => {
   router.push({ name });
+  navOpen.value = false;
 };
 
 window.goto = navigateTo;
@@ -295,13 +307,20 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 
     <v-sonner position="top-center" />
 
+    <v-app-bar v-if="mobile" class="glass fluent-glass tk-appbar" density="compact" flat>
+      <v-app-bar-nav-icon @click="navOpen = !navOpen" />
+      <v-app-bar-title>Phi-TKC</v-app-bar-title>
+    </v-app-bar>
+
     <v-navigation-drawer
-      permanent
+      v-model="navOpen"
+      :permanent="!mobile"
+      :temporary="mobile"
       class="glass fluent-glass tk-nav"
       width="250"
       :rail-width="64"
-      rail
-      expand-on-hover
+      :rail="!mobile"
+      :expand-on-hover="!mobile"
     >
       <div class="nav-logo">
         <img src="/phi-tklogo.png" alt="Phi-TKC" class="tklogo" />
@@ -336,7 +355,13 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
       <router-view v-slot="{ Component }">
         <Suspense timeout="0">
           <template #default>
-            <component :is="Component" ref="routeComponent" class="page-view" />
+            <MobileUnsupported
+              v-if="mobile && mobileUnsupportedRoutes.includes(String(route.name))"
+              ref="routeComponent"
+              class="page-view"
+              :feature="t(String(route.name))"
+            />
+            <component v-else :is="Component" ref="routeComponent" class="page-view" />
           </template>
           <template #fallback>
             <div class="loading-container">
@@ -435,5 +460,23 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
   justify-content: center;
   align-items: center;
   min-height: 100vh;
+}
+
+/* ===== Mobile (iOS/iPadOS/Android) ===== */
+.tk-appbar {
+  border-bottom: 1px solid rgba(var(--main-color-rgb), 0.12) !important;
+}
+
+@media (pointer: coarse) {
+  /* Keep content clear of the notch / home indicator. */
+  .tk-main {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .nav-logo {
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+  .nav-item {
+    min-height: 48px; /* 44px+ touch target */
+  }
 }
 </style>

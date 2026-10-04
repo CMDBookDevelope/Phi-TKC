@@ -319,3 +319,19 @@ input[type='number'] {
 .v-divider {
   border-color: rgba(var(--main-color-rgb), 0.15) !important;
 }
+
+/* ===== Mobile (touch): full-window backdrop blur is expensive on phone/tablet GPUs ===== */
+@media (pointer: coarse) {
+  .blur-glass,
+  .v-field {
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .v-dialog .v-overlay__content > .v-card,
+  .v-dialog .v-overlay__content > form > .v-card,
+  .v-menu > .v-overlay__content > .v-list,
+  .v-menu > .v-overlay__content > .v-card {
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+  }
+}

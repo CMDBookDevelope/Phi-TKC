@@ -8,6 +8,9 @@ en:
   add-folder: Add Folder
   clear-list: Clear All
   clear-done: Clear Completed
+  clear-list-confirm: Clear the whole list? This cannot be undone.
+  cancel: Cancel
+  confirm: OK
   start-render: Start Render
   stop-render: Stop
   retry-failed: Retry Failed
@@ -74,6 +77,9 @@ zh-CN:
   add-folder: 添加文件夹
   clear-list: 清空全部
   clear-done: 清除已完成
+  clear-list-confirm: 确定清空整个列表？此操作不可撤销。
+  cancel: 取消
+  confirm: 确定
   start-render: 开始渲染
   stop-render: 停止渲染
   retry-failed: 重试失败项
@@ -366,8 +372,15 @@ async function addChart(path: string) {
   }
 }
 
+// `window.confirm` is unreliable in mobile WebViews, so ask with a dialog.
+const clearListDialog = ref(false);
+
 function clearList() {
-  if (confirm(t('clear-list') + '?')) charts.value = [];
+  clearListDialog.value = true;
+}
+function confirmClearList() {
+  charts.value = [];
+  clearListDialog.value = false;
 }
 function clearDone() {
   charts.value = charts.value.filter((c) => c.status !== 'done');
@@ -801,6 +814,18 @@ watch(
         </v-card-actions>
       </v-card>
     </v-dialog>
+
+    <!-- Clear-list confirmation (replaces window.confirm) -->
+    <v-dialog v-model="clearListDialog" max-width="420">
+      <v-card class="glass fluent-glass">
+        <v-card-title>{{ t('clear-list') }}</v-card-title>
+        <v-card-text>{{ t('clear-list-confirm') }}</v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="clearListDialog = false">{{ t('cancel') }}</v-btn>
+          <v-btn color="error" @click="confirmClearList">{{ t('confirm') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -1144,6 +1169,14 @@ watch(
   background: rgba(var(--bg-color-rgb), 0.55) !important;
   backdrop-filter: blur(40px) saturate(160%) !important;
   -webkit-backdrop-filter: blur(40px) saturate(160%) !important;
+}
+
+/* Mobile: tone the fullscreen blur down (phone GPUs pay for it continuously). */
+@media (pointer: coarse) {
+  .md3-dialog-full {
+    backdrop-filter: blur(14px) saturate(130%) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(130%) !important;
+  }
 }
 
 .border-b {

@@ -86,9 +86,11 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 defineOptions({ name: 'SettingsPanel' });
 import { RULES as rules, toast } from './common';
 import { mainColor, bgColor, subColor } from './colorStore';
+import { isMobile } from './platform';
 import ColorDot from './components/ColorDot.vue';
 
 const { t } = useI18n();
+const mobile = isMobile();
 
 const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
 const selectedInfo = ref<string | null>(null);
@@ -210,8 +212,8 @@ function confirmColor(type: 'main' | 'bg' | 'sub') {
 <template>
   <div class="settings-container">
     <div class="settings-scroll">
-      <!-- Output Path -->
-      <div class="md3-card glass fluent-glass" v-glass>
+      <!-- Output Path (desktop only: mobile render output is fixed to the app data dir) -->
+      <div v-if="!mobile" class="md3-card glass fluent-glass" v-glass>
         <div class="card-label">{{ t('settings.outputPath.label') }}</div>
         <v-text-field
           v-model="outputPath"

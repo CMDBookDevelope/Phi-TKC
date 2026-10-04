@@ -53,8 +53,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import moment from 'moment';
 import { toastError } from './common';
+import { isMobile } from './platform';
 
 const { t } = useI18n();
+const mobile = isMobile();
 
 const tasks = ref<Task[]>();
 
@@ -164,6 +166,16 @@ const showContextMenu = (event: MouseEvent, task: Task) => {
   contextMenuTask.value = task;
 };
 
+// Touch-friendly replacement for the right-click menu: anchor it to the button.
+const showContextMenuFromButton = (event: MouseEvent, task: Task) => {
+  const target = event.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  contextMenuTask.value = task;
+  contextMenuX.value = rect.left;
+  contextMenuY.value = rect.bottom;
+  contextMenu.value = true;
+};
+
 const closeContextMenu = () => {
   contextMenu.value = false;
   contextMenuTask.value = null;
@@ -220,6 +232,14 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
             <span class="status-chip" :class="'chip-' + statusColor(task.status.type)">
               {{ task.status.type.toUpperCase() }}
             </span>
+            <v-btn
+              icon="mdi-dots-vertical"
+              variant="text"
+              size="x-small"
+              class="task-menu-btn"
+              :title="t('details')"
+              @click.stop="showContextMenuFromButton($event, task)"
+            />
           </div>
 
           <p class="task-path" :title="task.path">{{ task.path }}</p>
@@ -261,7 +281,8 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
                 <v-icon icon="mdi-text-box-outline" size="16" class="mr-1" />
                 <span>{{ t('show-output') }}</span>
               </v-btn>
-              <v-btn variant="text" size="small" color="primary" @click="showInFolder(task.output)">
+              <!-- Desktop shell integration only (explorer / gdbus / open). -->
+              <v-btn v-if="!mobile" variant="text" size="small" color="primary" @click="showInFolder(task.output)">
                 <v-icon icon="mdi-folder-open-outline" size="16" class="mr-1" />
                 <span>{{ t('show-in-folder') }}</span>
               </v-btn>
@@ -566,11 +587,23 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
   border-radius: 8px;
 }
 
+.task-menu-btn {
+  margin-left: auto;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 600px) {
   .tasks-container { padding: 16px; }
   .task-card { flex-direction: column; height: auto; }
   .task-cover { width: 100%; min-height: 140px; }
   .task-info { width: 100%; }
+}
+
+/* ===== Mobile (touch) ===== */
+@media (pointer: coarse) {
+  .task-menu-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 </style>

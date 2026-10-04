@@ -6,6 +6,7 @@ import { createApp } from 'vue';
 import { createI18n } from 'vue-i18n';
 
 import { changeLocale } from './common';
+import { isMobile } from './platform';
 
 import App from './App.vue';
 import router from './router';
@@ -174,14 +175,19 @@ app.mount('#app');
 export { i18n };
 
 // Phi-TKC keeps the browser's default context menu and devtools shortcuts disabled.
+// The context-menu block doubles as long-press-callout suppression on touch devices.
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
-document.addEventListener('keydown', (e) => {
-  const ctrl = e.ctrlKey || e.metaKey;
-  const shift = e.shiftKey;
-  const key = e.key.toUpperCase();
+// Devtools shortcuts only exist on desktop; skipping this on mobile avoids fighting
+// the on-screen keyboard for Ctrl/Meta chords.
+if (!isMobile()) {
+  document.addEventListener('keydown', (e) => {
+    const ctrl = e.ctrlKey || e.metaKey;
+    const shift = e.shiftKey;
+    const key = e.key.toUpperCase();
 
-  if (e.key === 'F12') e.preventDefault();
-  if (ctrl && shift && (key === 'I' || key === 'J')) e.preventDefault();
-  if (ctrl && (key === 'U' || key === 'R')) e.preventDefault();
-});
+    if (e.key === 'F12') e.preventDefault();
+    if (ctrl && shift && (key === 'I' || key === 'J')) e.preventDefault();
+    if (ctrl && (key === 'U' || key === 'R')) e.preventDefault();
+  });
+}

@@ -62,6 +62,9 @@ en:
   preset-deleted: Preset deleted
   preset-replaced: Preset replaced
   preset-cannot-use-default: Cannot use 'default'
+  preset-name-empty: Please enter a preset name
+  cancel: Cancel
+  confirm: OK
   preset-new: New
   preset-save: Save
   preset-delete: Delete
@@ -154,6 +157,9 @@ zh-CN:
   preset-deleted: 预设已删除
   preset-replaced: 预设已替换
   preset-cannot-use-default: 不能使用 default
+  preset-name-empty: 请输入预设名称
+  cancel: 取消
+  confirm: 确定
   preset-new: 新建
   preset-save: 保存
   preset-delete: 删除
@@ -528,20 +534,39 @@ function applyConfig(c: RenderConfig) {
 }
 defineExpose({ buildConfig, applyConfig });
 
+// `window.prompt` is a no-op in the iOS WKWebView, so preset naming uses a dialog.
+let pendingPresetConfig: RenderConfig | null = null;
+const presetNameDialog = ref(false);
+const presetName = ref('');
+const presetNameError = ref('');
+
 async function createPreset() {
   const config = await buildConfig();
   if (!config) return;
-  const name = prompt(t('preset-create-title'));
-  if (!name) return;
+  pendingPresetConfig = config;
+  presetName.value = '';
+  presetNameError.value = '';
+  presetNameDialog.value = true;
+}
+
+async function confirmCreatePreset() {
+  if (!pendingPresetConfig) return;
+  const name = presetName.value.trim();
+  if (!name) {
+    presetNameError.value = t('preset-name-empty');
+    return;
+  }
   if (name === 'default') {
-    toast(t('preset-cannot-use-default'), 'error');
+    presetNameError.value = t('preset-cannot-use-default');
     return;
   }
   try {
-    await invoke('add_preset', { name, config });
+    await invoke('add_preset', { name, config: pendingPresetConfig });
     await updatePresets();
     preset.value = presets.value.find((x) => x.key === name) || presets.value[0];
     toast(t('preset-created'), 'success');
+    presetNameDialog.value = false;
+    pendingPresetConfig = null;
   } catch (e) {
     toastError(e);
   }
@@ -815,6 +840,27 @@ async function replacePreset() {
         <v-btn variant="tonal" color="error" size="small" prepend-icon="mdi-delete" :disabled="preset.key === 'default'" @click="deletePreset">{{ t('preset-delete') }}</v-btn>
       </div>
     </div>
+
+    <!-- Preset name dialog (replaces window.prompt, which iOS WKWebView ignores) -->
+    <v-dialog v-model="presetNameDialog" max-width="420">
+      <v-card class="glass fluent-glass">
+        <v-card-title>{{ t('preset-create-title') }}</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="presetName"
+            autofocus
+            variant="outlined"
+            density="compact"
+            :error-messages="presetNameError"
+            @keyup.enter="confirmCreatePreset"
+          />
+        </v-card-text>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="presetNameDialog = false">{{ t('cancel') }}</v-btn>
+          <v-btn color="primary" @click="confirmCreatePreset">{{ t('confirm') }}</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-form>
 </template>
 
