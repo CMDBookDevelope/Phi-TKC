@@ -104,8 +104,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Init Android project
-        run: pnpm tauri android init --ci --skip-targets-install
+        run: pnpm run android:init
 
+      # The actual build command lives in package.json (`android:build`) so that the
+      # runner and a local checkout invoke *exactly* the same thing.  Keep the two in
+      # sync: adding/removing an ABI means editing the script, not this file.
       - name: Build release APK
         shell: bash
         run: |
