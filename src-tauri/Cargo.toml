@@ -33,8 +33,8 @@ anyhow = { version = "1.0.70", features = ["backtrace"] }
 
 
 #macroquad = { path = "D:/Github/prpr-macroquad", default-features = false}
-macroquad = { path = "../../prpr-macroquad", default-features = false }
-prpr = { path = "../../Phi-TK-render-lib/prpr" }
+macroquad = { git = "https://github.com/CMDBookDevelope/prpr-macroquad", default-features = false }
+prpr = { git = "https://github.com/CMDBookDevelope/Phi-TK-render-lib", package = "prpr", branch = "render-lib" }
 
 # prpr = { path = "../../phira/prpr" }
 
@@ -78,10 +78,3 @@ opt-level = 3
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55.0"
-
-# Local checkout pins: the Vulkan backend lives in the sibling forks. Remove these
-# when the forks are pushed and the git branches are used again.
-[patch."https://github.com/CMDBookDevelope/prpr-miniquad"]
-miniquad = { path = "../../prpr-miniquad" }
-[patch."https://github.com/CMDBookDevelope/prpr-macroquad"]
-macroquad = { path = "../../prpr-macroquad" }
