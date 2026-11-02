@@ -2,8 +2,17 @@ name: Desktop
 
 # Packages the desktop app:
 #   Windows -> NSIS setup wizard (.exe)
-#   Linux   -> deb
+#   Linux   -> deb + AppImage
 #   macOS   -> dmg (Apple Silicon only; no x86_64-apple-darwin FFmpeg static libs exist)
+#
+# Why one job per OS instead of "cross-compile everything on a macOS runner":
+#   * Tauri does not support cross-compiling to Linux from macOS: the deb/AppImage
+#     bundlers shell out to Linux tools (dpkg-deb, linuxdeploy, FUSE) and the binary
+#     must link against the target glibc.
+#   * Windows NSIS from macOS is likewise unsupported by tauri-action; it needs a
+#     Windows (or MinGW) toolchain and makensis.
+#   * iOS/IPA *does* require macOS, and Android runs on any host with the SDK —
+#     both live in mobile.yml, which is triggered alongside this workflow.
 on:
   workflow_dispatch:
   push:
@@ -42,6 +51,13 @@ jobs:
             args: --bundles deb
             artifact: desktop-linux-deb
             files: src-tauri/target/release/bundle/deb/*.deb
+          - label: linux-x86_64-appimage
+            platform: ubuntu-22.04
+            toolchain: stable
+            rust-target: x86_64-unknown-linux-gnu
+            args: --bundles appimage
+            artifact: desktop-linux-appimage
+            files: src-tauri/target/release/bundle/appimage/*.AppImage
           - label: macos-arm64-dmg
             platform: macos-latest
             toolchain: stable
@@ -52,6 +68,9 @@ jobs:
     env:
       # prpr-avc's build.rs appends /<target-triple> to this path.
       PRPR_AVC_LIBS: ${{ github.workspace }}/prpr-lib/prpr-avc/static-lib
+      # linuxdeploy is itself an AppImage; without FUSE on the runner it has to
+      # extract-and-run instead of mounting.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,6 +91,7 @@ jobs:
             libavfilter-dev \
             libavdevice-dev \
             zlib1g-dev \
+            libfuse2 \
             build-essential
 
       - name: Setup pnpm

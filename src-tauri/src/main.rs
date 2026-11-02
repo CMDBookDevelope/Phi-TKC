@@ -1,18 +1,26 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod render;
 use clap::{CommandFactory, Parser};
-use render::{render_cli, CliArgs};
+use app_lib::render::{render_cli, CliArgs};
 
 fn build_conf() -> macroquad::window::Conf {
-    // Headless except for preview mode (which needs a real rendering window)
-    let is_preview = std::env::args().skip(1).next().as_deref() == Some("preview");
+    // The Vulkan renderer needs a real Vulkan context, and miniquad's headless
+    // path is EGL/OpenGL only. Only the Tauri GUI process stays headless; the
+    // render/preview subprocesses (and the CLI directly) open a window, which
+    // also works under `xvfb-run` on servers.
+    let first = std::env::args().skip(1).next();
+    let is_preview = first.as_deref() == Some("preview");
+    let is_render = first.as_deref() == Some("render");
     macroquad::window::Conf {
         window_title: "Phi-TKC (GUI/CLI)".to_string(),
         window_width: 1920,
         window_height: 1440,
-        headless: !is_preview,
+        headless: !(is_preview || is_render || has_cli_intent()),
+        platform: macroquad::miniquad::conf::Platform {
+            rendering_backend: macroquad::miniquad::conf::RenderingBackend::Vulkan,
+            ..Default::default()
+        },
         ..Default::default()
     }
 }

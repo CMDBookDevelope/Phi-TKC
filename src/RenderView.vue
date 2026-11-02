@@ -200,6 +200,17 @@ async function loadChart(file: string) {
     renderProgress.value = undefined;
     renderDuration.value = undefined;
     chartInfo.value = (await invoke('parse_chart', { path: file })) as ChartInfo;
+    // Show the illustration immediately instead of waiting for the first task
+    // update: covers live inside the chart archive and must be extracted first.
+    try {
+      const cover = await invoke<string>('load_chart_illustration', {
+        path: file,
+        illustration: chartInfo.value.illustration,
+      });
+      if (cover) renderCover.value = cover;
+    } catch {
+      /* charts without an illustration keep the placeholder */
+    }
     aspectWidth.value = String(chartInfo.value.aspectRatio);
     aspectHeight.value = '1.0';
     for (let asp of [

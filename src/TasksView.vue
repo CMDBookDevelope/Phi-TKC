@@ -39,6 +39,8 @@ en:
 
   show-output: Show Output
   show-in-folder: Open Folder
+  save-log: Save Log
+  log-saved: Log saved
 
 zh-CN:
   empty: 空空如也
@@ -80,6 +82,8 @@ zh-CN:
 
   show-output: 查看输出
   show-in-folder: 打开文件夹
+  save-log: 保存日志
+  log-saved: 日志已保存
 
 </i18n>
 
@@ -89,6 +93,8 @@ import { useI18n } from 'vue-i18n';
 import type { Task, TaskStatus } from './model';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
+import { toast } from './common';
 import moment from 'moment';
 import { toastError } from './common';
 import { isMobile } from './platform';
@@ -194,6 +200,20 @@ async function showFolder() {
 async function cancelTask(id: number) {
   try {
     await invoke('cancel_task', { id });
+  } catch (e) {
+    toastError(e);
+  }
+}
+
+async function saveLog(text: string, name: string) {
+  try {
+    const path = await save({
+      defaultPath: name,
+      filters: [{ name: 'Log', extensions: ['log', 'txt'] }],
+    });
+    if (!path) return;
+    await invoke('save_text_file', { path, content: text });
+    toast(t('log-saved'), 'success');
   } catch (e) {
     toastError(e);
   }
@@ -352,6 +372,9 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
           <pre class="error-message copyable">{{ errorDialogMessage }}</pre>
         </v-card-text>
         <v-card-actions class="justify-end">
+          <v-btn variant="text" prepend-icon="mdi-content-save" @click="saveLog(errorDialogMessage, 'phi-tkc-error.log')">
+            {{ t('save-log') }}
+          </v-btn>
           <v-btn variant="text" color="primary" @click="errorDialog = false">{{ t('confirm') }}</v-btn>
         </v-card-actions>
       </v-card>
@@ -365,6 +388,9 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
           <pre class="output-pre copyable">{{ outputDialogMessage }}</pre>
         </v-card-text>
         <v-card-actions class="justify-end">
+          <v-btn variant="text" prepend-icon="mdi-content-save" @click="saveLog(outputDialogMessage, 'phi-tkc-output.log')">
+            {{ t('save-log') }}
+          </v-btn>
           <v-btn variant="tonal" color="primary" @click="outputDialog = false">{{ t('confirm') }}</v-btn>
         </v-card-actions>
       </v-card>

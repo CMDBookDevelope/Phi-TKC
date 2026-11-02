@@ -215,6 +215,23 @@ impl Task {
                         };
                     }
                 }
+                IPCEvent::EncoderFps(fps) => {
+                    // Encoder-side FPS (frames actually written to the pipe); it is a
+                    // better estimate than the render loop's frame counter when the
+                    // encoder is the bottleneck.
+                    let mut status = self.status.lock().await;
+                    let next = match &*status {
+                        TaskStatus::Rendering { progress, estimate, .. } => Some(TaskStatus::Rendering {
+                            progress: *progress,
+                            fps: fps.max(0.0) as u64,
+                            estimate: *estimate,
+                        }),
+                        _ => None,
+                    };
+                    if let Some(next) = next {
+                        *status = next;
+                    }
+                }
                 IPCEvent::Done(duration) => {
                     let output = child.wait_with_output().await?;
                     let stdout = String::from_utf8(output.stdout)

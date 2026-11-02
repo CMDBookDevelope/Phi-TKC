@@ -3,15 +3,21 @@
 
 prpr::tl_file!("main" mtl);
 
+mod av1_level;
 mod common;
-mod ipc;
+mod gpu_info;
+pub mod ipc;
 mod preview;
-mod render;
+pub mod render;
 mod task;
+mod vulkan_encode;
+mod vulkan_readback;
+mod vulkan_video;
 
 use anyhow::{bail, Context, Result};
 use common::{ensure_dir, output_dir, respack_dir, CONFIG_DIR, DATA_DIR};
 use fs4::tokio::AsyncFileExt;
+use gpu_info::get_msaa_sample_counts;
 use macroquad::prelude::set_pc_assets_folder;
 use prpr::{
     fs::{self, FileSystem},
@@ -107,6 +113,10 @@ pub async fn run() -> Result<()> {
             test_ffmpeg,
             open_app_folder,
             list_chart_files,
+            save_text_file,
+            save_binary_file,
+            load_chart_illustration,
+            get_msaa_sample_counts,
         ])
         .on_window_event(|_, event| match event {
             //WindowEvent::CloseRequested { api, .. } => {
@@ -630,4 +640,47 @@ fn open_app_folder() -> Result<(), InvokeError> {
         Ok(())
     })()
     .map_err(InvokeError::from_anyhow)
+}
+
+#[tauri::command]
+fn save_text_file(path: PathBuf, content: String) -> Result<(), InvokeError> {
+    std::fs::write(path, content).map_err(|e| InvokeError::from_anyhow(e.into()))
+}
+
+#[tauri::command]
+fn save_binary_file(path: PathBuf, data: Vec<u8>) -> Result<(), InvokeError> {
+    std::fs::write(path, data).map_err(|e| InvokeError::from_anyhow(e.into()))
+}
+
+/// Copy a chart's illustration into the app cache and return the cached path,
+/// so the webview can display covers that live inside a `.pez`/`.zip`.
+#[tauri::command]
+async fn load_chart_illustration(
+    app: tauri::AppHandle,
+    path: PathBuf,
+    illustration: String,
+) -> Result<String, InvokeError> {
+    wrap_async(async move {
+        use std::hash::{Hash, Hasher};
+        let mut fs: Box<dyn FileSystem + Send + Sync + 'static> =
+            fs::fs_from_file(&path).with_context(|| mtl!("read-chart-failed"))?;
+        let data = fs
+            .load_file(&illustration)
+            .await
+            .with_context(|| format!("Failed to load chart illustration: {illustration}"))?;
+
+        let cache_dir = ensure_dir(app.path().app_cache_dir()?.join("chart-covers"));
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        path.hash(&mut hasher);
+        illustration.hash(&mut hasher);
+        let extension = Path::new(&illustration)
+            .extension()
+            .and_then(|value| value.to_str())
+            .filter(|value| value.chars().all(|ch| ch.is_ascii_alphanumeric()))
+            .unwrap_or("img");
+        let cover_path = cache_dir.join(format!("{:016x}.{extension}", hasher.finish()));
+        tokio::fs::write(&cover_path, data).await?;
+        Ok(cover_path.display().to_string())
+    })
+    .await
 }

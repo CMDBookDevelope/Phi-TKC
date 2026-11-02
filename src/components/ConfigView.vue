@@ -17,6 +17,10 @@ en:
   fxaa-tips: Causes blur, not recommended
   sample-count: Sample Count
   sample-count-tips: Power of 2 for MSAA
+  sample-count-off: Off (1x)
+  sample-count-device: 'GPU: {device}, up to {max}x MSAA'
+  sample-count-unknown: 'GPU capability unavailable; using 1/2/4/8'
+  vulkan-qp-hint: 'Vulkan encoder constant QP: {qp} (derived from the CRF/bitrate setting)'
   bitrate-control: Bitrate Control
   bitrate: Bitrate/CRF
   ffmpeg-thread: Thread Optimization
@@ -112,6 +116,10 @@ zh-CN:
   fxaa-tips: 会导致画面模糊
   sample-count: 采样数
   sample-count-tips: 非1启用MSAA
+  sample-count-off: 关闭（1x）
+  sample-count-device: '显卡：{device}，最高支持 {max}x MSAA'
+  sample-count-unknown: 未能检测到显卡信息，使用 1/2/4/8
+  vulkan-qp-hint: 'Vulkan 编码器常量 QP：{qp}（由 CRF/码率换算）'
   bitrate-control: 码率控制
   bitrate: 码率/CRF
   ffmpeg-thread: 线程优化
@@ -263,7 +271,41 @@ const categories = [
 
 const resolution = ref('1920x1080');
 const fps = ref('60');
-const sampleCount = ref('1');
+const sampleCount = ref(4);
+const FALLBACK_MSAA_COUNTS = [1, 2, 4, 8];
+const msaaCounts = ref<number[]>(FALLBACK_MSAA_COUNTS);
+const msaaDevice = ref('');
+const msaaItems = computed(() =>
+  msaaCounts.value.map((n) => ({ title: n === 1 ? t('sample-count-off') : `${n}x`, value: n })),
+);
+const msaaMax = computed(() => msaaCounts.value[msaaCounts.value.length - 1] ?? 1);
+const msaaHint = computed(() =>
+  msaaDevice.value
+    ? t('sample-count-device', { device: msaaDevice.value, max: msaaMax.value })
+    : t('sample-count-unknown'),
+);
+
+function clampSampleCount(samples: number) {
+  const usable = msaaCounts.value.filter((n) => n <= samples);
+  return usable.length ? usable[usable.length - 1] : 1;
+}
+
+// The Vulkan backend reports the MSAA levels the physical device supports; the
+// selector used to offer a free-form field, which let users pick unsupported
+// values that silently fell back to 1x.
+async function loadMsaaSupport() {
+  try {
+    const support = (await invoke('get_msaa_sample_counts')) as { device: string; counts: number[] };
+    if (support?.counts?.length) {
+      msaaCounts.value = support.counts;
+      msaaDevice.value = support.device;
+      sampleCount.value = clampSampleCount(sampleCount.value);
+    }
+  } catch {
+    /* keep the fallback list */
+  }
+}
+loadMsaaSupport();
 const videoCodec = ref('h264');
 const encoder = ref('auto');
 const ffmpegPreset = ref('medium');
@@ -271,6 +313,17 @@ const ffmpegPreset = ref('medium');
 const bitrateControl = ref('CRF');
 const bitrate = ref('28');
 const hwAccel = ref(true);
+
+// Mirrors `encoder_qp()` in src-tauri/src/render.rs: the Rust Vulkan encoder is
+// constant-QP and H.264-only, so the existing CRF value *is* the QP.
+const vulkanEligible = computed(
+  () => hwAccel.value && videoCodec.value === 'h264' && (encoder.value === 'auto' || encoder.value === 'vulkan'),
+);
+const vulkanQp = computed(() => {
+  if (bitrateControl.value.toUpperCase() !== 'CRF') return null;
+  const crf = Number(bitrate.value.trim());
+  return Number.isFinite(crf) ? Math.min(51, Math.max(1, Math.round(crf))) : 28;
+});
 const fxaa = ref(false);
 const ffmpegThread = ref(false);
 const audioFormat = ref('flac');
@@ -380,7 +433,7 @@ const DEFAULT_PRESET: Preset = {
     playerAvatar: null,
     playerName: '',
     playerRks: 15,
-    sampleCount: 1,
+    sampleCount: 4,
     resPackPath: null,
     speed: 1,
     volumeMusic: 1,
@@ -491,7 +544,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
     playerAvatar: playerAvatar.value?.length ? playerAvatar.value : null,
     playerName: playerName.value,
     playerRks: parseFloat(playerRks.value),
-    sampleCount: parseInt(sampleCount.value, 10),
+    sampleCount: sampleCount.value,
     resPackPath: respack.value.path,
     speed: 1,
     volumeMusic: volumeMusic.value,
@@ -548,7 +601,7 @@ function applyConfig(c: RenderConfig) {
   playerAvatar.value = c.playerAvatar || undefined;
   playerName.value = c.playerName;
   playerRks.value = String(c.playerRks);
-  sampleCount.value = String(c.sampleCount ?? 1);
+  sampleCount.value = clampSampleCount(Number(c.sampleCount ?? 4));
   respack.value = respacks.value.find((x) => x.path === c.resPackPath) || respacks.value[0];
   volumeMusic.value = c.volumeMusic;
   volumeSfx.value = c.volumeSfx;
@@ -661,7 +714,16 @@ async function replacePreset() {
               </div>
               <div class="field-row two-col">
                 <v-text-field v-model="fps" :rules="[RULES.positiveInt]" :label="t('fps')" density="compact" variant="outlined" hide-details />
-                <v-text-field v-model="sampleCount" :rules="[RULES.sampleCount]" :label="t('sample-count')" density="compact" variant="outlined" hide-details />
+                <v-select
+                  v-model="sampleCount"
+                  :items="msaaItems"
+                  item-title="title"
+                  item-value="value"
+                  :label="t('sample-count')"
+                  :hint="msaaHint"
+                  persistent-hint
+                  density="compact"
+                  variant="outlined" />
               </div>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
@@ -697,6 +759,9 @@ async function replacePreset() {
                 <v-select v-model="bitrateControl" :items="['CRF', 'CBR']" :label="t('bitrate-control')" density="compact" variant="outlined" hide-details />
                 <v-text-field v-model="bitrate" :rules="[RULES.non_empty]" :label="t('bitrate')" density="compact" variant="outlined" hide-details />
               </div>
+              <p v-if="vulkanEligible && vulkanQp !== null" class="field-hint">
+                {{ t('vulkan-qp-hint', { qp: vulkanQp }) }}
+              </p>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.performance') }}</div>
@@ -1128,5 +1193,10 @@ async function replacePreset() {
   .ui-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+.field-hint {
+  margin: 8px 2px 0;
+  font-size: 0.75rem;
+  opacity: 0.65;
 }
 </style>
