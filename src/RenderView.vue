@@ -48,6 +48,13 @@
     see-tasks: See tasks
     next-chart: Render Next Chart
     render-status: 'Progress: {progress}% | FPS: {fps} | ETA: {estimate}'
+    render-waiting: Waiting for the render queue...
+    render-loading: Loading chart...
+    render-mixing: Mixing audio...
+    render-done: 'Render finished in {duration}'
+    render-canceled: Render canceled
+    render-failed: Render failed — see the task list for details
+    duration: Duration
 
     ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and put it in the specific folder.
 
@@ -100,6 +107,13 @@
     see-tasks: 查看任务列表
     next-chart: 渲染下一个谱面
     render-status: '进度：{progress}% | FPS: {fps} | 预计：{estimate}'
+    render-waiting: 等待渲染队列…
+    render-loading: 正在加载谱面…
+    render-mixing: 正在混音…
+    render-done: '渲染完成，耗时 {duration}'
+    render-canceled: 渲染已取消
+    render-failed: 渲染失败，详情请查看任务列表
+    duration: 耗时
 
     ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并放置在指定文件夹内。
 
@@ -110,32 +124,23 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { toastError, toast, anyFilter, isString, RULES } from './common';
-import type { ChartInfo, FileDropEvent, Task } from './model';
+import type { ChartInfo, Task } from './model';
 import { VForm } from 'vuetify/components';
 import ConfigView from './components/ConfigView.vue';
 import moment from 'moment';
 import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import gsap from 'gsap';
 
 const { t } = useI18n();
 
-// Tauri's `listen` resolves asynchronously, so a component unmounted before it settles
-// must still release the handle — hence the `disposed` guard.
+// Polling `get_tasks` is the only reliable progress source: the Rust backend never
+// emitted the `render-msg` / `render-progress` / `render-done` events these listeners
+// used to wait for, so live progress was always empty.
 let disposed = false;
-const unlistenFns: UnlistenFn[] = [];
-
-function track(pending: Promise<UnlistenFn>) {
-  pending.then((unlisten) => (disposed ? unlisten() : unlistenFns.push(unlisten))).catch((e) => console.error('Failed to register listener:', e));
-}
-
-onUnmounted(() => {
-  disposed = true;
-  unlistenFns.forEach((unlisten) => unlisten());
-  unlistenFns.length = 0;
-});
+let unlistenDrag: (() => void) | null = null;
 
 if (!(await invoke('is_the_only_instance'))) {
   await dialog.message(t('already-running'));
@@ -174,7 +179,7 @@ async function chooseChart(folder?: boolean) {
           filters: [
             {
               name: t('choose.filter-name'),
-              extensions: ['zip', 'pez'],
+              extensions: ['zip', 'pez', 'json'],
             },
             anyFilter(),
           ],
@@ -187,10 +192,13 @@ async function chooseChart(folder?: boolean) {
 }
 
 async function loadChart(file: string) {
+  if (!file) return;
   try {
     parsingChart.value = true;
     chartPath = file;
     renderCover.value = null;
+    renderProgress.value = undefined;
+    renderDuration.value = undefined;
     chartInfo.value = (await invoke('parse_chart', { path: file })) as ChartInfo;
     aspectWidth.value = String(chartInfo.value.aspectRatio);
     aspectHeight.value = '1.0';
@@ -318,73 +326,110 @@ const renderMsg = ref(''),
   renderProgress = ref<number>(),
   renderDuration = ref<number>();
 const renderCover = ref<string | null>(null);
-let coverPollInterval: ReturnType<typeof setInterval> | null = null;
-track(listen('render-msg', (msg) => (renderMsg.value = msg.payload as string)));
-track(
-  listen('render-progress', (msg) => {
-    let payload = msg.payload as { progress: number; fps: number; estimate: number };
-    renderMsg.value = t('render-status', {
-      progress: (payload.progress * 100).toFixed(2),
-      fps: payload.fps,
-      estimate: moment.duration(payload.estimate, 'seconds').humanize(true, { ss: 1 }),
-    });
-    renderProgress.value = payload.progress * 100;
-  }),
-);
-track(
-  listen('render-done', (msg) => {
-    stepIndex.value++;
-    renderDuration.value = Math.round(msg.payload as number);
-  }),
-);
+let taskPollInterval: ReturnType<typeof setInterval> | null = null;
 
-async function fetchRenderCover() {
+function formatDuration(seconds: number) {
+  const duration = moment.duration(Math.round(seconds), 'seconds');
+  const hours = Math.floor(duration.asHours());
+  const minutes = duration.minutes();
+  const secs = duration.seconds();
+  if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
+async function pollRenderTask() {
+  if (disposed || !chartPath) return;
   try {
     const tasks = await invoke<Task[]>('get_tasks');
-    if (tasks && tasks.length > 0) {
-      const task = tasks.find((t) => t.path === chartPath);
-      if (task?.cover) {
-        renderCover.value = task.cover;
-        // The cover never changes once resolved — no reason to keep hitting the backend.
-        stopCoverPolling();
-      }
+    const task = tasks.find((item) => item.path === chartPath);
+    if (!task) return;
+
+    if (!renderCover.value && task.cover) renderCover.value = task.cover;
+
+    const status = task.status;
+    switch (status.type) {
+      case 'pending':
+        renderProgress.value = 0;
+        renderMsg.value = t('render-waiting');
+        break;
+      case 'loading':
+        renderProgress.value = 0;
+        renderMsg.value = t('render-loading');
+        break;
+      case 'mixing':
+        renderProgress.value = 0;
+        renderMsg.value = t('render-mixing');
+        break;
+      case 'rendering':
+        renderProgress.value = status.progress * 100;
+        renderMsg.value = t('render-status', {
+          progress: (status.progress * 100).toFixed(2),
+          fps: status.fps,
+          estimate: moment.duration(status.estimate, 'seconds').humanize(true, { ss: 1 }),
+        });
+        break;
+      case 'done':
+        renderProgress.value = 100;
+        renderDuration.value = Math.round(status.duration);
+        renderMsg.value = t('render-done', { duration: formatDuration(status.duration) });
+        stopTaskPolling();
+        break;
+      case 'canceled':
+        renderProgress.value = 0;
+        renderMsg.value = t('render-canceled');
+        stopTaskPolling();
+        break;
+      case 'failed':
+        renderProgress.value = 0;
+        // The raw error can include the renderer's whole stderr; keep the card readable
+        // and point the user at the task list for details.
+        console.error('Render failed:', status.error);
+        renderMsg.value = t('render-failed');
+        toast(t('render-failed'), 'error');
+        stopTaskPolling();
+        break;
     }
   } catch (e) {
-    console.error('Failed to fetch render cover:', e);
+    console.error('Failed to poll task status:', e);
   }
 }
 
-function startCoverPolling() {
-  stopCoverPolling();
-  fetchRenderCover();
-  coverPollInterval = setInterval(fetchRenderCover, 700);
+function startTaskPolling() {
+  stopTaskPolling();
+  renderProgress.value = 0;
+  renderMsg.value = t('render-waiting');
+  void pollRenderTask();
+  taskPollInterval = setInterval(pollRenderTask, 700);
 }
 
-function stopCoverPolling() {
-  if (coverPollInterval) {
-    clearInterval(coverPollInterval);
-    coverPollInterval = null;
+function stopTaskPolling() {
+  if (taskPollInterval) {
+    clearInterval(taskPollInterval);
+    taskPollInterval = null;
   }
 }
 
 watch(step, (s) => {
-  if (s === 'render') startCoverPolling();
-  else stopCoverPolling();
+  if (s === 'render') startTaskPolling();
+  else stopTaskPolling();
 });
 
-onUnmounted(() => stopCoverPolling());
+onUnmounted(() => {
+  disposed = true;
+  stopTaskPolling();
+  if (unlistenDrag) {
+    unlistenDrag();
+    unlistenDrag = null;
+  }
+});
 
 async function moveNext() {
   if (step.value === 'config') {
-    // The config step uses plain <input class="md3-field"> elements, which Vuetify's
-    // `v-form` cannot validate (it only knows about its own inputs), so `validate()`
-    // alone would always pass. Check the required fields explicitly.
-    const required = [chartInfo.value?.name, chartInfo.value?.level, chartInfo.value?.charter];
-    if (required.some((value) => RULES.non_empty(value) !== true)) {
-      toast(t('has-error'), 'error');
-      return;
-    }
-    if ((await form.value!.validate()).valid) {
+    // The chart fields below are Vuetify inputs inside this <v-form>, so `validate()`
+    // now sees their rules (name / level / charter are required).
+    const valid = form.value ? (await form.value.validate()).valid : true;
+    if (valid) {
       stepIndex.value++;
     } else {
       toast(t('has-error'), 'error');
@@ -420,33 +465,44 @@ function tryParseAspect(): number | undefined {
     let height = parseFloat(aspectHeight.value);
     if (isNaN(width) || isNaN(height)) return undefined;
     return width / height;
-  } catch (e) {
+  } catch {
     return undefined;
   }
 }
 
 const fileHovering = ref(false);
-track(listen('tauri://drag-over', () => (fileHovering.value = step.value === 'choose')));
-track(listen('tauri://drag-leave', () => (fileHovering.value = false)));
-track(
-  listen('tauri://drag-drop', async (payload) => {
-    const files = (payload.payload as FileDropEvent).paths;
-    if (step.value === 'choose') {
-      fileHovering.value = false;
-      await loadChart(files[0]);
-    } else if (step.value === 'config' || step.value === 'options' || step.value === 'render') {
-      fileHovering.value = false;
-      stepIndex.value = 1;
-      await loadChart(files[0]);
+
+getCurrentWebview()
+  .onDragDropEvent((event) => {
+    const payload = event.payload;
+    if (payload.type === 'enter' || payload.type === 'over') {
+      fileHovering.value = step.value === 'choose';
+      return;
     }
-  }),
-);
+    if (payload.type === 'leave') {
+      fileHovering.value = false;
+      return;
+    }
+    fileHovering.value = false;
+    const path = payload.paths[0];
+    if (!path) return;
+    if (step.value !== 'choose') stepIndex.value = 1;
+    void loadChart(path);
+  })
+  .then((unlisten) => {
+    if (disposed) unlisten();
+    else unlistenDrag = unlisten;
+  })
+  .catch((e) => console.error('Failed to register drag-drop listener:', e));
 
 function resetAndGoChoose() {
   stepIndex.value = 1;
   chartInfo.value = undefined;
   chartPath = '';
   renderCover.value = null;
+  renderProgress.value = undefined;
+  renderDuration.value = undefined;
+  renderMsg.value = '';
 }
 </script>
 
@@ -520,33 +576,60 @@ function resetAndGoChoose() {
               <div class="config-grid">
                 <div class="config-section">
                   <div class="field-group">
-                    <label class="field-label">{{ t('chart-name') }} *</label>
-                    <input v-model="chartInfo.name" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.name }" />
+                    <v-text-field
+                      v-model="chartInfo.name"
+                      :label="t('chart-name')"
+                      :rules="[RULES.non_empty]"
+                      variant="outlined"
+                      density="compact"
+                      hide-details />
                   </div>
                   <div class="field-group">
-                    <label class="field-label">{{ t('level') }} *</label>
-                    <input v-model="chartInfo.level" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.level }" />
+                    <v-text-field
+                      v-model="chartInfo.level"
+                      :label="t('level')"
+                      :rules="[RULES.non_empty]"
+                      variant="outlined"
+                      density="compact"
+                      hide-details />
                   </div>
                   <div class="field-group">
-                    <label class="field-label">{{ t('charter') }} *</label>
-                    <input v-model="chartInfo.charter" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.charter }" />
+                    <v-text-field
+                      v-model="chartInfo.charter"
+                      :label="t('charter')"
+                      :rules="[RULES.non_empty]"
+                      variant="outlined"
+                      density="compact"
+                      hide-details />
                   </div>
                   <div class="field-group">
-                    <label class="field-label">{{ t('composer') }}</label>
-                    <input v-model="chartInfo.composer" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.composer }" />
+                    <v-text-field v-model="chartInfo.composer" :label="t('composer')" variant="outlined" density="compact" hide-details />
                   </div>
                   <div class="field-group">
-                    <label class="field-label">{{ t('illustrator') }}</label>
-                    <input v-model="chartInfo.illustrator" class="blur-glass md3-field" :class="{ 'has-value': chartInfo.illustrator }" />
+                    <v-text-field v-model="chartInfo.illustrator" :label="t('illustrator')" variant="outlined" density="compact" hide-details />
                   </div>
                 </div>
                 <div class="config-section">
                   <div class="field-group">
                     <label class="field-label">{{ t('aspect') }}</label>
                     <div class="aspect-row">
-                      <input type="number" v-model="aspectWidth" class="blur-glass md3-field aspect-field" />
+                      <v-text-field
+                        v-model="aspectWidth"
+                        type="number"
+                        :rules="[RULES.positive]"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        class="aspect-field" />
                       <span class="aspect-sep">:</span>
-                      <input type="number" v-model="aspectHeight" class="blur-glass md3-field aspect-field" />
+                      <v-text-field
+                        v-model="aspectHeight"
+                        type="number"
+                        :rules="[RULES.positive]"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        class="aspect-field" />
                     </div>
                   </div>
                   <div class="field-group">
@@ -567,8 +650,13 @@ function resetAndGoChoose() {
                     <v-switch class="switch" color="primary" hide-details v-model="chartInfo.HoldPartialCover" />
                   </div>
                   <div class="field-group">
-                    <label class="field-label">{{ t('tip') }}</label>
-                    <input v-model="chartInfo.tip" class="blur-glass md3-field" :placeholder="t('tip-placeholder')" />
+                    <v-text-field
+                      v-model="chartInfo.tip"
+                      :label="t('tip')"
+                      :placeholder="t('tip-placeholder')"
+                      variant="outlined"
+                      density="compact"
+                      hide-details />
                   </div>
                 </div>
               </div>
@@ -580,7 +668,7 @@ function resetAndGoChoose() {
       <!-- Step 3: Options -->
       <div class="clear-glass glass step-panel" v-glass :class="{ 'is-active': step === 'options' }">
         <div class="options-wrapper">
-          <ConfigView ref="configView" :init-aspect-ratio="tryParseAspect()" />
+          <ConfigView ref="configView" />
         </div>
       </div>
 
@@ -624,6 +712,10 @@ function resetAndGoChoose() {
               <div class="info-row">
                 <span class="info-label">{{ t('aspect') }}</span
                 ><span class="info-value">{{ aspectWidth }}:{{ aspectHeight }}</span>
+              </div>
+              <div class="info-row" v-if="renderDuration !== undefined">
+                <span class="info-label">{{ t('duration') }}</span
+                ><span class="info-value">{{ formatDuration(renderDuration) }}</span>
               </div>
             </div>
             <div v-if="renderProgress !== undefined" class="render-progress">
@@ -927,33 +1019,6 @@ function resetAndGoChoose() {
   color: rgba(var(--main-color-rgb), 0.55);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-}
-
-.md3-field {
-  width: 100%;
-  border-top: 1px solid rgba(var(--main-color-rgb), 0.3);
-  border-left: 1px solid rgba(var(--main-color-rgb), 0.25);
-  border-right: 1px solid rgba(var(--main-color-rgb), 0.1);
-  border-bottom: 1px solid rgba(var(--main-color-rgb), 0.05);
-  padding: 12px 16px;
-  border-radius: 16px;
-  font-size: 14px;
-  font-family: inherit;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
-  color: var(--main-color) !important;
-}
-.md3-field:focus {
-  outline: none;
-  border-top: 1px solid rgba(var(--sub-color-rgb), 0.3);
-  border-left: 1px solid rgba(var(--sub-color-rgb), 0.25);
-  border-right: 1px solid rgba(var(--sub-color-rgb), 0.1);
-  border-bottom: 1px solid rgba(var(--sub-color-rgb), 0.05);
-  box-shadow: 0 0 0 3px rgba(var(--sub-color-rgb), 0.15);
-}
-.md3-field::placeholder {
-  color: rgba(var(--main-color-rgb), 0.3);
 }
 
 .aspect-row {

@@ -1,6 +1,6 @@
 import { toast as sonnerToast } from 'vuetify-sonner';
 
-import { SUPPORTED_LOCALES, i18n } from './main';
+import { SUPPORTED_LOCALES, i18n } from './i18n';
 
 import moment from 'moment';
 
@@ -21,12 +21,22 @@ export function isString(s: unknown): s is string {
 export const RULES = {
   // Vuetify's `clearable` sets the model to null, so accept nullish values here.
   non_empty: (value: string | null | undefined) => (value ?? '').trim().length > 0 || i18n.global.t('rules.non-empty'),
-  positive: (value: string) => (isNumeric(value) && Number(value) >= 0) || i18n.global.t('rules.positive'),
-  positiveInt: (value: string) => (isNumeric(value) && Math.abs(Number(value) - Math.round(Number(value))) < 1e-4 && Number(value) > 0) || i18n.global.t('rules.positive-int'),
+  positive: (value: string | number | null | undefined) => (isNumeric(value) && Number(value) > 0) || i18n.global.t('rules.positive'),
+  positiveInt: (value: string | number | null | undefined) =>
+    (isNumeric(value) && Math.abs(Number(value) - Math.round(Number(value))) < 1e-4 && Number(value) > 0) || i18n.global.t('rules.positive-int'),
+  number: (value: string | number | null | undefined) => isNumeric(value) || i18n.global.t('rules.number'),
+  resolution: (value: string | null | undefined) => {
+    const match = (value ?? '').trim().match(/^(\d+)\s*[xX]\s*(\d+)$/);
+    return (!!match && Number(match[1]) > 0 && Number(match[2]) > 0) || i18n.global.t('rules.resolution');
+  },
+  sampleCount: (value: string | number | null | undefined) => {
+    const n = Number(value);
+    return (Number.isInteger(n) && n > 0 && (n & (n - 1)) === 0) || i18n.global.t('rules.sample-count');
+  },
 };
 
-export function isNumeric(num: any) {
-  return (typeof num === 'number' || (typeof num === 'string' && num.trim() !== '')) && !isNaN(num as number);
+export function isNumeric(num: unknown) {
+  return (typeof num === 'number' || (typeof num === 'string' && num.trim() !== '')) && Number.isFinite(Number(num));
 }
 
 export function setTitle(title: string) {
@@ -52,8 +62,6 @@ export function toast(message: string, kind?: 'success' | 'info' | 'warning' | '
     duration: 2000,
     cardProps: {
       color: kind,
-      // @ts-ignore
-      style: 'width: var(--width)',
     },
   });
 }

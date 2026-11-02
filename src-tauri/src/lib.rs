@@ -33,7 +33,6 @@ use std::{
 use task::{TaskQueue, TaskView};
 use tauri::{ipc::InvokeError, Manager, State, WindowEvent};
 use tokio::{io::AsyncWriteExt, process::Command};
-use clap::Parser;
 
 static ASSET_PATH: OnceLock<PathBuf> = OnceLock::new();
 static LOCK_FILE: OnceLock<tokio::fs::File> = OnceLock::new();
@@ -67,19 +66,16 @@ pub async fn run() -> Result<()> {
         .build()?;
     let _guard = rt.enter();
 
-    if std::env::args().len() > 1 {
-        match std::env::args().skip(1).next().as_deref() {
-            Some("render") => {
-                run_wrapped(render::main()).await;
-            }
-            Some("preview") => {
-                run_wrapped(preview::main()).await;
-            }
-            cmd => {
-                eprintln!("Unknown subcommand: {cmd:?}");
-                std::process::exit(1);
-            }
+    match std::env::args().skip(1).next().as_deref() {
+        Some("render") => {
+            run_wrapped(render::main()).await;
         }
+        Some("preview") => {
+            run_wrapped(preview::main()).await;
+        }
+        // Not an internal subcommand: fall through to the GUI. On macOS Finder may
+        // pass `-psn_...`; CLI flags are handled by main.rs before reaching here.
+        _ => {}
     }
 
     let app = tauri::Builder::default()
@@ -167,30 +163,37 @@ pub async fn run() -> Result<()> {
         ))
         .unwrap();
 
+    // Resolve the renderer's assets. The layout differs per packaging:
+    //   1. normal Tauri bundle / deb / rpm / AppImage -> <resource_dir>/assets
+    //   2. legacy Phi-TKC deb -> /usr/lib/ptkc-assets
+    //   3. `pnpm tauri dev` -> src-tauri/assets
+    //   4. iOS -> Tauri's resource_dir() already ends with /assets
+    //   5. Android -> the assets live inside the APK, exposed as `asset://localhost/`,
+    //      which is not a filesystem path (rendering is disabled there anyway).
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(dir) = resolver.resource_dir() {
+        #[cfg(target_os = "ios")]
+        candidates.push(dir.clone());
+        candidates.push(dir.join("assets"));
+    }
     #[cfg(target_os = "linux")]
-    let asset_dir = {
-        PathBuf::from("/usr/lib/ptkc-assets")
-        // exe_dir.parent().unwrap().join("assets")
-    };
+    candidates.push(PathBuf::from("/usr/lib/ptkc-assets"));
+    candidates.push(exe_dir.join("assets"));
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"));
 
-    #[cfg(target_os = "windows")]
-    let asset_dir = exe_dir.join("assets");
-
-    // macOS bundles resources into `.app/Contents/Resources`; iOS/Android copy them into
-    // the app bundle as well, so ask Tauri where they live instead of guessing from exe_dir.
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
-    let asset_dir = resolver
-        .resource_dir()
-        .map(|dir| dir.join("assets"))
-        .unwrap_or_else(|_| exe_dir.join("assets"));
-
-    if !asset_dir.exists() {
-        eprintln!("错误：资源目录不存在 - {:?}", asset_dir);
+    if let Some(asset_dir) = candidates.into_iter().find(|dir| dir.exists()) {
+        ASSET_PATH.set(asset_dir.clone()).ok();
+        // Macroquad's asset folder is only meaningful on desktop; on iOS/Android the
+        // renderer and preview window are gated off (see MOBILE.md).
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        set_pc_assets_folder(&asset_dir.display().to_string());
+    } else {
+        eprintln!("错误：资源目录不存在");
+        // Mobile builds must still start so the settings/tasks/about pages work even if
+        // the resource layout is unexpected; never make that a fatal error there.
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
         bail!("资源目录未找到，请检查安装路径");
     }
-
-    ASSET_PATH.set(asset_dir.clone()).unwrap();
-    set_pc_assets_folder(&asset_dir.display().to_string());
 
     app.run(|_, _| {});
 
@@ -328,12 +331,14 @@ fn get_respacks() -> Result<Vec<RespackInfo>, InvokeError> {
         let mut names: Vec<RespackInfo> = dir
             .read_dir()?
             .filter_map(|it| {
-                it.ok()
-                    .filter(|it| it.path().is_file())
-                    .map(|it| RespackInfo {
-                        name: it.file_name().to_str().unwrap().to_owned(),
-                        path: it.path().canonicalize().unwrap().display().to_string(),
-                    })
+                let it = it.ok()?;
+                if !it.path().is_file() {
+                    return None;
+                }
+                Some(RespackInfo {
+                    name: it.file_name().to_str()?.to_owned(),
+                    path: it.path().canonicalize().ok()?.display().to_string(),
+                })
             })
             .collect();
         names.sort_by(|x, y| x.name.cmp(&y.name));
@@ -377,7 +382,7 @@ async fn list_chart_files(path: PathBuf) -> Result<Vec<String>, InvokeError> {
                 if path.is_dir() {
                     dirs.push(path);
                 } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                    if ["zip", "json", "pez"].contains(&ext) {
+                    if ["zip", "json", "pez"].contains(&ext.to_ascii_lowercase().as_str()) {
                         files.push(path.to_str().context("Invalid path")?.to_owned());
                     }
                 }

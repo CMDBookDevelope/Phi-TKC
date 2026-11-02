@@ -1,6 +1,9 @@
 import { nextTick } from 'vue';
 import { createRouter, createWebHistory } from 'vue-router';
 
+import { setTitle } from '../common';
+import { i18n } from '../i18n';
+
 import AboutView from '../AboutView.vue';
 import RenderView from '../RenderView.vue';
 import RPEView from '../RPEView.vue';
@@ -39,17 +42,21 @@ const router = createRouter({
       component: AboutView,
     },
   ],
-  scrollBehavior(_to, from, savedPosition) {
+  scrollBehavior(_to, _from, savedPosition) {
     return new Promise((resolve) => {
-      onLoaded.value = () => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
         resolve(savedPosition ? savedPosition : { top: 0 });
       };
+      onLoaded.value = finish;
+      // Navigation between two routes that reuse the same component instance does not
+      // change `routeComponent`, so don't leave the scroll promise pending forever.
+      setTimeout(finish, 600);
     });
   },
 });
-
-import { i18n } from '../main';
-import { setTitle } from '../common';
 
 router.afterEach((to) => {
   nextTick(() => {

@@ -22,19 +22,19 @@ Phi-TKC 是一个基于 Tauri + Vue 3 的谱面渲染工具。Fork 自: [素 ink
 - CRF码率控制
 - 铺面揭秘功能
 - 跨平台支持（Windows、Linux、macOS）
-- 现代化的用户界面，基于 Vue 3 + VFluent3
+- 现代化的用户界面，基于 Vue 3 + Vuetify 3
 - 支持Vulkan加速渲染
 - 手序分配AI引擎
 - 支持纯无头渲染，CLI支持完善
 
 ### 通用要求
-- Rust 1.60+
+- Rust 1.77.2+（Tauri 2 的最低版本）
 
 ## 系统要求
 
 ### 通用要求
-- Node.js 18+ 
-- Rust 1.60+
+- Node.js 20.19+（CI 使用 22）
+- Rust 1.77.2+（Tauri 2 的最低版本）
 - pnpm
 
 ### 平台特定要求
@@ -47,7 +47,7 @@ Phi-TKC 是一个基于 Tauri + Vue 3 的谱面渲染工具。Fork 自: [素 ink
 ### 1. 安装依赖
 
 #### 安装 Node.js
-从 [Node.js 官网](https://nodejs.org/ "棍母") 下载并安装 Node.js 18 或更高版本。
+从 [Node.js 官网](https://nodejs.org/ "棍母") 下载并安装 Node.js 20.19 或更高版本（CI 使用 22）。
 
 #### 安装 Rust
 从 [Rust 官网](https://rustup.rs/ "棍母") 下载并安装 Rust。
@@ -82,8 +82,8 @@ pnpm tauri build
 
 构建完成后，可执行文件将位于：
 - Windows: `src-tauri/target/release/Phi-TKC.exe`
-- Linux: `src-tauri/target/release/phi-tkc`
-- macOS: `src-tauri/target/release/bundle/macos/phi-tkc`
+- Linux: `src-tauri/target/release/Phi-TKC`
+- macOS: `src-tauri/target/release/bundle/macos/Phi-TKC.app/Contents/MacOS/Phi-TKC`
 
 ## 使用说明
 
@@ -104,7 +104,7 @@ phi-tk-cli # or wrapper.sh \
 --resolution 1920x1440 # default [optional] \
 --crf 20 # default [optional] \
 --fps 30 # dafault [optional] \
---dark 40 # default Background picture brightness [optional] \
+--dark 30 # default Background picture brightness [optional] \
 --load # default=off loading screen [optional] \
 --finish # default=off result screen [optional] \
 --assets # assets folder [optional] \
@@ -122,13 +122,13 @@ phi-tk-cli # or wrapper.sh \
 | `-d, --dark` | 背景亮度 | 0-100 | 30 |
 | `-l, --load` | 显示加载界面 | 布尔 | False |
 | `--finish` | 显示结算界面 | 布尔 | False |
-| `-a, --assets` | 资源文件位置 | DirectoryPath | /usr/lib/ptkc-assets |
+| `-a, --assets` | 资源文件位置 | DirectoryPath | 自动探测（旧版安装位置为 /usr/lib/ptkc-assets） |
 
-~~*摆烂了。。。申请查看[源代码](src-tauri/src/render.rs#L1939-L1975 "1939工作室快让美芬死一死。")*~~
+~~*摆烂了。。。申请查看[源代码](src-tauri/src/render.rs "1939工作室快让美芬死一死。")*~~
 
 ### 运行
 ```bash
-./phi-tkc #后面添加渲染变量
+./Phi-TKC #后面添加渲染变量
 ```
 
 ## 项目结构

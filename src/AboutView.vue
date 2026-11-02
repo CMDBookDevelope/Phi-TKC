@@ -1,11 +1,17 @@
 <i18n>
 en:
   app: Phi TKC
+  source: View source code
+  license-card: License
+  version-card: Version
   license: Licensed by GPLv3
   footer:
     copyright: © {year} Phi TKC. All rights reserved.
 zh-CN:
   app: Phi TKC
+  source: 查看源代码
+  license-card: 许可证
+  version-card: 版本
   license: 基于 GPLv3 协议授权
   footer:
     copyright: © {year} Phi TKC. 保留所有权利。
@@ -21,7 +27,7 @@ const { t } = useI18n();
 
 // Dynamic footer year, Phi-TKC style.
 const currentYear = ref(new Date().getFullYear());
-const appVersion = ref('0.1.63');
+const appVersion = ref('1.0.0');
 
 const fetchVersion = async () => {
   try {
@@ -195,7 +201,7 @@ onUnmounted(() => {
             </div>
             <div class="card-text">
               <h3 class="card-title">GitHub</h3>
-              <p class="card-subtitle">View source code</p>
+              <p class="card-subtitle">{{ t('source') }}</p>
             </div>
             <div class="card-link">
               <v-icon size="20" icon="mdi-open-in-new" />
@@ -209,7 +215,7 @@ onUnmounted(() => {
               <v-icon size="28" icon="mdi-license" />
             </div>
             <div class="card-text">
-              <h3 class="card-title">License</h3>
+              <h3 class="card-title">{{ t('license-card') }}</h3>
               <p class="card-subtitle">{{ t('license') }}</p>
             </div>
             <div class="card-link">
@@ -224,7 +230,7 @@ onUnmounted(() => {
               <v-icon size="28" icon="mdi-package-variant-closed" />
             </div>
             <div class="card-text">
-              <h3 class="card-title">Version</h3>
+              <h3 class="card-title">{{ t('version-card') }}</h3>
               <p class="card-subtitle">v{{ appVersion }}</p>
             </div>
           </div>

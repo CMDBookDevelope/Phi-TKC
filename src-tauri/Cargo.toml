@@ -7,7 +7,7 @@ license = "GPL-v3"
 repository = "https://github.com/CMDBookDevelope/Phi-TKC"
 default-run = "Phi-TKC"
 edition = "2021"
-rust-version = "1.60"
+rust-version = "1.77.2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

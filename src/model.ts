@@ -74,6 +74,8 @@ export interface RenderConfig {
   video: boolean;
   audioBit?: number;
   audioFormat: string;
+  // Only used by the preview/play commands; ignored by the render backend.
+  autoplay?: boolean;
   // Encoder selection: 'auto', 'nvenc', 'qsv', 'amf', 'vulkan', 'cpu'
   encoder?: string;
 

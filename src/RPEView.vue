@@ -21,15 +21,16 @@ zh-CN:
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
 import { toast, toastError } from './common'
 import type { RPEChart } from './model'
-import router from './router'
 
 const { t } = useI18n()
+const router = useRouter()
 
 const charts = ref<RPEChart[] | null>(null)
 

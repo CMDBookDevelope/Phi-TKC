@@ -18,16 +18,8 @@ zh-CN:
   more: 更多
 </i18n>
 
-<script lang="ts">
-declare global {
-  interface Window {
-    goto: (name: string) => void;
-  }
-}
-</script>
-
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -50,7 +42,9 @@ const vuetifyTheme = useTheme();
 // Mobile (iOS/iPadOS/Android): the nav rail becomes a temporary overlay drawer
 // opened from the app bar.
 const mobile = isMobile();
-const navOpen = ref(false);
+// The desktop rail is permanent, but Vuetify still honours `v-model`; starting closed
+// left the desktop app with no navigation at all (the app bar is mobile-only).
+const navOpen = ref(!mobile);
 
 // Routes whose features cannot work on mobile (see MOBILE.md) — the page is
 // replaced with an explanation instead of failing at runtime.
@@ -66,10 +60,9 @@ const navItems = [
 
 const navigateTo = (name: string) => {
   router.push({ name });
-  navOpen.value = false;
+  // The permanent desktop rail must stay open; only the mobile overlay closes.
+  if (mobile) navOpen.value = false;
 };
-
-window.goto = navigateTo;
 
 // ===== Custom background =====
 // Three layers, in priority order: a user-picked image (`customBackground`), a
@@ -77,9 +70,11 @@ window.goto = navigateTo;
 const customBackground = ref<string | null>(null);
 const currentBgBase64 = ref<string | null>(null);
 
+const API_BACKGROUND_URL = 'https://api.yppp.net/api.php';
+
 function defaultBgStyle() {
   return {
-    backgroundImage: `url("https://api.yppp.net/api.php?t=${Date.now()}")`,
+    backgroundImage: `url("${API_BACKGROUND_URL}?t=${Date.now()}")`,
     backgroundSize: 'cover',
     backgroundPosition: 'center',
     backgroundRepeat: 'no-repeat',
@@ -114,79 +109,100 @@ const backgroundStyle = computed(() => {
   }
 });
 
-async function loadApiBackground() {
+async function loadApiBackground(): Promise<boolean> {
   try {
-    const res = await fetch('https://api.yppp.net/api.php');
+    const res = await fetch(API_BACKGROUND_URL);
     const blob = await res.blob();
     const reader = new FileReader();
-    const base64 = await new Promise<string>((resolve) => {
+    const base64 = await new Promise<string>((resolve, reject) => {
       reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error ?? new Error('Failed to read background image'));
       reader.readAsDataURL(blob);
     });
     currentBgBase64.value = base64;
-    localStorage.setItem('BgBase64', base64);
+    try {
+      localStorage.setItem('BgBase64', base64);
+    } catch (err) {
+      // A random API image can be several MB; localStorage has a ~5 MB quota.
+      console.warn('背景缓存写入失败（图片过大）', err);
+    }
     customBackground.value = null;
+    return true;
   } catch (err) {
     console.error('加载 API 背景失败', err);
+    return false;
   }
 }
 
-async function loadCustomBackground(path: string) {
-  try {
-    const data = await readFile(path);
-    const base64 = `data:image/png;base64,${btoa(String.fromCharCode(...new Uint8Array(data)))}`;
-    currentBgBase64.value = base64;
-    localStorage.setItem('BgBase64', base64);
-    customBackground.value = path;
-  } catch (err) {
-    console.error('加载自定义背景失败', err);
-  }
+function loadCustomBackground(path: string) {
+  // The image is displayed through convertFileSrc(); no need to read it into memory.
+  customBackground.value = path;
 }
 
-async function refreshApiBackground() {
+function decodeBase64(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function detectImageExtension(bytes: Uint8Array): string {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg';
+  if (bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'gif';
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50)
+    return 'webp';
+  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) return 'bmp';
+  // Tauri's asset protocol derives the MIME type from the extension; PNG is the
+  // safest fallback for unknown data.
+  return 'png';
+}
+
+async function refreshApiBackground(): Promise<boolean> {
   customBackground.value = null;
   currentBgBase64.value = null;
   localStorage.removeItem('customBackground');
+  localStorage.removeItem('BgBase64');
 
-  await loadApiBackground();
+  const ok = await loadApiBackground();
 
   window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: null }));
-  console.log('API 背景已刷新');
+  return ok;
 }
 
-async function fixCurrentBackground() {
-  if (!currentBgBase64.value) {
-    console.warn('暂无可固定的背景图片');
-    return;
-  }
-
+async function fixCurrentBackground(): Promise<boolean> {
   try {
-    const [, pureBase64] = currentBgBase64.value.split(',');
-    if (!pureBase64) throw new Error('当前背景不是有效的 base64 图片');
-
-    const binaryStr = atob(pureBase64);
-    const byteArr = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      byteArr[i] = binaryStr.charCodeAt(i);
+    let bytes: Uint8Array | null = null;
+    if (customBackground.value) {
+      bytes = new Uint8Array(await readFile(customBackground.value));
+    } else if (currentBgBase64.value) {
+      const [, pureBase64] = currentBgBase64.value.split(',');
+      if (pureBase64) bytes = decodeBase64(pureBase64);
+    }
+    if (!bytes?.length) {
+      console.warn('暂无可固定的背景图片');
+      return false;
     }
 
-    const fileName = 'fixed_background.png';
-    await writeFile(fileName, byteArr, { baseDir: BaseDirectory.AppData });
+    // Keep the real format: the asset protocol serves the file by extension, and the
+    // random API image is often a JPEG even though the old code always wrote `.png`.
+    const fileName = `fixed_background.${detectImageExtension(bytes)}`;
+    await writeFile(fileName, bytes, { baseDir: BaseDirectory.AppData });
 
     const savePath = await join(await appDataDir(), fileName);
     customBackground.value = savePath;
     localStorage.setItem('customBackground', savePath);
     window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: savePath }));
 
-    console.log('背景固定成功，已覆盖旧文件：', savePath);
+    console.log('背景固定成功：', savePath);
+    return true;
   } catch (err) {
     console.error('固定背景失败：', err);
+    return false;
   }
 }
 
-// Exposed for Setting.vue and the in-page background controls.
-window.loadApiBackground = loadApiBackground;
-window.loadCustomBackground = loadCustomBackground;
+// Exposed for Setting.vue's background controls.
 window.refreshApiBackground = refreshApiBackground;
 window.fixCurrentBackground = fixCurrentBackground;
 
@@ -202,8 +218,6 @@ function onBackgroundChanged(e: Event) {
 }
 
 // ===== Theme colours =====
-provide('themeColors', { mainColor, bgColor, subColor });
-
 function hexToRgb(hex: string): string {
   let clean = hex.replace(/^#/, '').trim();
   if (!clean) return '255, 255, 255';
@@ -269,30 +283,30 @@ function applyThemeColors() {
 }
 
 // ===== Lifecycle =====
-function blockContextMenu(e: Event) {
-  e.preventDefault();
-}
-
-onMounted(async () => {
-  document.addEventListener('contextmenu', blockContextMenu);
-
+onMounted(() => {
   loadCustomColors();
 
   const stored = localStorage.getItem('customBackground');
   if (stored && stored !== 'null') {
-    await loadCustomBackground(stored);
+    loadCustomBackground(stored);
   }
 
   const cachedBase64 = localStorage.getItem('BgBase64');
-  if (cachedBase64 && !currentBgBase64.value) {
+  if (cachedBase64) {
     currentBgBase64.value = cachedBase64;
+  }
+
+  // First run (or after clearing the cache): fetch the random API background through
+  // the HTTP plugin and cache it, instead of relying on a remote CSS URL that the CSP
+  // has to allow. `defaultBgStyle()` remains the fallback when the request fails.
+  if (!customBackground.value && !currentBgBase64.value) {
+    void loadApiBackground();
   }
 
   window.addEventListener('customBackgroundChanged', onBackgroundChanged as EventListener);
 });
 
 onUnmounted(() => {
-  document.removeEventListener('contextmenu', blockContextMenu);
   window.removeEventListener('customBackgroundChanged', onBackgroundChanged as EventListener);
 });
 

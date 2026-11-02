@@ -31,7 +31,7 @@ iOS **禁止应用 spawn 子进程**，Android 上也没有可用的 ffmpeg 可�
 | RPE 绑定（RPEView） | ✅ | ❌ 屏蔽 | 需要选目录 + 读任意路径 |
 | 预览（Play/预览窗口） | ✅ | ❌ 屏蔽 | 独立 macroquad 窗口，移动端没有等价物 |
 | 任务列表（TasksView） | ✅ | ✅ 可用 | 移动端基本为空；「在文件夹中显示」已隐藏 |
-| 设置：主题色 / 自定义背景 / 语言 | ✅ | ✅ 可用 | 背景写入应用沙箱（AppData） |
+| 设置：主题色 / 自定义背景 / 语言 | ✅ | ✅ 可用 | 语言支持 English / 简体中文，切换后重载；背景写入应用沙箱（AppData） |
 | 设置：输出目录 | ✅ | ❌ 隐藏 | 移动端文件选择器不支持选目录；输出固定为应用数据目录 |
 | 关于（AboutView） | ✅ | ✅ 可用 | 彩蛋动画在移动端会消耗电量，已降低模糊开销 |
 | 拖拽谱面文件 | ✅ | ❌ 无 | 触屏没有拖拽来源；改用文件选择器 |
@@ -48,12 +48,15 @@ iOS **禁止应用 spawn 子进程**，Android 上也没有可用的 ffmpeg 可�
 - `src/components/MobileUnsupported.vue`：桌面专属页面的替代说明页（App.vue 按路由切换）。
 - `src/TasksView.vue`：任务卡加「⋮」按钮（复用原右键菜单）。
 - `src/components/ConfigView.vue`：`window.prompt` 换成 Vuetify 对话框（iOS WKWebView 不支持 prompt）。
+- `src/Setting.vue`：新增语言选择（English / 简体中文）；`window.prompt`/`confirm` 均已替换为 Vuetify 对话框。
 - `src/BatchRenderView.vue`：`window.confirm` 换成对话框；全屏模糊在触屏设备降级。
 - `src/main.ts`：移动端跳过 F12/devtools 拦截（保留右键屏蔽以抑制长按弹出菜单）。
 - `src/assets/main.css`：`@media (pointer: coarse)` 降低大面积 `backdrop-filter` 模糊（移动 GPU 开销）。
 - `index.html`：`viewport-fit=cover`。
-- Rust：`lib.rs` 的 `asset_dir` 增加 macOS/移动端分支（`resource_dir()`）；`render.rs` 增加移动端
-  `hw_detect` 空实现；`is_the_only_instance` 在移动端恒为 true（避免沙箱 flock 失败导致应用自杀）。
+- Rust：`lib.rs` 的 `asset_dir` 改为按平台/打包方式探测（Tauri 资源目录、旧版 `/usr/lib/ptkc-assets`、
+  dev 的 `src-tauri/assets`）；**移动端不再因资源目录缺失而退出**——Android 的资源位于 APK 内，
+  `resource_dir()` 返回 `asset://localhost/`，不是文件系统路径；iOS 的 `resource_dir()` 本身已指向
+  `.../assets`。`render.rs` 增加移动端 `hw_detect` 空实现；`is_the_only_instance` 在移动端恒为 true。
 
 ## 构建注意（Apple 平台的链接）
 

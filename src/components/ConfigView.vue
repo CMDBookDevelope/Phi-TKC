@@ -191,19 +191,17 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 const { t } = useI18n();
 
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { VForm } from 'vuetify/components';
-import { toast, anyFilter, toastError } from '@/common';
+import { toast, anyFilter, toastError, RULES } from '@/common';
 import type { RenderConfig } from '@/model';
 import TipSwitch from './TipSwitch.vue';
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-defineProps<{ initAspectRatio?: number }>();
 // Phi-TKC's preset list, plus the 1920x1080 default (which was missing from it).
 const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2133', '2388x1668', '1600x1080', '7680x5760'];
 const FFMPEG_PRESETS = [
@@ -215,6 +213,18 @@ const FFMPEG_PRESETS = [
   { value: 'slower', title: 'Slower' },
   { value: 'veryslow', title: 'VerySlow' },
 ];
+// The Rust side picks a different whitespace-separated token depending on the selected
+// encoder: CPU/QSV use token 0, NVENC token 1 (p1..p7) and AMF token 2 (speed/balanced/
+// quality). A single "medium" therefore silently ignored the choice on NVENC/AMF.
+const FFMPEG_PRESET_VALUES: Record<string, string> = {
+  veryfast: 'veryfast p1 speed',
+  faster: 'faster p2 speed',
+  fast: 'fast p3 speed',
+  medium: 'medium p4 balanced',
+  slow: 'slow p6 quality',
+  slower: 'slower p7 quality',
+  veryslow: 'veryslow p7 quality',
+};
 
 const VIDEO_FORMAT = [
   { value: 'mp4', title: 'MP4' },
@@ -225,14 +235,14 @@ const VIDEO_CODECS = [
   { value: 'hevc', title: 'HEVC' },
   { value: 'av1', title: 'AV1' },
 ];
-const ENCODERS = [
-  { value: 'auto', title: '自动选择', desc: '自动检测最佳编码器' },
-  { value: 'nvenc', title: 'NVIDIA NVENC', desc: 'NVIDIA GPU 硬件加速' },
-  { value: 'qsv', title: 'Intel QSV', desc: 'Intel Quick Sync Video' },
-  { value: 'amf', title: 'AMD AMF', desc: 'AMD Advanced Media Framework' },
-  { value: 'vulkan', title: 'Vulkan', desc: '跨平台 GPU 编码' },
-  { value: 'cpu', title: 'CPU 软编码', desc: 'libx264/libx265/libaom-av1' },
-];
+const encoders = computed(() => [
+  { value: 'auto', title: t('encoder-auto') },
+  { value: 'nvenc', title: t('encoder-nvenc') },
+  { value: 'qsv', title: t('encoder-qsv') },
+  { value: 'amf', title: t('encoder-amf') },
+  { value: 'vulkan', title: t('encoder-vulkan') },
+  { value: 'cpu', title: t('encoder-cpu') },
+]);
 const AUDIO_FORMATS = ['flac', 'mp3', 'aac', 'opus', 'wav'];
 // The Rust side only accepts 16/24/32 — a 48 option here would be rejected at render time.
 const AUDIO_BITS = [16, 24, 32];
@@ -322,11 +332,14 @@ const DEFAULT_RESPACK: Respack = { name: t('respack-default'), path: null, index
 const respacks = ref([DEFAULT_RESPACK]);
 const respack = ref(DEFAULT_RESPACK);
 async function updateRespacks() {
-  const list = (await invoke('get_respacks')) as { name: string; path: string }[];
-  respacks.value = [DEFAULT_RESPACK, ...list.map((obj, i) => ({ name: obj.name, path: obj.path, index: i + 1 }))];
-  respack.value = respacks.value.find((x) => x.name === respack.value.name) || respacks.value[0];
+  try {
+    const list = (await invoke('get_respacks')) as { name: string; path: string }[];
+    respacks.value = [DEFAULT_RESPACK, ...list.map((obj, i) => ({ name: obj.name, path: obj.path, index: i + 1 }))];
+    respack.value = respacks.value.find((x) => x.name === respack.value.name) || respacks.value[0];
+  } catch (e) {
+    toastError(e);
+  }
 }
-updateRespacks();
 
 interface Preset {
   name: string;
@@ -394,18 +407,31 @@ const preset = ref(DEFAULT_PRESET);
 
 async function updatePresets() {
   const currentKey = preset.value.key;
-  const pairs = (await invoke('get_presets')) as Record<string, RenderConfig>;
-  presets.value = [
-    DEFAULT_PRESET,
-    ...Object.keys(pairs)
-      .sort()
-      .map((key) => ({ name: key, key, config: pairs[key] })),
-  ];
-  const found = presets.value.find((x) => x.key === currentKey);
-  preset.value = found || presets.value[0];
-  applyConfig(preset.value.config);
+  try {
+    const pairs = (await invoke('get_presets')) as Record<string, RenderConfig>;
+    presets.value = [
+      DEFAULT_PRESET,
+      ...Object.keys(pairs)
+        .sort()
+        .map((key) => ({ name: key, key, config: pairs[key] })),
+    ];
+    const found = presets.value.find((x) => x.key === currentKey);
+    preset.value = found || presets.value[0];
+    applyConfig(preset.value.config);
+  } catch (e) {
+    toastError(e);
+    preset.value = DEFAULT_PRESET;
+    applyConfig(DEFAULT_PRESET.config);
+  }
 }
-updatePresets();
+
+// Respacks must be loaded before applying the saved preset: applyConfig() resolves
+// `resPackPath` against the respack list, and both calls used to race on mount.
+async function initConfig() {
+  await updateRespacks();
+  await updatePresets();
+}
+void initConfig();
 
 async function chooseAvatar() {
   const file = await open({ filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }, anyFilter()] });
@@ -420,21 +446,27 @@ async function openRespackFolder() {
 }
 
 async function buildConfig(): Promise<RenderConfig | null> {
-  if (!(await form.value!.validate()).valid) {
+  const valid = form.value ? (await form.value.validate()).valid : true;
+  if (!valid) {
     toast(t('has-error'), 'error');
     return null;
   }
-  const [w, h] = resolution.value.split('x').map(Number);
+  const [w, h] = resolution.value.split(/x/i).map(Number);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    toast(t('rules.resolution'), 'error');
+    return null;
+  }
+  const challengeIndex = t('challenge-colors').split(',').indexOf(challengeColor.value);
   return {
     resolution: [w, h],
-    ffmpegPreset: ffmpegPreset.value,
+    ffmpegPreset: FFMPEG_PRESET_VALUES[ffmpegPreset.value] ?? ffmpegPreset.value,
     endingLength: parseFloat(endingLength.value),
     disableLoading: disableLoading.value,
     chartDebug: chartDebug.value,
     flidX: flidX.value,
     chartRatio: chartRatio.value,
-    bufferSize: bufferSize.value,
-    fps: parseInt(fps.value),
+    bufferSize: Number(bufferSize.value),
+    fps: parseInt(fps.value, 10),
     hardwareAccel: hwAccel.value,
     videoCodec: videoCodec.value,
     encoder: encoder.value,
@@ -449,8 +481,8 @@ async function buildConfig(): Promise<RenderConfig | null> {
     audioFormat: audioFormat.value,
     bar: bar.value,
     aggressive: aggressive.value,
-    challengeColor: STD_CHALLENGE_COLORS[t('challenge-colors').split(',').indexOf(challengeColor.value)],
-    challengeRank: parseInt(challengeRank.value),
+    challengeColor: STD_CHALLENGE_COLORS[challengeIndex >= 0 ? challengeIndex : 4],
+    challengeRank: parseInt(challengeRank.value, 10),
     disableEffect: disableEffect.value,
     doubleHint: doubleHint.value,
     fxaa: fxaa.value,
@@ -459,7 +491,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
     playerAvatar: playerAvatar.value?.length ? playerAvatar.value : null,
     playerName: playerName.value,
     playerRks: parseFloat(playerRks.value),
-    sampleCount: parseInt(sampleCount.value),
+    sampleCount: parseInt(sampleCount.value, 10),
     resPackPath: respack.value.path,
     speed: 1,
     volumeMusic: volumeMusic.value,
@@ -481,13 +513,13 @@ async function buildConfig(): Promise<RenderConfig | null> {
 
 function applyConfig(c: RenderConfig) {
   resolution.value = c.resolution.join('x');
-  ffmpegPreset.value = c.ffmpegPreset;
+  ffmpegPreset.value = FFMPEG_PRESETS.some((x) => x.value === c.ffmpegPreset) ? c.ffmpegPreset : c.ffmpegPreset?.split(' ')[0] || 'medium';
   endingLength.value = String(c.endingLength);
   disableLoading.value = c.disableLoading;
   chartDebug.value = c.chartDebug;
   flidX.value = c.flidX;
   chartRatio.value = c.chartRatio;
-  bufferSize.value = c.bufferSize;
+  bufferSize.value = Number(c.bufferSize);
   fps.value = String(c.fps);
   hwAccel.value = c.hardwareAccel;
   videoCodec.value = c.videoCodec;
@@ -498,11 +530,15 @@ function applyConfig(c: RenderConfig) {
   background.value = c.background ?? false;
   handSplit.value = c.handSplit ?? false;
   noteSpeedFactor.value = c.noteSpeedFactor;
+  // Keep the format select and the `video` boolean in sync; buildConfig() sends only
+  // the boolean, so a preset with MOV used to be displayed as MP4 (and vice versa).
+  videoFormat.value = c.video ? 'mov' : 'mp4';
   video.value = c.video;
   audioFormat.value = c.audioFormat || 'flac';
   audioBit.value = c.audioBit;
   aggressive.value = c.aggressive;
-  challengeColor.value = t('challenge-colors').split(',')[STD_CHALLENGE_COLORS.indexOf(c.challengeColor)];
+  const challengeIndex = STD_CHALLENGE_COLORS.indexOf(c.challengeColor);
+  challengeColor.value = t('challenge-colors').split(',')[challengeIndex >= 0 ? challengeIndex : 4];
   challengeRank.value = String(c.challengeRank);
   disableEffect.value = c.disableEffect;
   doubleHint.value = c.doubleHint;
@@ -512,7 +548,7 @@ function applyConfig(c: RenderConfig) {
   playerAvatar.value = c.playerAvatar || undefined;
   playerName.value = c.playerName;
   playerRks.value = String(c.playerRks);
-  sampleCount.value = String(c.sampleCount);
+  sampleCount.value = String(c.sampleCount ?? 1);
   respack.value = respacks.value.find((x) => x.path === c.resPackPath) || respacks.value[0];
   volumeMusic.value = c.volumeMusic;
   volumeSfx.value = c.volumeSfx;
@@ -613,10 +649,19 @@ async function replacePreset() {
           <div v-show="activeCategory === 'output'" class="settings-stack">
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.output') }}</div>
-              <div class="field-row"><v-combobox v-model="resolution" :items="RESOLUTIONS" :label="t('resolution')" density="compact" variant="outlined" hide-details /></div>
+              <div class="field-row">
+                <v-combobox
+                  v-model="resolution"
+                  :items="RESOLUTIONS"
+                  :rules="[RULES.non_empty, RULES.resolution]"
+                  :label="t('resolution')"
+                  density="compact"
+                  variant="outlined"
+                  hide-details />
+              </div>
               <div class="field-row two-col">
-                <v-text-field v-model="fps" :label="t('fps')" density="compact" variant="outlined" hide-details />
-                <v-text-field v-model="sampleCount" :label="t('sample-count')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="fps" :rules="[RULES.positiveInt]" :label="t('fps')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="sampleCount" :rules="[RULES.sampleCount]" :label="t('sample-count')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
@@ -633,7 +678,7 @@ async function replacePreset() {
                   hide-details />
                 <v-select
                   v-model="encoder"
-                  :items="ENCODERS"
+                  :items="encoders"
                   item-title="title"
                   item-value="value"
                   :label="t('encoder-select')"
@@ -650,7 +695,7 @@ async function replacePreset() {
               <div class="card-label">{{ t('section.bitrate') }}</div>
               <div class="field-row two-col">
                 <v-select v-model="bitrateControl" :items="['CRF', 'CBR']" :label="t('bitrate-control')" density="compact" variant="outlined" hide-details />
-                <v-text-field v-model="bitrate" :label="t('bitrate')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="bitrate" :rules="[RULES.non_empty]" :label="t('bitrate')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
@@ -695,7 +740,14 @@ async function replacePreset() {
               </div>
               <div class="field-row two-col">
                 <v-select v-model="targetAudio" :items="SAMPLE_RATES" :label="t('target_audio')" density="compact" variant="outlined" hide-details />
-                <v-text-field v-model="bufferSize" :label="t('buffer_size')" type="number" density="compact" variant="outlined" hide-details />
+                <v-text-field
+                  v-model.number="bufferSize"
+                  :rules="[RULES.positive]"
+                  :label="t('buffer_size')"
+                  type="number"
+                  density="compact"
+                  variant="outlined"
+                  hide-details />
               </div>
             </div>
           </div>
@@ -730,7 +782,7 @@ async function replacePreset() {
                 <v-text-field v-model="watermark" :label="t('watermark')" density="compact" variant="outlined" hide-details />
               </div>
               <div class="field-row">
-                <v-text-field v-model="endingLength" :label="t('ending-length')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="endingLength" :rules="[RULES.number]" :label="t('ending-length')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
           </div>
@@ -740,7 +792,16 @@ async function replacePreset() {
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.respack') }}</div>
               <div class="respack-row">
-                <v-select v-model="respack" :items="respacks" item-title="name" :label="t('respack')" density="compact" variant="outlined" hide-details class="flex-grow-1" />
+                <v-select
+                  v-model="respack"
+                  :items="respacks"
+                  item-title="name"
+                  return-object
+                  :label="t('respack')"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  class="flex-grow-1" />
                 <v-btn icon="mdi-refresh" size="small" variant="text" @click="updateRespacks" />
                 <v-btn icon="mdi-folder-open" size="small" variant="text" @click="openRespackFolder" />
               </div>
@@ -781,20 +842,20 @@ async function replacePreset() {
               <div class="card-label">{{ t('section.player') }}</div>
               <div class="avatar-row">
                 <v-avatar size="56" color="surface-variant">
-                  <v-img v-if="playerAvatar" :src="playerAvatar" />
+                  <v-img v-if="playerAvatar" :src="convertFileSrc(playerAvatar)" />
                   <v-icon v-else icon="mdi-account" size="32" />
                 </v-avatar>
                 <v-btn @click="chooseAvatar" variant="outlined" size="small">{{ t('player-avatar') }}</v-btn>
               </div>
               <div class="field-row two-col">
                 <v-text-field v-model="playerName" :label="t('player-name')" density="compact" variant="outlined" hide-details />
-                <v-text-field v-model="playerRks" :label="t('player-rks')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="playerRks" :rules="[RULES.number]" :label="t('player-rks')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.challenge') }}</div>
               <div class="field-row two-col">
-                <v-text-field v-model="challengeRank" :label="t('challenge-rank')" density="compact" variant="outlined" hide-details />
+                <v-text-field v-model="challengeRank" :rules="[RULES.positiveInt]" :label="t('challenge-rank')" density="compact" variant="outlined" hide-details />
                 <v-select v-model="challengeColor" :items="t('challenge-colors').split(',')" :label="t('challenge-color')" density="compact" variant="outlined" hide-details />
               </div>
             </div>

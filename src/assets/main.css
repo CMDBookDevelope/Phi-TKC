@@ -45,6 +45,7 @@ textarea,
 }
 
 /* ===== 毛玻璃通用类 ===== */
+/* Legacy class name from the pre-Vuetify UI; this is plain CSS (no VFluent dependency). */
 .fluent-glass {
   background: rgba(var(--bg-color-rgb), 0.2);
   transition:

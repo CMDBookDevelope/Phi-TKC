@@ -29,19 +29,25 @@
         "$HOME/**/*",
         "**/*.jpg",
         "**/*.png",
-        "**/*.webp"
+        "**/*.webp",
+        "$APPDATA/*",
+        "**/*.jpeg",
+        "**/*.bmp",
+        "**/*.gif"
       ]
     },
     {
       "identifier": "fs:allow-write-file",
       "allow": [
-        "$APPDATA/**"
+        "$APPDATA/**",
+        "$APPDATA/*"
       ]
     },
     {
       "identifier": "fs:allow-exists",
       "allow": [
-        "$APPDATA/**"
+        "$APPDATA/**",
+        "$APPDATA/*"
       ]
     },
     "shell:allow-open",

@@ -1,7 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 prpr::tl_file!("render");
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use macroquad::{
     miniquad::{
         gl::{
@@ -467,12 +467,8 @@ pub fn find_ffmpeg() -> Result<Option<String>> {
             }
         }
     }
-    warn!("Failed to find global ffmpeg. Using bundled ffmpeg");
-    Ok(if test(&bundled_ffmpeg) {
-        Some(bundled_ffmpeg.to_string_lossy().into_owned())
-    } else {
-        None
-    })
+    warn!("Failed to find ffmpeg (checked the app folder and PATH)");
+    Ok(None)
 }
 
 pub async fn main_with_params(params: RenderParams, output_path: PathBuf,  exit_after: bool, log_mode: bool) -> Result<()> {
@@ -1554,6 +1550,10 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf,  exit_
         "-b:v"
     };
 
+    // A hardware encoder is a preference, not a hard requirement: the candidate lists
+    // above always end in a software encoder. Failing the whole render when, for
+    // example, AV1 NVENC is unavailable made the default configuration unusable on
+    // most machines, even though libx264/libx265/libaom-av1 were right there.
     if params.config.hardware_accel {
         let h264_supported = encoder_availability.h264_nvenc
             || encoder_availability.h264_qsv
@@ -1572,75 +1572,18 @@ pub async fn main_with_params(params: RenderParams, output_path: PathBuf,  exit_
             || (params.config.video_codec == "hevc" && !hevc_supported)
             || (params.config.video_codec == "av1" && !av1_supported)
         {
-            if log_mode == true {
-                error!("{}", tl!("no-hwacc"));
-                error!("Hardware detection summary:");
-                error!("  - NVIDIA: {}", hw_detected.h264_nvenc);
-                error!("  - Intel Quick Sync: {}", hw_detected.h264_qsv);
-                error!("  - AMD AMF: {}", hw_detected.h264_amf);
-                error!("  - Vulkan: {}", hw_detected.h264_vulkan);
-                error!("Encoder test results:");
-                error!("  - h264_nvenc: {}", if encoder_availability.h264_nvenc { "SUCCESS" } else { "FAILED" });
-                error!("  - hevc_nvenc: {}", if encoder_availability.hevc_nvenc { "SUCCESS" } else { "FAILED" });
-                error!("  - av1_nvenc: {}", if encoder_availability.av1_nvenc { "SUCCESS" } else { "FAILED" });
-                error!("  - h264_qsv: {}", if encoder_availability.h264_qsv { "SUCCESS" } else { "FAILED" });
-                error!("  - hevc_qsv: {}", if encoder_availability.hevc_qsv { "SUCCESS" } else { "FAILED" });
-                error!("  - av1_qsv: {}", if encoder_availability.av1_qsv { "SUCCESS" } else { "FAILED" });
-                error!("  - h264_amf: {}", if encoder_availability.h264_amf { "SUCCESS" } else { "FAILED" });
-                error!("  - hevc_amf: {}", if encoder_availability.hevc_amf { "SUCCESS" } else { "FAILED" });
-                error!("  - av1_amf: {}", if encoder_availability.av1_amf { "SUCCESS" } else { "FAILED" });
-                error!("  - h264_vulkan: {}", if encoder_availability.h264_vulkan { "SUCCESS" } else { "FAILED" });
-                error!("  - hevc_vulkan: {}", if encoder_availability.hevc_vulkan { "SUCCESS" } else { "FAILED" });
-                error!("  - av1_vulkan: {}", if encoder_availability.av1_vulkan { "SUCCESS" } else { "FAILED" });
-                error!("  - h264_cuvid: {}", if encoder_availability.h264_cuvid { "SUCCESS" } else { "FAILED" });
-                error!("  - hevc_cuvid: {}", if encoder_availability.hevc_cuvid { "SUCCESS" } else { "FAILED" });
-                error!("  - av1_cuvid: {}", if encoder_availability.av1_cuvid { "SUCCESS" } else { "FAILED" });
-
-                if !hw_errors.is_empty() {
-                    error!("Detailed error logs:");
-                    for (i, e) in hw_errors.iter().enumerate() {
-                        error!("  {}. {}", i + 1, e);
-                    }
-                } else {
-                    error!("No hardware encoders were tested (all detection failed).");
-                }
+            let message = format!(
+                "No hardware encoder is available for {}; falling back to software encoding.",
+                params.config.video_codec
+            );
+            if log_mode {
+                warn!("{}", message);
             } else {
-                println!("{}", tl!("no-hwacc"));
-                println!("Hardware detection summary:");
-                println!("  - NVIDIA: {}", hw_detected.h264_nvenc);
-                println!("  - Intel Quick Sync: {}", hw_detected.h264_qsv);
-                println!("  - AMD AMF: {}", hw_detected.h264_amf);
-                println!("  - Vulkan: {}", hw_detected.h264_vulkan);
-                println!("Encoder test results:");
-                println!("  - h264_nvenc: {}", if encoder_availability.h264_nvenc { "SUCCESS" } else { "FAILED" });
-                println!("  - hevc_nvenc: {}", if encoder_availability.hevc_nvenc { "SUCCESS" } else { "FAILED" });
-                println!("  - av1_nvenc: {}", if encoder_availability.av1_nvenc { "SUCCESS" } else { "FAILED" });
-                println!("  - h264_qsv: {}", if encoder_availability.h264_qsv { "SUCCESS" } else { "FAILED" });
-                println!("  - hevc_qsv: {}", if encoder_availability.hevc_qsv { "SUCCESS" } else { "FAILED" });
-                println!("  - av1_qsv: {}", if encoder_availability.av1_qsv { "SUCCESS" } else { "FAILED" });
-                println!("  - h264_amf: {}", if encoder_availability.h264_amf { "SUCCESS" } else { "FAILED" });
-                println!("  - hevc_amf: {}", if encoder_availability.hevc_amf { "SUCCESS" } else { "FAILED" });
-                println!("  - av1_amf: {}", if encoder_availability.av1_amf { "SUCCESS" } else { "FAILED" });
-                println!("  - h264_vulkan: {}", if encoder_availability.h264_vulkan { "SUCCESS" } else { "FAILED" });
-                println!("  - hevc_vulkan: {}", if encoder_availability.hevc_vulkan { "SUCCESS" } else { "FAILED" });
-                println!("  - av1_vulkan: {}", if encoder_availability.av1_vulkan { "SUCCESS" } else { "FAILED" });
-                println!("  - h264_cuvid: {}", if encoder_availability.h264_cuvid { "SUCCESS" } else { "FAILED" });
-                println!("  - hevc_cuvid: {}", if encoder_availability.hevc_cuvid { "SUCCESS" } else { "FAILED" });
-                println!("  - av1_cuvid: {}", if encoder_availability.av1_cuvid { "SUCCESS" } else { "FAILED" });
-
-                if !hw_errors.is_empty() {
-                    println!("Detailed error logs:");
-                    for (i, e) in hw_errors.iter().enumerate() {
-                        println!("  {}. {}", i + 1, e);
-                    }
-                } else {
-                    println!("No hardware encoders were tested (all detection failed).");
-                }
+                println!("{}", message);
             }
-            return Err(anyhow::anyhow!(tl!("no-hwacc")));
         }
-    }                                                                           
-    
+    }
+
     let global_args = "-y";
     let mut input_args = String::new();
     write!(
@@ -1928,11 +1871,11 @@ pub struct CliArgs {
     pub output: String,
     #[arg(short, long, default_value = "1920x1440")]
     pub resolution: String,
-    #[arg(short, long, default_value_t = 40)]
+    #[arg(short, long, default_value_t = 20)]
     pub crf: u32,
-    #[clap(long, default_value = "/usr/lib/ptkc-assets")]
+    #[clap(long, default_value = "/usr/lib/ptkc-assets", help = "Assets folder (falls back to the bundled assets if missing)")]
     pub assets: String,
-    #[arg(long, default_value_t = 40)]
+    #[arg(long, default_value_t = 30)]
     pub dark: u8,
     #[arg(long, default_value_t = false)]
     pub load: bool,
@@ -1942,19 +1885,39 @@ pub struct CliArgs {
     pub fps: u32,
 }
 
+/// Resolve the CLI's asset folder. The documented default is the legacy
+/// `/usr/lib/ptkc-assets`, but normal Tauri packages install resources under
+/// `/usr/lib/<product>/assets`, and a dev build keeps them in `src-tauri/assets`.
+fn resolve_cli_assets(arg: &str) -> PathBuf {
+    let exe_assets = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("assets")));
+    let candidates = [
+        PathBuf::from(arg),
+        exe_assets.unwrap_or_default(),
+        PathBuf::from("/usr/lib/ptkc-assets"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"),
+    ];
+    candidates
+        .into_iter()
+        .find(|path| !path.as_os_str().is_empty() && path.exists())
+        .unwrap_or_else(|| PathBuf::from(arg))
+}
+
 /// CLI 渲染入口
 pub async fn render_cli(args: CliArgs) -> Result<()> {
-    macroquad::file::set_pc_assets_folder(&args.assets);
+    let assets = resolve_cli_assets(&args.assets);
+    macroquad::file::set_pc_assets_folder(&assets.display().to_string());
     let mut config = RenderConfig::default();
     config.resolution = {
-        let parts: Vec<&str> = args.resolution.split('x').collect();
+        let parts: Vec<&str> = args.resolution.split(|c| c == 'x' || c == 'X').collect();
         if parts.len() == 2 {
             (
                 parts[0].parse().unwrap_or(1920),
-                parts[1].parse().unwrap_or(1200),
+                parts[1].parse().unwrap_or(1440),
             )
         } else {
-            (1280, 720)
+            (1920, 1440)
         }
     };
     config.fps = args.fps;

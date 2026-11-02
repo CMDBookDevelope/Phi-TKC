@@ -16,7 +16,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tempfile::NamedTempFile;
 use tokio::{
@@ -87,6 +87,13 @@ impl Task {
         );
 
         let output = if let Some(path) = output_path {
+            // The custom output directory comes from a free-text setting and may not
+            // exist yet; create it instead of letting ffmpeg fail with a vague error.
+            if !path.exists() {
+                std::fs::create_dir_all(&path)?;
+            } else if !path.is_dir() {
+                anyhow::bail!("output path is not a directory: {}", path.display());
+            }
             path.join(file_name)
         } else {
             output_dir()?.join(file_name)
@@ -107,6 +114,12 @@ impl Task {
 
     pub async fn run(&self) -> Result<()> {
         info!("Task #{} started ({})", self.id, self.params.path.display());
+
+        // A task canceled while it was still queued must not spawn a renderer at all.
+        if self.request_cancel.load(Ordering::Relaxed) {
+            *self.status.lock().await = TaskStatus::Canceled;
+            return Ok(());
+        }
 
         *self.status.lock().await = TaskStatus::Loading;
 
@@ -132,9 +145,24 @@ impl Task {
         let mut total = 0;
         let mut frame_count: u64 = 0;
         let start = Instant::now();
-        let mut last_fps: usize = 0;
+        // A task can sit in the queue for minutes; measure FPS from when it actually
+        // starts, and seed the estimate with the requested frame rate.
+        *self.last_fps_update.lock().await = Instant::now();
+        let mut last_fps: usize = self.params.config.fps as usize;
         loop {
-            let line = lines.next_line().await?;
+            // If the renderer stalls (or emits no lines), a plain `next_line().await`
+            // would make cancellation impossible. Wake up periodically to check the flag.
+            let line = match tokio::time::timeout(Duration::from_millis(250), lines.next_line()).await {
+                Ok(line) => line?,
+                Err(_) => {
+                    if self.request_cancel.load(Ordering::Relaxed) {
+                        let _ = child.kill().await;
+                        *self.status.lock().await = TaskStatus::Canceled;
+                        return Ok(());
+                    }
+                    continue;
+                }
+            };
             let Some(line) = line else { break };
             let Ok(event): Result<IPCEvent, _> = serde_json::from_str(line.trim()) else {
                 continue;
@@ -168,7 +196,7 @@ impl Task {
                     let cur = start.elapsed().as_secs_f64();
                     let estimate =
                         total.saturating_sub(frame_count).max(1) as f64 / last_fps.max(1) as f64;
-                    if frame_count as f64 / total as f64 >= 1.0 {
+                    if total > 0 && frame_count >= total {
                         let output = child.wait_with_output().await?;
                         let stdout = String::from_utf8(output.stdout)
                             .unwrap_or_else(|_| "Invalid output".to_owned());
@@ -181,7 +209,7 @@ impl Task {
                         return Ok(());
                     } else {
                         *self.status.lock().await = TaskStatus::Rendering {
-                            progress: frame_count as f64 / total as f64,
+                            progress: if total > 0 { frame_count as f64 / total as f64 } else { 0. },
                             fps: last_fps as u64,
                             estimate,
                         };
@@ -201,7 +229,7 @@ impl Task {
                 }
             }
             if self.request_cancel.load(Ordering::Relaxed) {
-                child.kill().await?;
+                let _ = child.kill().await;
                 *self.status.lock().await = TaskStatus::Canceled;
                 return Ok(());
             }
@@ -217,6 +245,15 @@ impl Task {
                 ),
             };
             return Ok(());
+        }
+
+        // A successful exit without an IPCEvent::Done leaves the task in Loading/
+        // Rendering forever, so the UI would show a render that never finishes.
+        let mut status = self.status.lock().await;
+        if !matches!(&*status, TaskStatus::Done { .. } | TaskStatus::Canceled | TaskStatus::Failed { .. }) {
+            *status = TaskStatus::Failed {
+                error: "The renderer exited without reporting completion".to_owned(),
+            };
         }
 
         Ok(())
@@ -297,7 +334,9 @@ impl TaskQueue {
     }
 
     pub async fn cancel(&self, id: u32) {
-        self.tasks.lock().await[id as usize].cancel();
+        if let Some(task) = self.tasks.lock().await.get(id as usize) {
+            task.cancel();
+        }
     }
 }
 

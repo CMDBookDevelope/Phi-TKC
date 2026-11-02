@@ -6,10 +6,29 @@ en:
     pending: Pending…
     loading: Loading…
     mixing: Mixing…
-    rendering: Rendering { fps } FPS, estimated to end { estimate }
-    done: Done, took { duration }
+    rendering: Rendering {fps} FPS, estimated to end {estimate}
+    done: Done, took {duration}
     canceled: Canceled
     failed: Failed
+
+  chip:
+    pending: Ready
+    loading: Loading
+    mixing: Mixing
+    rendering: Rendering
+    done: Done
+    canceled: Canceled
+    failed: Failed
+
+  detail:
+    name: Name
+    path: Path
+    status: Status
+    progress: Progress
+    fps: Frame rate
+    duration: Duration
+    output: Output
+    error: Error
 
   cancel: Cancel
   confirm: Confirm
@@ -28,10 +47,29 @@ zh-CN:
     pending: 等待中…
     loading: 加载中…
     mixing: 混音中…
-    rendering: 渲染中 { fps } FPS  预计 { estimate } 结束
-    done: 已完成，耗时 { duration }
+    rendering: 渲染中 {fps} FPS  预计 {estimate} 结束
+    done: 已完成，耗时 {duration}
     canceled: 已取消
     failed: 失败
+
+  chip:
+    pending: 就绪
+    loading: 加载中
+    mixing: 混音中
+    rendering: 渲染中
+    done: 已完成
+    canceled: 已取消
+    failed: 失败
+
+  detail:
+    name: 名称
+    path: 路径
+    status: 状态
+    progress: 进度
+    fps: 帧率
+    duration: 耗时
+    output: 输出
+    error: 错误
 
   cancel: 取消
   confirm: 确定
@@ -65,7 +103,12 @@ const POLL_ACTIVE_MS = 300;
 const POLL_IDLE_MS = 2000;
 
 async function updateList() {
-  tasks.value = await invoke<Task[]>('get_tasks');
+  try {
+    tasks.value = await invoke<Task[]>('get_tasks');
+  } catch (e) {
+    console.error('Failed to refresh tasks:', e);
+    tasks.value ??= [];
+  }
 }
 
 await updateList();
@@ -113,14 +156,11 @@ function describeStatus(status: TaskStatus): string {
     case 'pending': return t('status.pending');
     case 'loading': return t('status.loading');
     case 'mixing': return t('status.mixing');
-    case 'rendering': {
-      const progressDisplay = status.progress;
+    case 'rendering':
       return t('status.rendering', {
-        progress: progressDisplay,
         fps: status.fps,
         estimate: status.estimate ? formatDuration(status.estimate) : '',
       });
-    }
     case 'done': return t('status.done', { duration: status.duration ? formatDuration(status.duration) : '' });
     case 'canceled': return t('status.canceled');
     case 'failed': return t('status.failed');
@@ -149,6 +189,14 @@ async function showInFolder(path: string) {
 
 async function showFolder() {
   try { await invoke('show_folder'); } catch (e) { toastError(e); }
+}
+
+async function cancelTask(id: number) {
+  try {
+    await invoke('cancel_task', { id });
+  } catch (e) {
+    toastError(e);
+  }
 }
 
 function showOutput(task: Task) {
@@ -196,7 +244,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
     <!-- Header -->
     <div class="tasks-header">
       <h2 class="tasks-title">{{ t('output') }}</h2>
-      <v-btn color="primary" variant="tonal" @click="showFolder()">
+      <v-btn v-if="!mobile" color="primary" variant="tonal" @click="showFolder()">
         <v-icon icon="mdi-folder-open-outline" size="18" class="mr-1" />
         <span>{{ t('show-in-folder') }}</span>
       </v-btn>
@@ -230,7 +278,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
           <div class="task-header">
             <h3 class="task-name" :title="task.name">{{ task.name }}</h3>
             <span class="status-chip" :class="'chip-' + statusColor(task.status.type)">
-              {{ task.status.type.toUpperCase() }}
+              {{ t('chip.' + task.status.type) }}
             </span>
             <v-btn
               icon="mdi-dots-vertical"
@@ -265,7 +313,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 
           <div class="task-actions">
             <template v-if="['loading', 'mixing', 'rendering', 'pending'].includes(task.status.type)">
-              <v-btn variant="text" size="small" color="primary" @click="invoke('cancel_task', { id: task.id })">
+              <v-btn variant="text" size="small" color="primary" @click="cancelTask(task.id)">
                 <v-icon icon="mdi-cancel" size="16" class="mr-1" />
                 <span>{{ t('cancel') }}</span>
               </v-btn>
@@ -341,23 +389,23 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
         <v-divider />
         <v-card-text>
           <div class="detail-list">
-            <div class="detail-row"><span class="detail-label">名称</span><span>{{ selectedTask.name }}</span></div>
-            <div class="detail-row"><span class="detail-label">路径</span><span>{{ selectedTask.path }}</span></div>
-            <div class="detail-row"><span class="detail-label">状态</span><span>{{ describeStatus(selectedTask.status) }}</span></div>
+            <div class="detail-row"><span class="detail-label">{{ t('detail.name') }}</span><span>{{ selectedTask.name }}</span></div>
+            <div class="detail-row"><span class="detail-label">{{ t('detail.path') }}</span><span>{{ selectedTask.path }}</span></div>
+            <div class="detail-row"><span class="detail-label">{{ t('detail.status') }}</span><span>{{ describeStatus(selectedTask.status) }}</span></div>
             <div class="detail-row" v-if="selectedTask.status.type === 'rendering'">
-              <span class="detail-label">进度</span><span>{{ Math.round(selectedTask.status.progress * 100) }}%</span>
+              <span class="detail-label">{{ t('detail.progress') }}</span><span>{{ Math.round(selectedTask.status.progress * 100) }}%</span>
             </div>
             <div class="detail-row" v-if="selectedTask.status.type === 'rendering'">
-              <span class="detail-label">帧率</span><span>{{ selectedTask.status.fps }} FPS</span>
+              <span class="detail-label">{{ t('detail.fps') }}</span><span>{{ selectedTask.status.fps }} FPS</span>
             </div>
             <div class="detail-row" v-if="selectedTask.status.type === 'done' && selectedTask.status.duration">
-              <span class="detail-label">耗时</span><span>{{ formatDuration(selectedTask.status.duration) }}</span>
+              <span class="detail-label">{{ t('detail.duration') }}</span><span>{{ formatDuration(selectedTask.status.duration) }}</span>
             </div>
             <div class="detail-row" v-if="selectedTask.status.type === 'done' && selectedTask.output">
-              <span class="detail-label">输出</span><span class="break-all">{{ selectedTask.output }}</span>
+              <span class="detail-label">{{ t('detail.output') }}</span><span class="break-all">{{ selectedTask.output }}</span>
             </div>
             <div class="detail-row" v-if="selectedTask.status.type === 'failed' && selectedTask.status.error">
-              <span class="detail-label">错误</span><span class="error-text">{{ selectedTask.status.error }}</span>
+              <span class="detail-label">{{ t('detail.error') }}</span><span class="error-text">{{ selectedTask.status.error }}</span>
             </div>
           </div>
         </v-card-text>

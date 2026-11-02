@@ -10,18 +10,23 @@ import { platform } from '@tauri-apps/plugin-os';
 let cached: string | null = null;
 
 function currentPlatform(): string {
-  if (cached === null) {
-    try {
-      cached = platform();
-    } catch {
-      // Not running inside Tauri (e.g. plain `vite dev` in a browser): treat as desktop.
-      cached = 'unknown';
-    }
+  if (cached !== null) return cached;
+  try {
+    cached = platform();
+    return cached;
+  } catch {
+    // Not running inside Tauri (e.g. plain `vite dev` in a browser) or the OS plugin
+    // is not ready yet. Don't cache the fallback, so a later call can retry instead of
+    // permanently classifying a phone as a desktop.
+    return 'unknown';
   }
-  return cached;
 }
 
 export function isMobile(): boolean {
   const p = currentPlatform();
-  return p === 'ios' || p === 'android';
+  if (p === 'ios' || p === 'android') return true;
+  // Last-resort fallback when the OS plugin is unavailable; iPadOS may report a
+  // desktop UA, in which case the plugin path above is what makes it work.
+  if (p === 'unknown') return /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+  return false;
 }

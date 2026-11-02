@@ -9,8 +9,12 @@ en:
     selectFolder: "Select folder"
     save: "Save"
     copy: "Copy path"
+    copied: "Path copied"
     clear: "Clear"
     saved: "Saved"
+    language:
+      label: "Language"
+      hint: "The app reloads after switching languages"
     selected:
       picked: "Selected folder: {name}"
       fallback: "Fallback selection: {count} files (root: {root})"
@@ -28,6 +32,8 @@ en:
       fix: "Fix"
       refresh: "Refresh"
       fixed: "Background successfully fixed"
+      fixFailed: "Failed to fix the background"
+      refreshFailed: "Failed to refresh the background"
       noCustom: "No custom background to clear"
     colors:
       label: "Theme Color"
@@ -46,8 +52,12 @@ zh-CN:
     selectFolder: "选择文件夹"
     save: "保存路径"
     copy: "复制路径"
+    copied: "路径已复制"
     clear: "清除"
     saved: "保存成功！"
+    language:
+      label: "语言"
+      hint: "切换语言后应用会自动重新加载"
     selected:
       picked: "已选择文件夹：{name}"
       fallback: "回退选择：{count} 个文件（根：{root})"
@@ -65,6 +75,8 @@ zh-CN:
       fix: "固定背景"
       refresh: "刷新背景"
       fixed: "背景成功固定!"
+      fixFailed: "固定背景失败"
+      refreshFailed: "刷新背景失败"
       noCustom: "当前没有自定义背景"
     colors:
       label: "主题色"
@@ -84,13 +96,28 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 defineOptions({ name: 'SettingsPanel' });
-import { RULES as rules, toast } from './common';
+import { RULES as rules, toast, changeLocale } from './common';
 import { mainColor, bgColor, subColor } from './colorStore';
 import { isMobile } from './platform';
 import ColorDot from './components/ColorDot.vue';
 
 const { t } = useI18n();
 const mobile = isMobile();
+
+// Only these two message sets exist; `changeLocale` normalises zh-TW to zh-CN.
+const LANGUAGES = [
+  { value: 'en', title: 'English' },
+  { value: 'zh-CN', title: '简体中文' },
+];
+const storedLocale = localStorage.getItem('locale');
+const currentLocale = ref(storedLocale === 'en' || storedLocale === 'zh-CN' ? storedLocale : storedLocale === 'zh-TW' ? 'zh-CN' : 'en');
+
+function applyLocale(value: string) {
+  changeLocale(value);
+  // Several labels are resolved once during setup (render list, preset names, moment
+  // locale); a reload guarantees every view picks up the new language.
+  window.location.reload();
+}
 
 const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
 const selectedInfo = ref<string | null>(null);
@@ -132,7 +159,7 @@ async function copyPath() {
   if (!outputPath.value) return;
   try {
     await writeText(outputPath.value);
-    toast(t('settings.saved'), 'success');
+    toast(t('settings.copied'), 'success');
   } catch {
     toast(t('settings.warning.copy_error'), 'error');
   }
@@ -175,16 +202,16 @@ function clearBackground() {
 }
 
 async function fixBackground() {
-  await window.fixCurrentBackground?.();
+  const ok = await window.fixCurrentBackground?.();
   const stored = localStorage.getItem('customBackground');
   if (stored) backgroundPath.value = stored;
-  toast(t('settings.background.fixed'), 'success');
+  toast(t(ok ? 'settings.background.fixed' : 'settings.background.fixFailed'), ok ? 'success' : 'error');
 }
 
 async function refreshBackground() {
-  await window.refreshApiBackground?.();
+  const ok = await window.refreshApiBackground?.();
   backgroundPath.value = '';
-  toast(t('settings.background.saved'), 'success');
+  toast(t(ok ? 'settings.background.saved' : 'settings.background.refreshFailed'), ok ? 'success' : 'error');
 }
 
 // ===== Theme colours =====
@@ -212,6 +239,22 @@ function confirmColor(type: 'main' | 'bg' | 'sub') {
 <template>
   <div class="settings-container">
     <div class="settings-scroll">
+      <!-- Language (available on mobile too; MOBILE.md lists it as supported) -->
+      <div class="md3-card glass fluent-glass" v-glass>
+        <div class="card-label">{{ t('settings.language.label') }}</div>
+        <v-select
+          v-model="currentLocale"
+          :items="LANGUAGES"
+          item-title="title"
+          item-value="value"
+          :label="t('settings.language.label')"
+          :hint="t('settings.language.hint')"
+          persistent-hint
+          density="compact"
+          variant="outlined"
+          @update:model-value="applyLocale" />
+      </div>
+
       <!-- Output Path (desktop only: mobile render output is fixed to the app data dir) -->
       <div v-if="!mobile" class="md3-card glass fluent-glass" v-glass>
         <div class="card-label">{{ t('settings.outputPath.label') }}</div>

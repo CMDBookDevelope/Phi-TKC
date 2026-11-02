@@ -23,6 +23,11 @@ en:
   rendering: Rendering
   done: Done
   failed: Failed
+  canceled: Canceled
+  original: Original
+  keep: Keep
+  on: On
+  off: Off
   total-selected: "Total selected: {count}"
   all: All
   none: None
@@ -92,6 +97,11 @@ zh-CN:
   rendering: 渲染中
   done: 已完成
   failed: 失败
+  canceled: 已取消
+  original: 保持原值
+  keep: 保持
+  on: 开启
+  off: 关闭
   actions: 操作
   total-selected: "已选择: {count}"
   all: 全选
@@ -144,14 +154,20 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import moment from 'moment';
 
 import { toast, toastError, RULES } from './common';
-import type { ChartInfo, RenderConfig } from './model';
+import type { ChartInfo, RenderConfig, Task } from './model';
 import ConfigView from '@/components/ConfigView.vue';
 
 const { t } = useI18n();
+
+const ACTIVE_STATUSES = ['pending', 'loading', 'mixing', 'rendering'];
+const POLL_MS = 500;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 interface BatchChart {
   id: string;
@@ -159,7 +175,7 @@ interface BatchChart {
   name: string;
   level: string;
   charter: string;
-  status: 'pending' | 'rendering' | 'done' | 'failed';
+  status: 'pending' | 'rendering' | 'done' | 'failed' | 'canceled';
   selected: boolean;
   error?: string;
   chartInfo?: ChartInfo;
@@ -179,9 +195,12 @@ const editingChart = computed(() => (editingChartId.value ? charts.value.find((c
 const form = ref<any>();
 
 const currentRenderingId = ref<string | null>(null);
+const currentTaskId = ref<number | null>(null);
 const isRenderingQueue = ref(false);
 const renderMsg = ref('');
 const renderProgress = ref<number>(0);
+let disposed = false;
+let statusSyncTimer: ReturnType<typeof setInterval> | null = null;
 
 const bulkEditData = ref({
   aspectWidth: '',
@@ -204,7 +223,9 @@ async function previewChart(id: string) {
   const chart = charts.value.find((c) => c.id === id);
   if (!chart?.chartInfo) return toast(t('chart-info-missing'), 'error');
   try {
-    const config = await buildRenderParams();
+    // Previewing does not invoke ffmpeg; requiring it here made the preview button fail
+    // on machines without ffmpeg even though the preview window itself works.
+    const config = await buildRenderParams(false);
     await invoke('preview_chart', {
       params: { path: chart.path, info: chart.chartInfo, config: { ...config, autoplay: true } },
     });
@@ -278,15 +299,22 @@ function loadDefaultConfig(): RenderConfig {
 
 function saveDefaultConfig(config: RenderConfig) {
   defaultConfig.value = config;
-  localStorage.setItem('defaultRenderConfig', JSON.stringify(config));
+  try {
+    localStorage.setItem('defaultRenderConfig', JSON.stringify(config));
+  } catch (e) {
+    console.error('Failed to persist the default render config', e);
+    toastError(e);
+  }
   toast(t('config-saved'), 'success');
 }
 
 async function getPresets() {
   try {
-    const presetsMap = (await invoke('get_presets')) as Record<string, any>;
+    const presetsMap = (await invoke('get_presets')) as Record<string, unknown>;
+    const current = selectedPreset.value;
     presets.value = [{ name: 'default' }, ...Object.keys(presetsMap).map((name) => ({ name }))];
-    selectedPreset.value = presets.value[0].name;
+    // Keep the user's selection when a new preset is created in the config dialog.
+    selectedPreset.value = presets.value.some((p) => p.name === current) ? current : 'default';
   } catch (error) {
     console.error('Failed to get presets', error);
   }
@@ -317,7 +345,7 @@ async function addFiles() {
     if (!files) return;
     const paths = (Array.isArray(files) ? files : [files]).map((f) => (typeof f === 'string' ? f : (f as any).path));
     await processNewPaths(paths);
-  } catch (error) {
+  } catch {
     toast(t('add-files-failed'), 'error');
   } finally {
     isAddingFiles.value = false;
@@ -336,7 +364,7 @@ async function addFolder() {
     const validExtensions = ['.json', '.zip', '.pez'];
     const filteredFiles = files.filter((f) => validExtensions.includes(f.toLowerCase().slice(f.lastIndexOf('.'))));
     await processNewPaths(filteredFiles);
-  } catch (error) {
+  } catch {
     toast(t('add-folder-failed'), 'error');
   } finally {
     isAddingFolder.value = false;
@@ -376,6 +404,7 @@ async function addChart(path: string) {
 const clearListDialog = ref(false);
 
 function clearList() {
+  if (isRenderingQueue.value) return;
   clearListDialog.value = true;
 }
 function confirmClearList() {
@@ -385,18 +414,29 @@ function confirmClearList() {
 function clearDone() {
   charts.value = charts.value.filter((c) => c.status !== 'done');
 }
-function retryFailed() {
+async function retryFailed() {
+  // Parse failures have no `chartInfo`; flipping their status to pending would only
+  // make startRender throw "chart-info-missing". Re-parse those instead.
+  const unparsed = charts.value.filter((c) => (c.status === 'failed' || c.status === 'canceled') && !c.chartInfo);
+  for (const chart of unparsed) {
+    const index = charts.value.findIndex((c) => c.id === chart.id);
+    if (index >= 0) charts.value.splice(index, 1);
+    await addChart(chart.path);
+  }
   charts.value.forEach((c) => {
-    if (c.status === 'failed') c.status = 'pending';
+    if ((c.status === 'failed' || c.status === 'canceled') && c.chartInfo) {
+      c.status = 'pending';
+      c.error = undefined;
+    }
   });
 }
 function removeChart(id: string) {
   charts.value = charts.value.filter((c) => c.id !== id);
 }
 
-async function buildRenderParams() {
-  if (!(await invoke('test_ffmpeg'))) throw new Error(t('ffmpeg-not-found'));
-  let config = selectedPreset.value === 'default' ? defaultConfig.value : ((await invoke('get_presets')) as any)[selectedPreset.value];
+async function buildRenderParams(requireFfmpeg = true) {
+  if (requireFfmpeg && !(await invoke('test_ffmpeg'))) throw new Error(t('ffmpeg-not-found'));
+  let config = selectedPreset.value === 'default' ? defaultConfig.value : ((await invoke('get_presets')) as Record<string, RenderConfig>)[selectedPreset.value];
   if (!config) config = defaultConfig.value;
   if (!config.resolution) throw new Error('Resolution missing');
   return config;
@@ -407,47 +447,167 @@ async function saveConfig() {
   if (config) {
     saveDefaultConfig(config);
     configDialog.value = false;
+    await getPresets();
   }
 }
 
+// `post_render` only enqueues the task (the queue worker renders serially), so the
+// old code marked every chart done immediately. Poll the real task status instead.
+async function waitForRender(chart: BatchChart): Promise<{ status: 'done' | 'failed' | 'canceled' | 'stopped'; error?: string }> {
+  while (!disposed && isRenderingQueue.value) {
+    let tasks: Task[];
+    try {
+      tasks = await invoke<Task[]>('get_tasks');
+    } catch (e) {
+      console.error('Failed to poll batch task:', e);
+      await sleep(POLL_MS);
+      continue;
+    }
+    const task = tasks.find((item) => item.path === chart.path);
+    if (task) {
+      currentTaskId.value = task.id;
+      const status = task.status;
+      if (status.type === 'rendering') {
+        renderProgress.value = status.progress * 100;
+        renderMsg.value = `FPS: ${status.fps} | ${t('eta')}: ${moment.duration(status.estimate, 'seconds').humanize(true, { ss: 1 })}`;
+      } else if (status.type === 'pending' || status.type === 'loading' || status.type === 'mixing') {
+        renderProgress.value = 0;
+      } else if (status.type === 'done') {
+        renderProgress.value = 100;
+        return { status: 'done' };
+      } else if (status.type === 'failed') {
+        return { status: 'failed', error: status.error };
+      } else if (status.type === 'canceled') {
+        return { status: 'canceled' };
+      }
+    }
+    await sleep(POLL_MS);
+  }
+  return { status: 'stopped' };
+}
+
 async function startRender() {
-  const pendingCount = filteredCharts.value.filter((c) => c.selected && c.status === 'pending').length;
-  if (pendingCount === 0) return toast(t('no-charts-selected'), 'warning');
+  // Use the full selection, not `filteredCharts`: a search filter must not silently
+  // change which charts the queue renders.
+  const pendingCharts = charts.value.filter((c) => c.selected && c.status === 'pending');
+  if (pendingCharts.length === 0) return toast(t('no-charts-selected'), 'warning');
   try {
     const config = await buildRenderParams();
+    const outputPath = localStorage.getItem('outputPath') || null;
+    stopStatusSync();
     isRenderingQueue.value = true;
-    for (let i = 0; i < charts.value.length; i++) {
-      if (!isRenderingQueue.value) break;
-      const chart = charts.value[i];
-      if (!chart.selected || chart.status !== 'pending') continue;
+    let completed = 0;
+    for (const chart of pendingCharts) {
+      if (!isRenderingQueue.value || disposed) break;
       currentRenderingId.value = chart.id;
       chart.status = 'rendering';
+      chart.error = undefined;
       renderProgress.value = 0;
+      renderMsg.value = t('rendering');
       try {
         if (!chart.chartInfo) throw new Error(t('chart-info-missing'));
-        await invoke('post_render', { params: { path: chart.path, info: chart.chartInfo, config } });
-        chart.status = 'done';
+        await invoke('post_render', { params: { path: chart.path, info: chart.chartInfo, config }, outputPath });
+        const result = await waitForRender(chart);
+        if (result.status === 'done') {
+          chart.status = 'done';
+          completed++;
+        } else if (result.status === 'failed') {
+          chart.status = 'failed';
+          chart.error = result.error;
+          toastError(result.error);
+        } else if (result.status === 'canceled') {
+          chart.status = 'canceled';
+          break;
+        } else {
+          // 'stopped': stopRender() already set the status; on unmount leave it as
+          // 'rendering' so mount-time reconciliation can pick up the background task.
+          if (!disposed) chart.status = 'canceled';
+          break;
+        }
       } catch (error: any) {
         chart.status = 'failed';
-        chart.error = error.message || String(error);
+        chart.error = error?.message || String(error);
         toastError(error);
       }
     }
-    if (isRenderingQueue.value) toast(t('batch-completed', { count: pendingCount }), 'success');
+    if (isRenderingQueue.value && completed > 0) toast(t('batch-completed', { count: completed }), 'success');
   } catch (error) {
     toastError(error);
   } finally {
     isRenderingQueue.value = false;
     currentRenderingId.value = null;
+    currentTaskId.value = null;
     renderMsg.value = '';
     renderProgress.value = 0;
+    if (!disposed && charts.value.some((c) => c.status === 'rendering')) startStatusSync();
   }
 }
 
-function stopRender() {
+async function stopRender() {
+  if (!isRenderingQueue.value) return;
   isRenderingQueue.value = false;
+  const id = currentTaskId.value;
+  if (id !== null) {
+    try {
+      await invoke('cancel_task', { id });
+    } catch (e) {
+      console.error('Failed to cancel the running task:', e);
+    }
+  }
+  const chart = charts.value.find((c) => c.id === currentRenderingId.value);
+  if (chart && chart.status === 'rendering') chart.status = 'canceled';
   toast(t('batch-stopped'), 'info');
 }
+
+async function reconcileTasks() {
+  let tasks: Task[];
+  try {
+    tasks = await invoke<Task[]>('get_tasks');
+  } catch (e) {
+    console.error('Failed to reconcile batch tasks:', e);
+    return;
+  }
+  for (const chart of charts.value) {
+    const task = tasks.find((item) => item.path === chart.path);
+    if (!task) continue;
+    const status = task.status;
+    if (status.type === 'done') chart.status = 'done';
+    else if (status.type === 'failed') {
+      chart.status = 'failed';
+      chart.error = status.error;
+    } else if (status.type === 'canceled') chart.status = 'canceled';
+    else if (ACTIVE_STATUSES.includes(status.type)) {
+      chart.status = 'rendering';
+      currentRenderingId.value = chart.id;
+      currentTaskId.value = task.id;
+      if (status.type === 'rendering') {
+        renderProgress.value = status.progress * 100;
+        renderMsg.value = `FPS: ${status.fps} | ${t('eta')}: ${moment.duration(status.estimate, 'seconds').humanize(true, { ss: 1 })}`;
+      }
+    }
+  }
+}
+
+function stopStatusSync() {
+  if (statusSyncTimer) {
+    clearInterval(statusSyncTimer);
+    statusSyncTimer = null;
+  }
+}
+
+function startStatusSync() {
+  if (statusSyncTimer) return;
+  statusSyncTimer = setInterval(async () => {
+    await reconcileTasks();
+    if (!charts.value.some((c) => c.status === 'rendering')) stopStatusSync();
+  }, 1000);
+}
+
+onUnmounted(() => {
+  disposed = true;
+  isRenderingQueue.value = false;
+  stopStatusSync();
+});
 
 const filteredCharts = computed(() => {
   if (!searchQuery.value.trim()) return charts.value;
@@ -459,40 +619,27 @@ const selectedCount = computed(() => charts.value.filter((c) => c.selected).leng
 const allSelected = computed(() => charts.value.length > 0 && selectedCount.value === charts.value.length);
 const isIndeterminate = computed(() => selectedCount.value > 0 && selectedCount.value < charts.value.length);
 
+function statusChipColor(status: BatchChart['status']): string | undefined {
+  switch (status) {
+    case 'done':
+      return 'success';
+    case 'failed':
+      return 'error';
+    case 'rendering':
+      return 'warning';
+    case 'canceled':
+      return 'secondary';
+    default:
+      return undefined;
+  }
+}
+
 function toggleSelectAll() {
   const target = !allSelected.value;
   charts.value.forEach((chart) => {
     if (chart.status !== 'rendering') chart.selected = target;
   });
 }
-
-// Tauri's `listen` resolves asynchronously, so a component unmounted before it settles
-// must still release the handle — hence the `disposed` guard.
-let disposed = false;
-const unlistenFns: UnlistenFn[] = [];
-
-function track(pending: Promise<UnlistenFn>) {
-  pending.then((unlisten) => (disposed ? unlisten() : unlistenFns.push(unlisten))).catch((e) => console.error('Failed to register listener:', e));
-}
-
-onUnmounted(() => {
-  disposed = true;
-  unlistenFns.forEach((unlisten) => unlisten());
-  unlistenFns.length = 0;
-});
-
-track(
-  listen('render-msg', (msg) => {
-    renderMsg.value = msg.payload as string;
-  }),
-);
-track(
-  listen('render-progress', (msg) => {
-    const p = msg.payload as { progress: number; fps: number; estimate: number };
-    renderMsg.value = `FPS: ${p.fps} | ${t('eta')}: ${moment.duration(p.estimate, 'seconds').humanize(true, { ss: 1 })}`;
-    renderProgress.value = p.progress * 100;
-  }),
-);
 
 function openEditDialog(id: string) {
   editingChartId.value = id;
@@ -546,22 +693,33 @@ function tryParseAspect(w?: string, h?: string) {
 }
 
 const STORAGE_KEY = 'batch_render_charts_v2';
-onMounted(() => {
-  getPresets();
+onMounted(async () => {
+  await getPresets();
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try {
-      charts.value = JSON.parse(saved).map((c: any) => ({ ...c, status: c.status === 'rendering' ? 'failed' : c.status }));
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        // A previous session may have been closed mid-render; reconciliation below
+        // restores the real state from the backend task list.
+        charts.value = parsed.map((c: any) => ({ ...c, status: c.status === 'rendering' ? 'pending' : c.status }));
+      }
     } catch (e) {
-      /* empty */
+      console.error('Failed to restore the batch list', e);
     }
   }
+  await reconcileTasks();
+  if (charts.value.some((c) => c.status === 'rendering')) startStatusSync();
 });
 
 watch(
   charts,
   (val) => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(val));
+    } catch (e) {
+      console.error('Failed to persist the batch list', e);
+    }
   },
   { deep: true },
 );
@@ -578,6 +736,17 @@ watch(
         </div>
 
         <div class="header-actions">
+          <v-select
+            v-model="selectedPreset"
+            :items="presets"
+            item-title="name"
+            item-value="name"
+            :label="t('select-preset')"
+            density="compact"
+            variant="outlined"
+            hide-details
+            :disabled="isRenderingQueue"
+            class="preset-select" />
           <button class="md3-btn md3-btn-tonal" :disabled="isAddingFiles" @click="addFiles">
             <v-icon icon="mdi-file-plus-outline" size="18" />
             <span>{{ t('add-files') }}</span>
@@ -606,13 +775,13 @@ watch(
         </button>
       </div>
       <div class="sel-right">
-        <button v-if="charts.some((c) => c.status === 'failed')" class="md3-btn md3-btn-text md3-btn-sm" @click="retryFailed">
+        <button v-if="charts.some((c) => c.status === 'failed' || c.status === 'canceled')" class="md3-btn md3-btn-text md3-btn-sm" @click="retryFailed">
           <v-icon icon="mdi-refresh" size="16" /><span>{{ t('retry-failed') }}</span>
         </button>
         <button v-if="charts.some((c) => c.status === 'done')" class="md3-btn md3-btn-text md3-btn-sm" @click="clearDone">
           <v-icon icon="mdi-check-all" size="16" /><span>{{ t('clear-done') }}</span>
         </button>
-        <button class="md3-btn md3-btn-text md3-btn-sm" @click="clearList" :disabled="charts.length === 0">
+        <button class="md3-btn md3-btn-text md3-btn-sm" @click="clearList" :disabled="charts.length === 0 || isRenderingQueue">
           <v-icon icon="mdi-delete-outline" size="16" /><span>{{ t('clear-list') }}</span>
         </button>
       </div>
@@ -668,12 +837,9 @@ watch(
               </div>
             </div>
 
-            <v-chip
-              :color="item.status === 'done' ? 'success' : item.status === 'failed' ? 'error' : item.status === 'rendering' ? 'warning' : 'default'"
-              :variant="item.status === 'pending' ? 'tonal' : 'flat'"
-              size="small"
-              >{{ t(item.status) }}</v-chip
-            >
+            <v-chip :color="statusChipColor(item.status)" :variant="item.status === 'pending' || item.status === 'canceled' ? 'tonal' : 'flat'" size="small">{{
+              t(item.status)
+            }}</v-chip>
 
             <div class="row-actions">
               <button class="icon-btn" :disabled="!item.chartInfo || item.status === 'rendering'" @click="openEditDialog(item.id)" :title="t('edit')">
@@ -778,9 +944,9 @@ watch(
           <v-form @submit.prevent>
             <div class="field-label-sm mb-1">{{ t('aspect') }}</div>
             <div class="d-flex align-center gap-2 mb-4">
-              <v-text-field type="number" placeholder="Original" v-model="bulkEditData.aspectWidth" hide-details variant="outlined" density="comfortable" />
+              <v-text-field type="number" :placeholder="t('original')" v-model="bulkEditData.aspectWidth" hide-details variant="outlined" density="comfortable" />
               <span>:</span>
-              <v-text-field type="number" placeholder="Original" v-model="bulkEditData.aspectHeight" hide-details variant="outlined" density="comfortable" />
+              <v-text-field type="number" :placeholder="t('original')" v-model="bulkEditData.aspectHeight" hide-details variant="outlined" density="comfortable" />
             </div>
             <div class="field-label-sm mb-1">{{ t('dim') }}</div>
             <v-slider
@@ -800,9 +966,9 @@ watch(
             <div class="d-flex align-center justify-space-between mt-4">
               <span class="field-label-sm">{{ t('hold_cover') }}</span>
               <v-btn-toggle v-model="bulkEditData.holdCover" color="primary" variant="outlined" density="compact">
-                <v-btn :value="null">Keep</v-btn>
-                <v-btn :value="true">On</v-btn>
-                <v-btn :value="false">Off</v-btn>
+                <v-btn :value="null">{{ t('keep') }}</v-btn>
+                <v-btn :value="true">{{ t('on') }}</v-btn>
+                <v-btn :value="false">{{ t('off') }}</v-btn>
               </v-btn-toggle>
             </div>
           </v-form>
@@ -945,6 +1111,12 @@ watch(
   display: flex;
   gap: 8px;
   margin-left: auto;
+  align-items: center;
+}
+
+.preset-select {
+  min-width: 160px;
+  max-width: 200px;
 }
 
 /* ===== Selection Bar ===== */
