@@ -38,7 +38,6 @@ prpr = { git = "https://github.com/CMDBookDevelope/Phi-TK-render-lib", package =
 
 # prpr = { path = "../../phira/prpr" }
 
-sasa = { git = "https://github.com/Winamin/sasa" }
 #sasa = {path = "/home/link/sasa"}
 serde_yaml = "0.9"
 tokio = { version = "1.36.0", features = ["process", "rt-multi-thread", "fs", "full"] }
@@ -77,3 +76,13 @@ opt-level = 3
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55.0"
+
+# `sasa` uses oboe on Android instead of cpal. Keep this in sync with prpr's own
+# target split (Phi-TK-render-lib/prpr/Cargo.toml): if the app pulled sasa with the
+# default cpal feature on Android, cpal's oboe 0.4 and sasa's oboe 0.5 would both be
+# linked into the .so and the linker would reject the duplicate C++ symbols.
+[target.'cfg(target_os = "android")'.dependencies]
+sasa = { git = "https://github.com/Winamin/sasa", default-features = false, features = ["oboe"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+sasa = { git = "https://github.com/Winamin/sasa" }

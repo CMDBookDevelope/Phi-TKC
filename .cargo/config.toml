@@ -7,6 +7,10 @@
 # final binary fails with undefined symbols. Unreferenced frameworks are dropped by the
 # linker, so this is safe even if a given build does not need all of them.
 #
+# The same static FFmpeg also enables the Matroska demuxer, whose objects reference
+# BZ2_bzDecompress* (libbz2).  macOS and iOS both ship libbz2 in the SDK, but it still
+# has to be requested explicitly (`-lbz2`).
+#
 # Note: cargo discovers config files by walking up from its working directory, so a
 # file here applies whether cargo is invoked from the repo root or from src-tauri/.
 
@@ -20,6 +24,7 @@ rustflags = [
   "-Clink-arg=CoreVideo",
   "-Clink-arg=-framework",
   "-Clink-arg=VideoToolbox",
+  "-Clink-arg=-lbz2",
 ]
 
 [target.aarch64-apple-ios]
@@ -32,4 +37,5 @@ rustflags = [
   "-Clink-arg=CoreVideo",
   "-Clink-arg=-framework",
   "-Clink-arg=VideoToolbox",
+  "-Clink-arg=-lbz2",
 ]
