@@ -214,4 +214,7 @@ jobs:
             Rendering is headless: the CLI (`Phi-TKC -i chart.pez -o out.mp4`) and the
             bundled HTTP/WebSocket server never open a window, while the GUI drives the
             same Vulkan pipeline for previews.
-          files: dist/*
+          # Recursive: artifact archives keep the directory layout below the
+          # glob root (the APK lands in apk/universal/release/), so `dist/*`
+          # would silently skip it.
+          files: dist/**
