@@ -40,6 +40,9 @@
       "deb": {
         "depends": []
       }
+    },
+    "iOS": {
+      "template": "src-tauri/ios-project.yml"
     }
   },
   "productName": "Phi-TKC",
