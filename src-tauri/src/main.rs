@@ -27,40 +27,19 @@ fn build_conf() -> macroquad::window::Conf {
 
 /// Flags that mean "the user wanted the CLI". `--help`/`--version` are included so they
 /// are not swallowed by the GUI fallback (previously `Phi-TKC --help` opened the GUI).
-const CLI_FLAGS: &[&str] = &[
-    "-i",
-    "--input",
-    "-o",
-    "--output",
-    "-r",
-    "--resolution",
-    "-c",
-    "--crf",
-    "--fps",
-    "-d",
-    "--dark",
-    "-l",
-    "--load",
-    "--finish",
-    "-a",
-    "--assets",
-    "-h",
-    "--help",
-    "-V",
-    "--version",
-];
-
 fn has_cli_intent() -> bool {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // The GUI process spawns itself with these internal subcommands; they are not CLI.
-    if matches!(args.first().map(String::as_str), Some("render") | Some("preview")) {
+    if matches!(
+        args.first().map(String::as_str),
+        Some("render") | Some("preview") | Some("server")
+    ) {
         return false;
     }
-    args.iter().any(|arg| {
-        CLI_FLAGS
-            .iter()
-            .any(|flag| arg == flag || arg.strip_prefix(flag).is_some_and(|rest| rest.starts_with('=')))
-    })
+    // Any `-`/`--` flag means the user wanted the CLI. macOS Finder passes
+    // `-psn_...` when opening the .app, which must not be mistaken for a flag.
+    args.iter()
+        .any(|arg| arg.starts_with('-') && !arg.starts_with("-psn_"))
 }
 
 fn main() {
