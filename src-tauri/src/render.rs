@@ -405,6 +405,27 @@ mod hw_detect {
     }
 }
 
+/// 移动端没有可以探测的外部编码器（也不允许 spawn 外部进程），
+/// 一律当作「无硬件加速」，让编码器选择回退到软件路径。
+#[cfg(mobile)]
+mod hw_detect {
+    pub fn detect_nvidia() -> bool {
+        false
+    }
+
+    pub fn detect_intel_qsv() -> bool {
+        false
+    }
+
+    pub fn detect_amd() -> bool {
+        false
+    }
+
+    pub fn detect_vulkan() -> bool {
+        false
+    }
+}
+
 pub async fn build_player(config: &RenderConfig) -> Result<BasicPlayer> {
     Ok(BasicPlayer {
         avatar: if let Some(path) = &config.player_avatar {
