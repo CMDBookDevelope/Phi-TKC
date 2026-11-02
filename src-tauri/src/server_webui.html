@@ -4,275 +4,651 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#101014" />
-<title>Phi-TKC 渲染</title>
+<title>Phi-TKC</title>
+<!-- The real desktop stylesheet: the glass classes, colour variables, scrollbar and
+     page-transition rules below all come from src/assets/main.css, so the WebUI shares
+     the PC UI's look instead of re-implementing it. -->
+<link rel="stylesheet" href="/webui.css" />
 <style>
-  :root {
-    --bg: #101014;
-    --card: rgba(255, 255, 255, 0.06);
-    --stroke: rgba(255, 255, 255, 0.12);
-    --text: #f2f2f7;
-    --muted: #9aa0ae;
-    --accent: #8ab4ff;
-    --ok: #6ee7a8;
-    --bad: #ff8f8f;
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  /* Layout only. Every visual (glass, colours, shadows, radii) is from main.css. */
+  html, body { overflow: auto; }
   body {
-    margin: 0;
     min-height: 100dvh;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
-    color: var(--text);
     background:
-      radial-gradient(1200px 600px at 10% -10%, #2a2f52 0%, transparent 60%),
-      radial-gradient(900px 500px at 100% 0%, #3b2340 0%, transparent 55%),
-      var(--bg);
+      radial-gradient(1200px 700px at 8% -12%, rgba(var(--main-color-rgb), .20) 0%, transparent 60%),
+      radial-gradient(900px 600px at 105% -5%, rgba(var(--sub-color-rgb), .18) 0%, transparent 55%),
+      var(--bg-color);
+    color: var(--main-color);
   }
-  .wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; }
-  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
-  h1 { font-size: 1.15rem; margin: 0; letter-spacing: .02em; }
-  .pill {
-    font-size: .72rem; color: var(--muted);
-    border: 1px solid var(--stroke); border-radius: 999px;
-    padding: 4px 10px; background: var(--card); white-space: nowrap;
+  .app { display: flex; gap: 18px; max-width: 1180px; margin: 0 auto; padding: 18px; min-height: 100dvh; }
+
+  /* ---- Left navigation: same items as the desktop drawer ---- */
+  .rail {
+    width: 188px; flex: none; display: flex; flex-direction: column; gap: 6px;
+    padding: 14px 10px; border-radius: 22px; align-self: flex-start; position: sticky; top: 18px;
   }
-  .pill b { color: var(--ok); font-weight: 600; }
-  .card {
-    background: var(--card); border: 1px solid var(--stroke);
-    border-radius: 18px; padding: 16px; margin-bottom: 14px;
-    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  .brand { display: flex; align-items: center; gap: 9px; padding: 6px 8px 14px; }
+  .brand img { width: 30px; height: 30px; border-radius: 9px; }
+  .brand b { font-size: .98rem; letter-spacing: .03em; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 10px 12px; border: 0; border-radius: 13px; cursor: pointer;
+    background: transparent; color: inherit; font: inherit; font-size: .9rem;
+    text-align: left; transition: background .18s, color .18s;
   }
-  .card h2 { font-size: .82rem; color: var(--muted); font-weight: 600; margin: 0 0 12px; letter-spacing: .08em; text-transform: uppercase; }
+  .nav-item .ico { width: 18px; text-align: center; opacity: .85; }
+  .nav-item:hover { background: rgba(var(--main-color-rgb), .10); }
+  .nav-item.active {
+    background: rgba(var(--main-color-rgb), .18);
+    box-shadow: inset 0 0 0 1px rgba(var(--main-color-rgb), .35);
+  }
+  .rail-foot { margin-top: auto; padding: 10px 8px 4px; font-size: .72rem; opacity: .7; line-height: 1.6; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #888; margin-right: 5px; }
+  .dot.ok { background: #6ee7a8; box-shadow: 0 0 8px rgba(110,231,168,.9); }
+  .dot.bad { background: #ff8f8f; }
+
+  /* ---- Content ---- */
+  .content { flex: 1; min-width: 0; padding-bottom: 40px; }
+  .view { display: none; animation: pageEnter .35s ease both; }
+  .view.active { display: block; }
+  @keyframes pageEnter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+  .page-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 4px 4px 14px; }
+  .page-head h1 { font-size: 1.25rem; letter-spacing: .04em; margin: 0; }
+  .page-head .sub { font-size: .74rem; opacity: .65; }
+
+  .card { border-radius: 20px; padding: 18px; margin-bottom: 14px; }
+  .card h2 {
+    margin: 0 0 14px; font-size: .78rem; font-weight: 600; letter-spacing: .1em;
+    text-transform: uppercase; opacity: .68; color: var(--main-color);
+  }
+
+  /* ---- Drop zone ---- */
   .drop {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 6px; min-height: 112px; border-radius: 14px; cursor: pointer;
-    border: 1px dashed rgba(255,255,255,.22); background: rgba(255,255,255,.03);
-    text-align: center; padding: 14px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    min-height: 116px; padding: 16px; border-radius: 16px; cursor: pointer; text-align: center;
+    border: 1px dashed rgba(var(--main-color-rgb), .35);
+    background: rgba(var(--main-color-rgb), .05);
+    transition: background .18s, border-color .18s;
   }
-  .drop:active, .drop:hover { background: rgba(255,255,255,.07); }
-  .drop strong { font-size: .95rem; font-weight: 600; }
-  .drop span { font-size: .76rem; color: var(--muted); word-break: break-all; }
+  .drop:hover, .drop.over { background: rgba(var(--main-color-rgb), .12); border-color: rgba(var(--main-color-rgb), .8); }
+  .drop strong { font-size: .96rem; }
+  .drop span { font-size: .74rem; opacity: .66; word-break: break-all; }
   input[type=file] { display: none; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-  label.field { display: flex; flex-direction: column; gap: 5px; font-size: .72rem; color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+  .field { display: flex; flex-direction: column; gap: 6px; font-size: .72rem; opacity: .9; }
+  .field > span { opacity: .7; }
   select, input[type=number] {
-    width: 100%; padding: 10px 12px; border-radius: 11px; color: var(--text);
-    background: rgba(0,0,0,.28); border: 1px solid var(--stroke);
-    font-size: .92rem; appearance: none;
+    width: 100%; padding: 10px 12px; border-radius: 11px; color: inherit; font: inherit; font-size: .9rem;
+    background: rgba(0,0,0,.25); border: 1px solid rgba(var(--main-color-rgb), .22);
+    outline: none; appearance: none;
   }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 2px; font-size: .9rem; }
-  .row + .row { border-top: 1px solid rgba(255,255,255,.06); }
+  select:focus, input[type=number]:focus { border-color: rgba(var(--main-color-rgb), .8); }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px; font-size: .9rem; }
+  .row + .row { border-top: 1px solid rgba(var(--main-color-rgb), .10); }
   .switch { position: relative; width: 44px; height: 26px; flex: none; }
-  .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; }
+  .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; }
   .switch i { position: absolute; inset: 0; border-radius: 999px; background: rgba(255,255,255,.14); transition: background .18s; }
   .switch i::after {
-    content: ""; position: absolute; width: 20px; height: 20px; border-radius: 50%;
-    background: #fff; top: 3px; left: 3px; transition: transform .18s;
+    content: ""; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: #fff;
+    top: 3px; left: 3px; transition: transform .18s;
   }
-  .switch input:checked + i { background: var(--accent); }
+  .switch input:checked + i { background: rgba(var(--main-color-rgb), .95); }
   .switch input:checked + i::after { transform: translateX(18px); }
-  button {
-    width: 100%; padding: 14px; border-radius: 14px; border: 0; cursor: pointer;
-    font-size: .98rem; font-weight: 600; color: #10131a;
-    background: linear-gradient(180deg, #a9c6ff, #7ea8ff);
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 12px 22px; border-radius: 13px; border: 1px solid rgba(var(--main-color-rgb), .5);
+    background: rgba(var(--main-color-rgb), .85); color: #10131a; font: inherit; font-weight: 600;
+    font-size: .92rem; cursor: pointer; transition: filter .18s, transform .12s;
   }
-  button:disabled { opacity: .45; }
-  .bar { height: 8px; border-radius: 999px; background: rgba(255,255,255,.1); overflow: hidden; margin: 10px 0 8px; }
-  .bar > div { height: 100%; width: 0%; background: linear-gradient(90deg, #7ea8ff, #b18cff); transition: width .25s; }
-  .meta { display: flex; justify-content: space-between; font-size: .76rem; color: var(--muted); }
-  .job { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
-  .job + .job { border-top: 1px solid rgba(255,255,255,.07); }
-  .job-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.ghost { background: transparent; color: inherit; border-color: rgba(var(--main-color-rgb), .4); }
+
+  .actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+  .hint { font-size: .72rem; opacity: .6; line-height: 1.6; }
+
+  /* ---- Jobs ---- */
+  .bar { height: 7px; border-radius: 999px; background: rgba(255,255,255,.10); overflow: hidden; margin: 9px 0 7px; }
+  .bar > div { height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, rgba(var(--main-color-rgb),1), rgba(var(--sub-color-rgb),1)); transition: width .3s; }
+  .job { padding: 12px 0; display: flex; flex-direction: column; gap: 6px; }
+  .job + .job { border-top: 1px solid rgba(var(--main-color-rgb), .10); }
+  .job-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
   .job-name { font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .state { font-size: .72rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--stroke); color: var(--muted); flex: none; }
-  .state.done { color: var(--ok); border-color: rgba(110,231,168,.4); }
-  .state.failed, .state.canceled { color: var(--bad); border-color: rgba(255,143,143,.4); }
-  .actions { display: flex; gap: 16px; margin-top: 6px; }
-  .link { color: var(--accent); font-size: .82rem; text-decoration: none; }
-  .err { color: var(--bad); font-size: .78rem; word-break: break-word; }
-  .hint { color: var(--muted); font-size: .72rem; line-height: 1.5; margin-top: 10px; }
+  .state { font-size: .7rem; padding: 2px 9px; border-radius: 999px; border: 1px solid rgba(var(--main-color-rgb), .35); flex: none; opacity: .85; }
+  .state.done { color: #6ee7a8; border-color: rgba(110,231,168,.45); }
+  .state.failed, .state.canceled { color: #ff9c9c; border-color: rgba(255,143,143,.45); }
+  .meta { display: flex; justify-content: space-between; font-size: .72rem; opacity: .62; }
+  .job-actions { display: flex; gap: 16px; margin-top: 2px; }
+  .link { color: var(--main-color); font-size: .8rem; text-decoration: none; cursor: pointer; opacity: .9; }
+  .link:hover { text-decoration: underline; }
+  .err { color: #ff9c9c; font-size: .74rem; word-break: break-word; white-space: pre-wrap; }
 
-  /* ---- Desktop: wider canvas, four controls per row, denser job list ---- */
-  body.is-desktop .wrap { max-width: 960px; padding: 28px 24px 56px; }
-  body.is-desktop h1 { font-size: 1.3rem; }
-  body.is-desktop .grid { grid-template-columns: repeat(4, 1fr); }
-  body.is-desktop .drop { min-height: 96px; }
-  body.is-desktop .card { padding: 20px; }
-  body.is-desktop button { max-width: 260px; }
-  body.is-desktop .actions { gap: 22px; }
+  /* ---- Settings: colour cards (mirrors Setting.vue) ---- */
+  .colors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .color-card { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 14px; }
+  .color-dot {
+    width: 38px; height: 38px; flex: none; border-radius: 50%; position: relative; overflow: hidden;
+    border: 2px solid rgba(255,255,255,.7); box-shadow: 0 4px 14px rgba(0,0,0,.35);
+  }
+  .color-dot input { position: absolute; inset: -8px; width: 200%; height: 200%; border: 0; padding: 0; cursor: pointer; background: none; }
+  .color-meta { min-width: 0; }
+  .color-meta b { display: block; font-size: .82rem; }
+  .color-meta code { font-size: .72rem; opacity: .7; }
 
-  /* ---- Mobile: one column, larger touch targets, safe-area padding ---- */
-  body.is-mobile .wrap { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
-  body.is-mobile button { padding: 16px; font-size: 1rem; }
-  body.is-mobile select, body.is-mobile input[type=number] { padding: 12px; font-size: 1rem; }
+  /* ---- About (mirrors AboutView.vue) ---- */
+  .about { position: relative; min-height: 420px; border-radius: 22px; overflow: hidden; padding: 26px; }
+  .snow-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .about-content { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  .app-header { display: flex; align-items: center; gap: 14px; }
+  .app-logo-img { width: 84px; height: 84px; border-radius: 22px; object-fit: cover; }
+  .version-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: .74rem; }
+  .info-cards { display: flex; flex-direction: column; gap: 12px; width: min(520px, 100%); }
+  .info-card { border-radius: 18px; padding: 14px 16px; cursor: pointer; }
+  .card-content { display: flex; align-items: center; gap: 14px; }
+  .card-icon { width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; font-size: 20px; flex: none; }
+  .card-text { flex: 1; min-width: 0; }
+  .card-title { margin: 0; font-size: .92rem; }
+  .card-subtitle { margin: 2px 0 0; font-size: .74rem; opacity: .66; }
+  .card-link { opacity: .6; font-size: .95rem; }
+  .about-footer { width: min(520px, 100%); border-radius: 16px; padding: 12px; text-align: center; }
+  .about-footer p { margin: 0; font-size: .74rem; opacity: .7; }
+
+  /* ---- Mobile: top bar + single column (same idea as the PC UI drawer) ---- */
+  body.is-mobile .app { flex-direction: column; padding: 10px; gap: 10px; }
+  body.is-mobile .rail {
+    width: 100%; position: static; flex-direction: row; align-items: center; overflow-x: auto;
+    padding: 8px; border-radius: 18px; gap: 4px;
+  }
+  body.is-mobile .brand { padding: 4px 10px 4px 4px; }
+  body.is-mobile .brand b { display: none; }
+  body.is-mobile .rail-foot { display: none; }
+  body.is-mobile .nav-item { flex: none; width: auto; padding: 9px 12px; font-size: .84rem; }
+  body.is-mobile .grid { grid-template-columns: 1fr 1fr; }
+  body.is-mobile .colors { grid-template-columns: 1fr; }
+  body.is-mobile .btn { width: 100%; padding: 14px; }
+  body.is-mobile .card { padding: 15px; }
+  body.is-mobile .content { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>Phi-TKC 渲染</h1>
-    <div class="pill" id="status">连接中…</div>
-  </header>
-
-  <form class="card" id="form">
-    <h2>提交渲染</h2>
-    <label class="drop" for="file">
-      <strong>选择谱面压缩包</strong>
-      <span id="fileLabel">.pez / .zip / .pgr / .rpe</span>
-    </label>
-    <input id="file" type="file" accept=".pez,.zip,.pgr,.rpe,.json" />
-
-    <div class="grid">
-      <label class="field">分辨率
-        <select id="resolution">
-          <option>1920x1080</option>
-          <option selected>1920x1440</option>
-          <option>2560x1920</option>
-          <option>3840x2560</option>
-          <option>1280x960</option>
-        </select>
-      </label>
-      <label class="field">帧率
-        <select id="fps">
-          <option>30</option>
-          <option selected>60</option>
-          <option>120</option>
-        </select>
-      </label>
-      <label class="field">CRF / QP
-        <input id="crf" type="number" min="1" max="51" value="23" />
-      </label>
-      <label class="field">封装
-        <select id="video">
-          <option value="mp4" selected>MP4</option>
-          <option value="mov">MOV</option>
-        </select>
-      </label>
+<div class="app">
+  <aside class="rail glass fluent-glass">
+    <div class="brand">
+      <img src="/phi-tklogo.png" alt="Phi-TKC" />
+      <b>Phi-TKC</b>
     </div>
-
-    <div class="row"><span>跳过加载动画</span>
-      <label class="switch"><input id="load" type="checkbox" checked /><i></i></label>
+    <button class="nav-item active" data-view="render"><span class="ico">▶</span>渲染</button>
+    <button class="nav-item" data-view="tasks"><span class="ico">☰</span>任务</button>
+    <button class="nav-item" data-view="settings"><span class="ico">⚙</span>设置</button>
+    <button class="nav-item" data-view="about"><span class="ico">ⓘ</span>关于</button>
+    <div class="rail-foot">
+      <div><span class="dot" id="connDot"></span><span id="connText">连接中…</span></div>
+      <div id="railVersion"></div>
     </div>
-    <div class="row"><span>结算画面</span>
-      <label class="switch"><input id="finish" type="checkbox" /><i></i></label>
-    </div>
+  </aside>
 
-    <div style="height:12px"></div>
-    <button id="submit" type="submit">开始渲染</button>
-    <p class="hint" id="formHint">任务在电脑端排队渲染，完成后可直接下载。</p>
-  </form>
+  <main class="content">
+    <!-- ================= Render ================= -->
+    <section class="view active" id="view-render">
+      <div class="page-head">
+        <h1>渲染</h1>
+        <span class="sub">提交一个谱面，服务端会立刻起一个渲染进程</span>
+      </div>
 
-  <div class="card">
-    <h2>任务</h2>
-    <div id="jobs"><p class="hint">暂无任务</p></div>
-  </div>
+      <form class="card glass fluent-glass" id="form">
+        <h2>谱面</h2>
+        <label class="drop" id="drop" for="file">
+          <strong>选择谱面压缩包</strong>
+          <span id="fileLabel">.pez / .zip / .pgr / .rpe</span>
+        </label>
+        <input type="file" id="file" name="file" accept=".pez,.zip,.pgr,.rpe" />
+
+        <div class="grid">
+          <label class="field"><span>分辨率</span>
+            <select name="resolution">
+              <option>1920x1440</option><option>1920x1080</option><option>1280x960</option>
+              <option>2560x1920</option><option>3840x2560</option><option>2844x2133</option>
+              <option>2388x1668</option><option>1600x1080</option><option>7680x5760</option>
+            </select>
+          </label>
+          <label class="field"><span>帧率</span><input type="number" name="fps" value="60" min="1" max="240" /></label>
+          <label class="field"><span>CRF</span><input type="number" name="crf" value="20" min="1" max="51" /></label>
+          <label class="field"><span>容器</span>
+            <select name="format"><option value="mp4">mp4</option><option value="mov">mov</option></select>
+          </label>
+        </div>
+
+        <h2>画面</h2>
+        <div class="grid">
+          <label class="field"><span>背景压暗 (0-100)</span><input type="number" name="dim" value="30" min="0" max="100" /></label>
+          <label class="field"><span>结算秒数</span><input type="number" name="ending" value="3" step="0.1" /></label>
+          <label class="field"><span>谱面拉伸</span><input type="number" name="chart-ratio" value="1.0" step="0.01" /></label>
+          <label class="field"><span>流速</span><input type="number" name="speed" value="1.0" step="0.05" /></label>
+          <label class="field"><span>音符缩放</span><input type="number" name="note-scale" value="1.0" step="0.05" /></label>
+          <label class="field"><span>MSAA</span>
+            <select name="sample-count"><option>4</option><option>1</option><option>2</option><option>8</option><option>16</option></select>
+          </label>
+          <label class="field"><span>玩家名</span><input type="text" name="name" placeholder="可留空" /></label>
+          <label class="field"><span>rks</span><input type="number" name="rks" value="6.16" step="0.01" /></label>
+        </div>
+        <div class="row"><span>显示结算画面</span><label class="switch"><input type="checkbox" name="result" /><i></i></label></div>
+        <div class="row"><span>显示加载动画</span><label class="switch"><input type="checkbox" name="load" /><i></i></label></div>
+        <div class="row"><span>谱面插画作背景</span><label class="switch"><input type="checkbox" name="background" /><i></i></label></div>
+        <div class="row"><span>水平镜像</span><label class="switch"><input type="checkbox" name="flid-x" /><i></i></label></div>
+        <div class="row"><span>FXAA</span><label class="switch"><input type="checkbox" name="fxaa" /><i></i></label></div>
+        <div class="row"><span>关闭粒子</span><label class="switch"><input type="checkbox" name="no-particle" /><i></i></label></div>
+        <div class="row"><span>关闭背景特效</span><label class="switch"><input type="checkbox" name="no-effect" /><i></i></label></div>
+        <div class="row"><span>关闭双押提示线</span><label class="switch"><input type="checkbox" name="no-double-hint" /><i></i></label></div>
+        <div class="row"><span>Aggressive</span><label class="switch"><input type="checkbox" name="aggressive" /><i></i></label></div>
+        <div class="row"><span>手序拆分</span><label class="switch"><input type="checkbox" name="hand-split" /><i></i></label></div>
+        <div class="row"><span>进度条</span><label class="switch"><input type="checkbox" name="bar" /><i></i></label></div>
+        <div class="row"><span>目标分数</span><label class="switch"><input type="checkbox" name="score-aim" /><i></i></label></div>
+        <div class="row"><span>调试信息</span><label class="switch"><input type="checkbox" name="chart-debug" /><i></i></label></div>
+
+        <h2>玩家信息与 UI</h2>
+        <div class="grid">
+          <label class="field"><span>Combo 文本</span><input type="text" name="combo" value="PHI-TK POWERED" /></label>
+          <label class="field"><span>水印</span><input type="text" name="watermark" placeholder="可留空" /></label>
+          <label class="field"><span>显示 UI（逗号分隔 / all / none）</span><input type="text" name="ui" placeholder="all" /></label>
+          <label class="field"><span>隐藏 UI（在显示之后应用）</span><input type="text" name="hide-ui" placeholder="pb,pause" /></label>
+        </div>
+        <div class="grid">
+          <label class="field"><span>头像图片</span><input type="file" name="avatar" accept="image/*" class="file-input" /></label>
+          <label class="field"><span>资源包 (.zip)</span><input type="file" name="respack" accept=".zip" class="file-input" /></label>
+        </div>
+
+        <h2>音频</h2>
+        <div class="grid">
+          <label class="field"><span>采样率</span><input type="number" name="target-audio" value="48000" step="1000" /></label>
+          <label class="field"><span>音频格式</span>
+            <select name="audio-format"><option>flac</option><option>aac</option><option>opus</option><option>mp3</option><option>wav</option></select>
+          </label>
+          <label class="field"><span>位深</span>
+            <select name="audio-bit"><option value="">默认</option><option>16</option><option>24</option><option>32</option></select>
+          </label>
+          <label class="field"><span>音频延迟帧</span><input type="number" name="audio-delay-frames" value="0" /></label>
+          <label class="field"><span>音乐音量</span><input type="number" name="volume-music" value="1.0" min="0" max="1" step="0.05" /></label>
+          <label class="field"><span>音效音量</span><input type="number" name="volume-sfx" value="1.0" min="0" max="1" step="0.05" /></label>
+        </div>
+
+        <h2>编码</h2>
+        <div class="grid">
+          <label class="field"><span>编码格式</span>
+            <select name="codec"><option>h264</option><option>hevc</option><option>av1</option></select>
+          </label>
+          <label class="field"><span>编码器</span>
+            <select name="encoder"><option>auto</option><option>nvenc</option><option>qsv</option><option>amf</option><option>vulkan</option><option>dx12</option><option>cpu</option></select>
+          </label>
+          <label class="field"><span>预设</span>
+            <select name="preset"><option>medium</option><option>veryfast</option><option>fast</option><option>slow</option><option>veryslow</option></select>
+          </label>
+          <label class="field"><span>码率控制</span>
+            <select name="bitrate-control"><option>CRF</option><option>CBR</option></select>
+          </label>
+          <label class="field"><span>显式码率（覆盖 CRF）</span><input type="text" name="bitrate" placeholder="8000k" /></label>
+        </div>
+        <div class="row"><span>关闭硬件加速</span><label class="switch"><input type="checkbox" name="no-hw-accel" /><i></i></label></div>
+        <div class="row"><span>FFmpeg 多线程</span><label class="switch"><input type="checkbox" name="ffmpeg-thread" /><i></i></label></div>
+
+        <div class="actions">
+          <button class="btn" type="submit" id="submitBtn">开始渲染</button>
+          <span class="hint" id="formHint">谱面与资源包会上传到临时目录，渲染结束即删除</span>
+        </div>
+      </form>
+    </section>
+
+    <!-- ================= Tasks ================= -->
+    <section class="view" id="view-tasks">
+      <div class="page-head">
+        <h1>任务</h1>
+        <span class="sub">实时进度 · 完成/失败都会留在这里</span>
+      </div>
+      <div class="card glass fluent-glass">
+        <h2>任务列表</h2>
+        <div id="jobs"><div class="hint">暂无任务</div></div>
+      </div>
+    </section>
+
+    <!-- ================= Settings ================= -->
+    <section class="view" id="view-settings">
+      <div class="page-head">
+        <h1>设置</h1>
+        <span class="sub">主题色与服务器信息</span>
+      </div>
+
+      <div class="card glass fluent-glass">
+        <h2>主题色</h2>
+        <div class="colors">
+          <label class="color-card clear-glass">
+            <span class="color-dot" id="mainDot"><input type="color" id="mainColor" /></span>
+            <span class="color-meta"><b>主色</b><code id="mainHex"></code></span>
+          </label>
+          <label class="color-card clear-glass">
+            <span class="color-dot" id="bgDot"><input type="color" id="bgColor" /></span>
+            <span class="color-meta"><b>背景色</b><code id="bgHex"></code></span>
+          </label>
+          <label class="color-card clear-glass">
+            <span class="color-dot" id="subDot"><input type="color" id="subColor" /></span>
+            <span class="color-meta"><b>辅助色</b><code id="subHex"></code></span>
+          </label>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="resetColors">恢复默认</button>
+          <span class="hint">与桌面端共用一套配色变量，刷新后仍会保留</span>
+        </div>
+      </div>
+
+      <div class="card glass fluent-glass">
+        <h2>服务器</h2>
+        <div class="row"><span>地址</span><code id="svHost">—</code></div>
+        <div class="row"><span>版本</span><code id="svVersion">—</code></div>
+        <div class="row"><span>资源目录</span><code id="svAssets" class="copyable">—</code></div>
+        <div class="row"><span>连接</span><code id="svConn">—</code></div>
+      </div>
+    </section>
+
+    <!-- ================= About ================= -->
+    <section class="view" id="view-about">
+      <div class="page-head">
+        <h1>关于</h1>
+        <span class="sub">Phi-TKC</span>
+      </div>
+      <div class="about glass fluent-glass" id="aboutBox">
+        <canvas class="snow-canvas" id="snow"></canvas>
+        <div class="about-content">
+          <div class="app-header">
+            <img class="app-logo-img glass fluent-glass" src="/phi-tklogo.png" alt="Phi-TKC" />
+            <div class="version-badge glass fluent-glass">🏷 <span id="aboutVersion">v—</span></div>
+          </div>
+          <div class="info-cards">
+            <a class="info-card glass fluent-glass" href="https://github.com/CMDBookDevelope/Phi-TKC" target="_blank" rel="noreferrer">
+              <div class="card-content">
+                <div class="static-glass card-icon">GH</div>
+                <div class="card-text"><h3 class="card-title">GitHub</h3><p class="card-subtitle">查看源代码</p></div>
+                <div class="card-link">↗</div>
+              </div>
+            </a>
+            <a class="info-card glass fluent-glass" href="https://github.com/CMDBookDevelope/Phi-TKC/blob/main/LICENSE" target="_blank" rel="noreferrer">
+              <div class="card-content">
+                <div class="static-glass card-icon">§</div>
+                <div class="card-text"><h3 class="card-title">许可证</h3><p class="card-subtitle">基于 GPLv3 协议授权</p></div>
+                <div class="card-link">↗</div>
+              </div>
+            </a>
+            <div class="info-card glass fluent-glass">
+              <div class="card-content">
+                <div class="static-glass card-icon">▣</div>
+                <div class="card-text"><h3 class="card-title">版本</h3><p class="card-subtitle" id="aboutVersion2">v—</p></div>
+              </div>
+            </div>
+          </div>
+          <div class="about-footer glass fluent-glass">
+            <p>© <span id="year"></span> Phi TKC. 保留所有权利。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
 
 <script>
 (() => {
+  'use strict';
+
   const $ = (id) => document.getElementById(id);
-  const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent)
-    || (navigator.maxTouchPoints > 1 && matchMedia('(pointer: coarse)').matches);
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || matchMedia('(pointer: coarse)').matches;
   document.body.classList.add(isMobile ? 'is-mobile' : 'is-desktop');
 
-  const stateText = { queued: '排队中', mixing: '混音中', running: '渲染中', done: '已完成', failed: '失败', canceled: '已取消' };
-  let pollTimer = null;
-
-  const fmtEta = (s) => {
-    if (!s || !isFinite(s) || s <= 0) return '—';
-    const m = Math.floor(s / 60), r = Math.round(s % 60);
-    return m > 0 ? `约 ${m} 分 ${r} 秒` : `约 ${r} 秒`;
+  // ============ Theme (identical variables + storage keys as src/colorStore.ts) ============
+  const DEFAULTS = { mainColor: '#39c8bb', bgColor: '#222222', subColor: '#938cbb' };
+  const hexToRgb = (hex) => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) return '57, 200, 187';
+    const n = parseInt(m[1], 16);
+    return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
   };
-  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function applyColors() {
+    const root = document.documentElement.style;
+    for (const [key, cssVar] of [['mainColor', '--main-color'], ['bgColor', '--bg-color'], ['subColor', '--sub-color']]) {
+      const value = localStorage.getItem(key) || DEFAULTS[key];
+      root.setProperty(cssVar, value);
+      root.setProperty(cssVar + '-rgb', hexToRgb(value));
+      const input = $(key);
+      if (input) input.value = value;
+      const hex = $(key.replace('Color', 'Hex'));
+      if (hex) hex.textContent = value;
+      const dot = $(key.replace('Color', 'Dot'));
+      if (dot) dot.style.background = value;
+    }
+  }
+  for (const key of Object.keys(DEFAULTS)) {
+    const input = $(key);
+    if (input) input.addEventListener('input', () => {
+      localStorage.setItem(key, input.value);
+      applyColors();
+    });
+  }
+  $('resetColors').addEventListener('click', () => {
+    for (const [key, value] of Object.entries(DEFAULTS)) localStorage.setItem(key, value);
+    applyColors();
+  });
+  applyColors();
+
+  // ============ Mouse-follow glass highlight (port of the v-glass directive) ============
+  const attachGlass = (el) => {
+    if (el.__glass) return;
+    el.__glass = true;
+    el.addEventListener('mousemove', (e) => {
+      const rect = el.getBoundingClientRect();
+      el.style.setProperty('--highlight-x', (e.clientX - rect.left) + 'px');
+      el.style.setProperty('--highlight-y', (e.clientY - rect.top) + 'px');
+      el.style.setProperty('--highlight-opacity', '1');
+    });
+    el.addEventListener('mouseleave', () => el.style.setProperty('--highlight-opacity', '0'));
+  };
+  document.querySelectorAll('.glass').forEach(attachGlass);
+
+  // ============ Navigation ============
+  const views = document.querySelectorAll('.view');
+  const navItems = document.querySelectorAll('.nav-item');
+  const showView = (name) => {
+    views.forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
+    navItems.forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+    if (name === 'about') startSnow();
+  };
+  navItems.forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+
+  // ============ Server status / jobs ============
+  let ws = null;
+  let lastJobs = [];
+  const setConn = (ok, text) => {
+    $('connDot').className = 'dot ' + (ok ? 'ok' : 'bad');
+    $('connText').textContent = text;
+    $('svConn').textContent = text;
+  };
 
   async function refreshStatus() {
     try {
-      const res = await fetch('api/status', { cache: 'no-store' });
-      const data = await res.json();
-      $('status').innerHTML = `<b>在线</b> · v${data.version}${data.busy ? ' · 忙碌' : ''}`;
-    } catch {
-      $('status').textContent = '离线';
+      const r = await fetch('/api/status', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const s = await r.json();
+      $('svHost').textContent = location.host;
+      $('svVersion').textContent = s.version || '—';
+      $('svAssets').textContent = s.assets || '—';
+      $('railVersion').textContent = 'v' + (s.version || '?');
+      $('aboutVersion').textContent = 'v' + (s.version || '?');
+      $('aboutVersion2').textContent = 'v' + (s.version || '?');
+      setConn(true, s.busy ? `渲染中 · ${s.jobs} 个任务` : '已连接');
+    } catch (e) {
+      setConn(false, '离线');
     }
   }
 
-  function jobEl(job) {
-    const pct = Math.round((job.progress || 0) * 100);
-    const active = job.status === 'running' || job.status === 'mixing';
-    const el = document.createElement('div');
-    el.className = 'job';
-    el.innerHTML = `
-      <div class="job-head">
-        <div class="job-name">${escapeHtml(job.name || job.id)}</div>
-        <div class="state ${job.status}">${stateText[job.status] || job.status}</div>
-      </div>
-      ${active ? `<div class="bar"><div style="width:${pct}%"></div></div>
-        <div class="meta"><span>${job.fps || 0} FPS</span><span>${pct}% · ${fmtEta(job.eta)}</span></div>` : ''}
-      ${job.error ? `<div class="err">${escapeHtml(job.error)}</div>` : ''}
-      <div class="actions">
-        ${job.status === 'done' && job.download ? `<a class="link" href="${job.download}">下载视频</a>` : ''}
-        ${['queued', 'mixing', 'running'].includes(job.status) ? `<a class="link" href="#" data-cancel="${job.id}">取消</a>` : ''}
-      </div>`;
-    return el;
+  const stateText = { queued: '排队', mixing: '混音', running: '渲染', done: '完成', failed: '失败', canceled: '取消' };
+  function renderJobs(jobs) {
+    lastJobs = jobs;
+    const box = $('jobs');
+    if (!jobs.length) { box.innerHTML = '<div class="hint">暂无任务</div>'; return; }
+    box.innerHTML = '';
+    for (const job of jobs) {
+      const el = document.createElement('div');
+      el.className = 'job';
+      const pct = Math.max(0, Math.min(100, Math.round((job.progress || 0) * 100)));
+      const meta = [];
+      if (job.fps) meta.push(job.fps + ' FPS');
+      if (job.eta) meta.push('剩 ' + Math.round(job.eta) + 's');
+      el.innerHTML = `
+        <div class="job-head">
+          <span class="job-name">${escapeHtml(job.name || job.id)}</span>
+          <span class="state ${job.status}">${stateText[job.status] || job.status}</span>
+        </div>
+        <div class="bar"><div style="width:${pct}%"></div></div>
+        <div class="meta"><span>${pct}%</span><span>${meta.join(' · ')}</span></div>
+        ${job.error ? `<div class="err">${escapeHtml(job.error)}</div>` : ''}
+        ${job.status === 'done' ? `<div class="job-actions"><a class="link" href="${job.download}" target="_blank" rel="noreferrer">下载结果</a></div>` : ''}
+        ${job.status === 'running' || job.status === 'mixing' || job.status === 'queued'
+            ? `<div class="job-actions"><span class="link" data-cancel="${job.id}">取消</span></div>` : ''}
+      `;
+      box.appendChild(el);
+    }
+    box.querySelectorAll('[data-cancel]').forEach((b) =>
+      b.addEventListener('click', () => fetch('/api/jobs/' + b.dataset.cancel + '/cancel', { method: 'POST' })));
+  }
+
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   async function refreshJobs() {
     try {
-      const res = await fetch('api/jobs', { cache: 'no-store' });
-      const jobs = await res.json();
-      const box = $('jobs');
-      box.innerHTML = '';
-      if (!jobs.length) { box.innerHTML = '<p class="hint">暂无任务</p>'; return; }
-      jobs.slice(0, 20).forEach((job) => box.appendChild(jobEl(job)));
-      const busy = jobs.some((job) => ['queued', 'mixing', 'running'].includes(job.status));
-      if (busy && !pollTimer) pollTimer = setInterval(refreshJobs, 1000);
-      if (!busy && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    } catch { /* keep the last list */ }
+      const r = await fetch('/api/jobs', { cache: 'no-store' });
+      if (r.ok) renderJobs(await r.json());
+    } catch (_) { /* the poller retries */ }
   }
 
-  $('jobs').addEventListener('click', async (ev) => {
-    const id = ev.target?.dataset?.cancel;
-    if (!id) return;
-    ev.preventDefault();
-    await fetch(`api/jobs/${id}/cancel`, { method: 'POST' });
-    refreshJobs();
-  });
-
-  $('file').addEventListener('change', () => {
-    const f = $('file').files[0];
-    $('fileLabel').textContent = f ? `${f.name} · ${(f.size / 1048576).toFixed(1)} MB` : '.pez / .zip / .pgr / .rpe';
-  });
-
-  $('form').addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    const file = $('file').files[0];
-    if (!file) { $('formHint').textContent = '请先选择谱面文件'; return; }
-    const body = new FormData();
-    body.append('file', file);
-    body.append('resolution', $('resolution').value);
-    body.append('fps', $('fps').value);
-    body.append('crf', $('crf').value);
-    body.append('video', $('video').value);
-    body.append('load', $('load').checked ? 'true' : 'false');
-    body.append('finish', $('finish').checked ? 'true' : 'false');
-    $('submit').disabled = true;
-    $('formHint').textContent = '上传中…';
+  function connectWs() {
+    if (ws && ws.readyState <= 1) return;
     try {
-      const res = await fetch('api/render', { method: 'POST', body });
-      if (!res.ok) throw new Error(await res.text());
-      $('formHint').textContent = '已提交，正在排队…';
-      $('file').value = '';
-      $('fileLabel').textContent = '.pez / .zip / .pgr / .rpe';
-      refreshJobs();
-    } catch (e) {
-      $('formHint').textContent = `提交失败：${e.message || e}`;
-    } finally {
-      $('submit').disabled = false;
+      ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/render');
+      ws.onopen = () => setConn(true, '已连接');
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'jobs') renderJobs(msg.jobs || []);
+        } catch (_) {}
+      };
+      ws.onclose = () => { setConn(false, '重连中…'); setTimeout(connectWs, 2000); };
+      ws.onerror = () => ws && ws.close();
+    } catch (_) { setTimeout(connectWs, 3000); }
+  }
+
+  // ============ File picker + submit ============
+  const fileInput = $('file');
+  const drop = $('drop');
+  const fileLabel = $('fileLabel');
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files[0];
+    fileLabel.textContent = f ? `${f.name} · ${(f.size / 1048576).toFixed(1)} MB` : '.pez / .zip / .pgr / .rpe';
+  });
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => {
+    if (e.dataTransfer.files.length) {
+      fileInput.files = e.dataTransfer.files;
+      fileInput.dispatchEvent(new Event('change'));
     }
   });
 
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!fileInput.files.length) { $('formHint').textContent = '请先选择谱面文件'; return; }
+
+    const body = new FormData($('form'));
+    // Empty <input type=file> still produce a zero-byte part; drop those so the
+    // server does not try to open an empty resource pack / avatar.
+    for (const key of ['avatar', 'respack']) {
+      const value = body.get(key);
+      if (value instanceof File && value.size === 0) body.delete(key);
+    }
+
+    const btn = $('submitBtn');
+    btn.disabled = true;
+    $('formHint').textContent = '上传中…';
+    try {
+      const r = await fetch('/api/render', { method: 'POST', body });
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      $('formHint').textContent = '已提交：' + data.id;
+      fileInput.value = '';
+      fileLabel.textContent = '.pez / .zip / .pgr / .rpe';
+      showView('tasks');
+      refreshJobs();
+    } catch (err) {
+      $('formHint').textContent = '提交失败：' + err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ============ About: snow canvas (port of the AboutView.vue effect) ============
+  let snowStarted = false;
+  let raf = null;
+  function startSnow() {
+    if (snowStarted) return;
+    snowStarted = true;
+    const canvas = $('snow');
+    const box = $('aboutBox');
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const particles = [];
+    const resize = () => {
+      const rect = box.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width = rect.width + 'px';
+      canvas.style.height = rect.height + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    const spawn = () => ({
+      x: Math.random() * box.clientWidth,
+      y: Math.random() * box.clientHeight,
+      r: Math.random() * 2.2 + 0.8,
+      vy: Math.random() * 0.5 + 0.25,
+      vx: (Math.random() - 0.5) * 0.35,
+      a: Math.random() * 0.55 + 0.25,
+    });
+    for (let i = 0; i < 90; i++) particles.push(spawn());
+    const tick = () => {
+      const w = box.clientWidth, h = box.clientHeight;
+      ctx.clearRect(0, 0, w, h);
+      const color = getComputedStyle(document.documentElement).getPropertyValue('--main-color-rgb').trim() || '57, 200, 187';
+      for (const p of particles) {
+        p.x += p.vx; p.y += p.vy;
+        if (p.y > h + 4 || p.x < -4 || p.x > w + 4) Object.assign(p, spawn(), { y: -4 });
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${color}, ${p.a})`;
+        ctx.fill();
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    window.addEventListener('resize', resize);
+  }
+  $('year').textContent = new Date().getFullYear();
+
+  // ============ Boot ============
   refreshStatus();
   refreshJobs();
   setInterval(refreshStatus, 5000);
-  setInterval(() => { if (!pollTimer) refreshJobs(); }, 5000);
+  setInterval(() => { if (!ws || ws.readyState !== 1) refreshJobs(); }, 3000);
+  connectWs();
 })();
 </script>
 </body>

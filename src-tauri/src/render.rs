@@ -3065,7 +3065,7 @@ pub struct CliArgs {
 /// `--ui` is an allow-list (unlisted elements are hidden; `all`/`none` are
 /// accepted), and `--hide-ui` is applied afterwards so a single element can be
 /// dropped from `--ui all`.
-fn apply_ui(config: &mut RenderConfig, ui: Option<&str>, hide: Option<&str>) {
+pub(crate) fn apply_ui(config: &mut RenderConfig, ui: Option<&str>, hide: Option<&str>) {
     if let Some(list) = ui {
         let list = list.trim();
         let all = list.eq_ignore_ascii_case("all");
@@ -3114,19 +3114,31 @@ fn apply_ui(config: &mut RenderConfig, ui: Option<&str>, hide: Option<&str>) {
 /// `/usr/lib/ptkc-assets`, but normal Tauri packages install resources under
 /// `/usr/lib/<product>/assets`, and a dev build keeps them in `src-tauri/assets`.
 fn resolve_cli_assets(arg: &str) -> PathBuf {
+    let is_assets_dir = |path: &Path| path.join("ending.mp3").is_file();
     let exe_assets = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("assets")));
-    let candidates = [
-        PathBuf::from(arg),
-        exe_assets.unwrap_or_default(),
+
+    // An explicit --assets wins as long as it is a real directory.
+    let explicit = PathBuf::from(arg);
+    if !arg.trim().is_empty() && explicit.is_dir() {
+        return explicit;
+    }
+
+    // Prefer the documented install location over whatever `assets` folder happens
+    // to sit next to the binary (a partial one there fails on `ending.mp3`).
+    let mut candidates = vec![
         PathBuf::from("/usr/lib/ptkc-assets"),
+        exe_assets.unwrap_or_default(),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"),
     ];
+    candidates.retain(|path| !path.as_os_str().is_empty());
     candidates
-        .into_iter()
-        .find(|path| !path.as_os_str().is_empty() && path.exists())
-        .unwrap_or_else(|| PathBuf::from(arg))
+        .iter()
+        .find(|path| is_assets_dir(path))
+        .or_else(|| candidates.iter().find(|path| path.is_dir()))
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("/usr/lib/ptkc-assets"))
 }
 
 /// CLI 渲染入口

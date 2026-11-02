@@ -42,6 +42,11 @@ use tower_http::cors::CorsLayer;
 use crate::render::{IPCEvent, RenderConfig, RenderParams};
 
 const WEBUI: &str = include_str!("server_webui.html");
+/// The desktop stylesheet is served as-is so the WebUI shares the PC UI's glass
+/// classes, colour variables, scrollbars and transitions instead of re-implementing
+/// them. `include_str!` keeps the single-file server binary self-contained.
+const WEBUI_CSS: &str = include_str!("../../src/assets/main.css");
+const LOGO_PNG: &[u8] = include_bytes!("../../public/phi-tklogo.png");
 const MAX_UPLOAD: usize = 256 * 1024 * 1024;
 
 #[derive(Parser, Debug, Clone)]
@@ -229,6 +234,8 @@ fn build_app(assets: PathBuf) -> Router {
         // `/` is the human-facing WebUI; `/render` is the WebSocket endpoint the
         // mobile app connects to. Keep them distinct — do not alias one to the other.
         .route("/", get(webui))
+        .route("/webui.css", get(webui_css))
+        .route("/phi-tklogo.png", get(logo))
         .route("/api/status", get(status))
         .route("/api/jobs", get(list_jobs))
         .route("/api/render", post(upload))
@@ -242,24 +249,52 @@ fn build_app(assets: PathBuf) -> Router {
         .with_state(state)
 }
 
+/// Resolve the renderer's asset folder.
+///
+/// The documented install location is `/usr/lib/ptkc-assets`; a `cargo build`
+/// binary keeps them next to the executable. An unrelated `assets` directory
+/// next to the binary (common on developer machines) must not win: a folder
+/// without `ending.mp3` makes every job die with "Couldn't load file
+/// /usr/bin/assets/ending.mp3", so candidates are validated first.
 fn resolve_assets(arg: &str) -> PathBuf {
+    let is_assets_dir = |path: &Path| path.join("ending.mp3").is_file();
     let exe_assets = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("assets")));
-    let candidates = [
-        PathBuf::from(arg),
-        exe_assets.unwrap_or_default(),
+
+    // An explicit --assets wins as long as it is a real directory.
+    let explicit = PathBuf::from(arg);
+    if !arg.trim().is_empty() && explicit.is_dir() {
+        return explicit;
+    }
+
+    let mut candidates = vec![
         PathBuf::from("/usr/lib/ptkc-assets"),
+        exe_assets.unwrap_or_default(),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"),
     ];
+    candidates.retain(|path| !path.as_os_str().is_empty());
     candidates
-        .into_iter()
-        .find(|path| path.exists())
-        .unwrap_or_else(|| PathBuf::from(arg))
+        .iter()
+        .find(|path| is_assets_dir(path))
+        .or_else(|| candidates.iter().find(|path| path.is_dir()))
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("/usr/lib/ptkc-assets"))
 }
 
 async fn webui() -> Html<&'static str> {
     Html(WEBUI)
+}
+
+async fn webui_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        WEBUI_CSS,
+    )
+}
+
+async fn logo() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/png")], LOGO_PNG)
 }
 
 /// Live job snapshots for the mobile app (`ws://<host>/render`).
@@ -298,6 +333,9 @@ async fn status(State(st): State<AppState>) -> Json<serde_json::Value> {
         "busy": running,
         "queued": queued,
         "jobs": jobs.len(),
+        // Surfaced in the WebUI settings page: the first thing to check when a
+        // render fails with "Couldn't load file .../ending.mp3".
+        "assets": st.assets.display().to_string(),
     }))
 }
 
@@ -361,6 +399,11 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
     }
 
     let mut input: Option<PathBuf> = None;
+    // The WebUI may also upload a resource pack and a player avatar. Everything the
+    // client sends lives in this job's temp directory and is removed as soon as the
+    // render finishes (see `cleanup_inputs`).
+    let mut respack: Option<PathBuf> = None;
+    let mut avatar: Option<PathBuf> = None;
     let mut fields: HashMap<String, String> = HashMap::new();
 
     loop {
@@ -370,44 +413,64 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
             Err(e) => return (StatusCode::BAD_REQUEST, format!("bad multipart: {e}")).into_response(),
         };
         let name = field.name().unwrap_or("").to_string();
-        if name == "file" {
-            let original = field.file_name().unwrap_or("chart.pez").to_string();
+        if matches!(name.as_str(), "file" | "respack" | "avatar") {
+            let original = field.file_name().unwrap_or("upload.bin").to_string();
             let ext = Path::new(&original)
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .filter(|ext| ext.chars().all(|c| c.is_ascii_alphanumeric()))
-                .unwrap_or("pez");
-            let path = dir.join(format!("input.{ext}"));
+                .unwrap_or("bin");
+            let file_name = match name.as_str() {
+                "file" => format!("input.{ext}"),
+                "respack" => "respack.zip".to_owned(),
+                _ => format!("avatar.{ext}"),
+            };
+            let path = dir.join(file_name);
             let data = match field.bytes().await {
                 Ok(data) => data,
                 Err(e) => return (StatusCode::BAD_REQUEST, format!("upload failed: {e}")).into_response(),
             };
             if data.len() > MAX_UPLOAD {
-                return (StatusCode::PAYLOAD_TOO_LARGE, "chart archive is too large").into_response();
+                return (StatusCode::PAYLOAD_TOO_LARGE, "upload is too large").into_response();
             }
             if let Err(e) = tokio::fs::write(&path, &data).await {
                 return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")).into_response();
             }
-            input = Some(path);
-        } else {
-            if let Ok(text) = field.text().await {
-                fields.insert(name, text);
+            match name.as_str() {
+                "file" => input = Some(path),
+                "respack" => respack = Some(path),
+                _ => avatar = Some(path),
             }
+        } else if let Ok(text) = field.text().await {
+            fields.insert(name, text);
         }
     }
 
     let Some(input) = input else {
+        let _ = tokio::fs::remove_dir_all(&dir).await;
         return (StatusCode::BAD_REQUEST, "missing `file` part").into_response();
     };
 
-    let mut fs = match fs::fs_from_file(&input) {
-        Ok(fs) => fs,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("cannot open chart: {e}")).into_response(),
+    let mut chart_fs = match fs::fs_from_file(&input) {
+        Ok(chart_fs) => chart_fs,
+        Err(e) => {
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+            return (StatusCode::BAD_REQUEST, format!("cannot open chart: {e}")).into_response();
+        }
     };
-    let info = match fs::load_info(fs.deref_mut()).await {
+    let mut info = match fs::load_info(chart_fs.deref_mut()).await {
         Ok(info) => info,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("cannot read chart info: {e}")).into_response(),
+        Err(e) => {
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+            return (StatusCode::BAD_REQUEST, format!("cannot read chart info: {e}")).into_response();
+        }
     };
+    // Same meaning as the CLI's `--dim`: only override when the client sends > 0.
+    if let Some(dim) = fields.get("dim").and_then(|v| v.parse::<f32>().ok()) {
+        if dim > 0.0 {
+            info.background_dim = dim.clamp(0.0, 100.0) / 100.0;
+        }
+    }
 
     let video = fields.get("video").map(|v| v == "mov").unwrap_or(false);
     let ext = if video { "mov" } else { "mp4" };
@@ -418,7 +481,7 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
         .collect();
     let output = dir.join(format!("{}.{ext}", if safe_name.is_empty() { "render" } else { &safe_name }));
 
-    let config = build_config(&fields);
+    let config = build_config(&fields, respack.as_deref(), avatar.as_deref());
     let job = Job {
         view: JobView {
             id: id.clone(),
@@ -449,38 +512,91 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "id": id }))).into_response()
 }
 
-fn build_config(fields: &HashMap<String, String>) -> RenderConfig {
+fn build_config(
+    fields: &HashMap<String, String>,
+    respack: Option<&Path>,
+    avatar: Option<&Path>,
+) -> RenderConfig {
+    let text = |key: &str| fields.get(key).map(String::as_str).filter(|v| !v.is_empty());
+    let flag = |key: &str, default: bool| match text(key) {
+        Some(v) => matches!(
+            v.to_ascii_lowercase().as_str(),
+            "true" | "1" | "on" | "yes"
+        ),
+        None => default,
+    };
+    let number = |key: &str| text(key).and_then(|v| v.parse::<f32>().ok());
+
+    // Defaults mirror `render_cli` so a job submitted from the WebUI renders exactly
+    // like `Phi-TKC -i ... -o ...` with the same flags.
     let mut config = RenderConfig::default();
-    if let Some(res) = fields.get("resolution") {
-        let parts: Vec<&str> = res.split('x').collect();
-        if parts.len() == 2 {
-            if let (Ok(w), Ok(h)) = (parts[0].parse(), parts[1].parse()) {
-                config.resolution = (w, h);
-            }
-        }
+    if let Some((w, h)) = text("resolution").and_then(|res| {
+        let (w, h) = res.split_once(['x', 'X'])?;
+        Some((w.parse().ok()?, h.parse().ok()?))
+    }) {
+        config.resolution = (w, h);
     }
-    if let Some(fps) = fields.get("fps").and_then(|v| v.parse().ok()) {
-        config.fps = fps;
+    if let Some(fps) = number("fps") {
+        config.fps = fps as u32;
     }
-    config.bitrate = fields
-        .get("crf")
-        .cloned()
-        .unwrap_or_else(|| "23".to_string());
-    config.video = fields.get("video").map(|v| v == "mov").unwrap_or(false);
-    config.disable_loading = !fields.get("load").map(|v| v == "true").unwrap_or(false);
-    if fields.get("finish").map(|v| v == "true").unwrap_or(false) {
-        config.ending_length = 3.0;
+    config.bitrate_control = text("bitrate-control")
+        .unwrap_or("CRF")
+        .to_ascii_uppercase();
+    config.bitrate = text("bitrate")
+        .map(str::to_owned)
+        .unwrap_or_else(|| text("crf").unwrap_or("20").to_owned());
+    config.hardware_accel = !flag("no-hw-accel", false);
+    config.video_codec = text("codec").unwrap_or("h264").to_owned();
+    config.encoder = text("encoder").unwrap_or("auto").to_owned();
+    config.ffmpeg_preset = text("preset").unwrap_or("medium").to_owned();
+    config.video = text("format")
+        .map(|format| format.eq_ignore_ascii_case("mov"))
+        .unwrap_or(false);
+    config.ffmpeg_thread = flag("ffmpeg-thread", false);
+
+    config.target_audio = number("target-audio").map(|v| v as u32).unwrap_or(48000);
+    config.audio_format = text("audio-format").unwrap_or("flac").to_owned();
+    config.audio_bit = number("audio-bit").map(|v| v as u32);
+    config.audio_delay_frames = number("audio-delay-frames").map(|v| v as i32).unwrap_or(0);
+
+    config.combo = text("combo").unwrap_or("PHI-TK POWERED").to_owned();
+    config.player_name = text("name").unwrap_or("").to_owned();
+    config.player_rks = number("rks").unwrap_or(6.16);
+    config.player_avatar = avatar.map(|path| path.display().to_string());
+    config.watermark = text("watermark").unwrap_or("").to_owned();
+    config.bar = flag("bar", false);
+    config.score_aim = flag("score-aim", false);
+    config.chart_debug = flag("chart-debug", false);
+    config.flid_x = flag("flid-x", false);
+    config.chart_ratio = number("chart-ratio").unwrap_or(1.0);
+    config.background = flag("background", false);
+    config.res_pack_path = respack.map(|path| path.display().to_string());
+
+    config.speed = number("speed").unwrap_or(1.0);
+    config.note_scale = number("note-scale").unwrap_or(1.0);
+    config.volume_music = number("volume-music").unwrap_or(1.0);
+    config.volume_sfx = number("volume-sfx").unwrap_or(1.0);
+    config.fxaa = flag("fxaa", false);
+    config.particle = !flag("no-particle", false);
+    config.disable_effect = flag("no-effect", false);
+    config.double_hint = !flag("no-double-hint", false);
+    config.aggressive = flag("aggressive", false);
+    config.hand_split = flag("hand-split", false);
+    config.sample_count = number("sample-count").map(|v| v as u32).unwrap_or(4);
+
+    config.disable_loading = !flag("load", false);
+    let result = flag("result", false);
+    config.ending_length = number("ending")
+        .map(|v| v as f64)
+        .unwrap_or(if result { 3.0 } else { -2.0 });
+    if result {
         config.ui_score = true;
         config.ui_combo = true;
         config.ui_pb = true;
         config.ui_level = true;
         config.ui_name = true;
     }
-    config.hardware_accel = true;
-    config.video_codec = "h264".to_string();
-    config.encoder = "auto".to_string();
-    config.target_audio = 48000;
-    config.audio_format = "flac".to_string();
+    crate::render::apply_ui(&mut config, text("ui"), text("hide-ui"));
     config
 }
 
@@ -522,7 +638,22 @@ async fn run_job(state: AppState, id: &str) {
             .await;
         }
     }
+    // The chart archive, resource pack and avatar are only inputs: drop them as
+    // soon as the renderer exits, keeping only the produced video for /download.
+    cleanup_inputs(&input, &output).await;
     eprintln!("[server] job {id} ({name}) finished");
+}
+
+/// Remove every file in the job directory except the rendered output.
+async fn cleanup_inputs(input: &Path, output: &Path) {
+    let Some(dir) = input.parent() else { return };
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else { return };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path.as_path() != output {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+    }
 }
 
 async fn set_status(state: &AppState, id: &str, f: impl FnOnce(&mut JobView)) {
