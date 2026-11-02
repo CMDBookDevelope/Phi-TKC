@@ -187,7 +187,8 @@ pub async fn run(args: ServerArgs) -> Result<()> {
         .with_context(|| format!("cannot bind {addr}"))?;
 
     println!("Phi-TKC render server listening on http://{addr}");
-    println!("  WebUI: http://{addr}/render");
+    println!("  WebUI: http://{addr}/");
+    println!("  WebSocket: ws://{addr}/render");
     if args.host == "127.0.0.1" || args.host == "localhost" {
         println!("  Only local connections are accepted; use `--host 0.0.0.0` for phones.");
     }
@@ -237,15 +238,16 @@ fn build_app(assets: PathBuf) -> Router {
     });
 
     Router::new()
+        // `/` is the human-facing WebUI; `/render` is the WebSocket endpoint the
+        // mobile app connects to. Keep them distinct — do not alias one to the other.
         .route("/", get(webui))
-        .route("/render", get(webui))
         .route("/api/status", get(status))
         .route("/api/jobs", get(list_jobs))
         .route("/api/render", post(upload))
         .route("/api/jobs/{id}", get(get_job))
         .route("/api/jobs/{id}/download", get(download))
         .route("/api/jobs/{id}/cancel", post(cancel))
-        .route("/api/ws", get(ws))
+        .route("/render", get(ws))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }
@@ -270,7 +272,7 @@ async fn webui() -> Html<&'static str> {
     Html(WEBUI)
 }
 
-/// Live job snapshots for the mobile app (`ws://<host>/api/ws`).
+/// Live job snapshots for the mobile app (`ws://<host>/render`).
 async fn ws(upgrade: WebSocketUpgrade, State(st): State<AppState>) -> impl IntoResponse {
     upgrade.on_upgrade(move |socket| ws_loop(socket, st.events.subscribe()))
 }

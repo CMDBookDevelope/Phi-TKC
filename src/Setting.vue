@@ -314,7 +314,7 @@ const serverError = ref('');
 const serverDisplayHost = computed(() =>
   serverHost.value === '0.0.0.0' || serverHost.value === '::' ? '127.0.0.1' : serverHost.value,
 );
-const serverUrl = computed(() => `http://${serverDisplayHost.value}:${serverPort.value}/render`);
+const serverUrl = computed(() => `http://${serverDisplayHost.value}:${serverPort.value}/`);
 
 async function refreshServer() {
   try {
@@ -391,7 +391,7 @@ const remoteBase = computed(() => {
   if (!/^https?:\/\//i.test(raw)) raw = `http://${raw}`;
   return raw;
 });
-const remoteUrl = computed(() => `${remoteBase.value}/render`);
+const remoteUrl = computed(() => `${remoteBase.value}/`);
 
 type RemoteJob = {
   id: string;
@@ -454,7 +454,8 @@ function startPolling() {
 function startWatching() {
   stopWatching();
   watching = true;
-  const wsUrl = `${remoteBase.value.replace(/^http/i, 'ws')}/api/ws`;
+  // `/render` is the WebSocket endpoint; `/` is the WebUI.
+  const wsUrl = `${remoteBase.value.replace(/^http/i, 'ws')}/render`;
   try {
     const ws = new WebSocket(wsUrl);
     socket = ws;
