@@ -60,8 +60,40 @@ pub async fn run_wrapped(f: impl Future<Output = Result<()>>) -> ! {
     std::process::exit(0);
 }
 
+/// Write a line to logcat (`adb logcat -s Phi-TKC`). On Android the process has no
+/// stderr anyone can read, so panics and early-startup failures would otherwise be
+/// invisible — this mirrors what Winamin/Phi-TK does on its `android` branch.
+#[cfg(target_os = "android")]
+fn android_log(message: &str) {
+    use std::ffi::CString;
+
+    extern "C" {
+        fn __android_log_write(
+            prio: i32,
+            tag: *const std::os::raw::c_char,
+            text: *const std::os::raw::c_char,
+        ) -> i32;
+    }
+
+    if let Ok(text) = CString::new(message) {
+        unsafe {
+            __android_log_write(4, b"Phi-TKC\0".as_ptr() as _, text.as_ptr());
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn install_panic_logger() {
+    std::panic::set_hook(Box::new(|info| {
+        android_log(&format!("PANIC {info}"));
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub async fn run() -> Result<()> {
+    #[cfg(target_os = "android")]
+    install_panic_logger();
+
     //dynamic cpu core
     let num_workers = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -73,16 +105,21 @@ pub async fn run() -> Result<()> {
         .build()?;
     let _guard = rt.enter();
 
-    match std::env::args().skip(1).next().as_deref() {
-        Some("render") => {
-            run_wrapped(render::main()).await;
+    // Android may hand the process argv values it never asked for (and there is no
+    // CLI there anyway); dispatching on them could start a render on the UI thread.
+    #[cfg(not(mobile))]
+    {
+        match std::env::args().skip(1).next().as_deref() {
+            Some("render") => {
+                run_wrapped(render::main()).await;
+            }
+            Some("preview") => {
+                run_wrapped(preview::main()).await;
+            }
+            // Not an internal subcommand: fall through to the GUI. On macOS Finder may
+            // pass `-psn_...`; CLI flags are handled by main.rs before reaching here.
+            _ => {}
         }
-        Some("preview") => {
-            run_wrapped(preview::main()).await;
-        }
-        // Not an internal subcommand: fall through to the GUI. On macOS Finder may
-        // pass `-psn_...`; CLI flags are handled by main.rs before reaching here.
-        _ => {}
     }
 
     let app = tauri::Builder::default()
