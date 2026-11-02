@@ -71,6 +71,10 @@ jobs:
       # linuxdeploy is itself an AppImage; without FUSE on the runner it has to
       # extract-and-run instead of mounting.
       APPIMAGE_EXTRACT_AND_RUN: "1"
+      # shaderc-sys compiles glslang, which uses std::filesystem (macOS 10.15+).
+      # cc-rs defaults to an older deployment target, so set it explicitly or the
+      # macOS build fails with "'path' is unavailable: introduced in macOS 10.15".
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

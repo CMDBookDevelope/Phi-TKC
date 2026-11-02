@@ -94,6 +94,8 @@ jobs:
     timeout-minutes: 120
     env:
       PRPR_AVC_LIBS: ${{ github.workspace }}/prpr-lib/prpr-avc/static-lib
+      # Same reason as desktop.yml: glslang needs std::filesystem (iOS 13+).
+      IPHONEOS_DEPLOYMENT_TARGET: "14.0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
