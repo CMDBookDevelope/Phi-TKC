@@ -14,13 +14,13 @@ name: Desktop
 #   * iOS/IPA *does* require macOS, and Android runs on any host with the SDK —
 #     both live in mobile.yml, which is triggered alongside this workflow.
 on:
+  # A manual run builds *and* publishes a GitHub release.
   workflow_dispatch:
+  # Pushes only build and upload the workflow artifacts.
   push:
     branches:
       - main
       - merge/phi-tk-upstream
-    tags:
-      - 'v*'
 
 permissions:
   contents: read
@@ -144,27 +144,65 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Attach to draft release
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Publish GitHub release
+    # Pushes only build the artifacts; a manual run publishes them as a release.
+    if: github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
-    # Shared with mobile.yml's release job: both workflows attach their artifacts to
-    # the same tag's draft release, so creating/updating must not race.
+    # Shared with mobile.yml's release job. Both workflows publish into the same
+    # release for a given commit, so serialise them: whichever runs second simply
+    # attaches its own artifacts to the release created by the first.
     concurrency:
-      group: release-${{ github.ref }}
+      group: release-${{ github.sha }}
       cancel-in-progress: false
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version and tag
+        id: meta
+        shell: bash
+        run: |
+          # The version lives in tauri.conf.json; it is bumped by hand, never by CI.
+          version=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # The commit suffix keeps repeated manual runs from colliding on the tag.
+          echo "tag=v$version-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
-      - name: Create or update draft release
+      - name: Create or update release
         uses: softprops/action-gh-release@v2
         with:
-          draft: true
-          generate_release_notes: true
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: AutoRelease-v${{ steps.meta.outputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+          body: |
+            Phi-TKC is a Vuetify + Tauri front-end for the Phi chart renderer, rebuilt
+            around a Vulkan pipeline with a glass-inspired interface.
+
+            Published from `main` at commit `${{ github.sha }}` (version `v${{ steps.meta.outputs.version }}`).
+
+            ## Downloads
+
+            - **Linux (x86_64)** — `.deb` or `.AppImage`; the AppImage needs FUSE 2, or run it with `--appimage-extract-and-run`.
+            - **Windows (x86_64)** — NSIS installer built with the MinGW toolchain; there is no code-signing certificate, so SmartScreen will warn.
+            - **macOS (Apple Silicon)** — `.dmg`, macOS 11 or newer; unsigned, so right-click → Open the first time.
+            - **Android (arm64-v8a)** — `.apk`, unsigned; sign it with `apksigner` before installing.
+            - **iOS / iPadOS** — unsigned `.ipa`; re-sign it with your own Apple team before sideloading.
+
+            ## Notes
+
+            Rendering is headless: the CLI (`Phi-TKC -i chart.pez -o out.mp4`) and the
+            bundled HTTP/WebSocket server never open a window, while the GUI drives the
+            same Vulkan pipeline for previews.
           files: dist/*
