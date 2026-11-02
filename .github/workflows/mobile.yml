@@ -55,7 +55,10 @@ jobs:
       - name: Setup Rust (Android targets)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi
+          # 32-bit ARM is intentionally not built: the Vulkan Video encoder has
+          # 64-bit-only assumptions (vk handle transmutes and AV1 struct layout
+          # asserts), and mobile builds do not render anyway. See AGENTS.md.
+          targets: aarch64-linux-android
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
@@ -78,14 +81,14 @@ jobs:
         run: pnpm tauri android init --ci --skip-targets-install
 
       - name: Build unsigned release APK
-        run: pnpm tauri android build --ci --apk --target aarch64 --target armv7
+        run: pnpm tauri android build --ci --apk --target aarch64
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          # No keystore is configured, so the file is app-universal-release-unsigned.apk.
-          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+          # No keystore is configured, so the APK is *-unsigned.apk.
+          path: src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk
           if-no-files-found: error
 
   ios:
