@@ -34,7 +34,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    sync::{broadcast, mpsc, Mutex},
+    sync::{broadcast, Mutex},
 };
 use tokio_util::io::ReaderStream;
 use tower_http::cors::CorsLayer;
@@ -91,7 +91,6 @@ type Jobs = Arc<Mutex<HashMap<String, Job>>>;
 #[derive(Clone)]
 struct AppState {
     jobs: Jobs,
-    queue: mpsc::Sender<String>,
     /// Fan-out for the WebSocket clients (mobile app shows live progress).
     events: broadcast::Sender<String>,
     assets: PathBuf,
@@ -199,11 +198,9 @@ pub async fn run(args: ServerArgs) -> Result<()> {
 }
 
 fn build_app(assets: PathBuf) -> Router {
-    let (tx, mut rx) = mpsc::channel::<String>(64);
     let (events, _) = broadcast::channel::<String>(32);
     let state = AppState {
         jobs: Arc::new(Mutex::new(HashMap::new())),
-        queue: tx,
         events: events.clone(),
         assets,
     };
@@ -225,15 +222,6 @@ fn build_app(assets: PathBuf) -> Router {
             jobs.sort_by_key(|job| std::cmp::Reverse(job.created_at));
             let payload = serde_json::json!({ "type": "jobs", "jobs": jobs }).to_string();
             let _ = ticker.events.send(payload);
-        }
-    });
-
-    // One job at a time: a render already saturates the GPU and the machine is the
-    // user's desktop, so a second concurrent job would only make both slower.
-    let worker_state = state.clone();
-    tokio::spawn(async move {
-        while let Some(id) = rx.recv().await {
-            run_job(worker_state.clone(), &id).await;
         }
     });
 
@@ -447,9 +435,14 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
         cancel: Arc::new(AtomicBool::new(false)),
     };
     st.jobs.lock().await.insert(id.clone(), job);
-    if st.queue.send(id.clone()).await.is_err() {
-        return (StatusCode::SERVICE_UNAVAILABLE, "render queue stopped").into_response();
-    }
+
+    // One process per job: there is no in-server queue. A client that wants N
+    // parallel renders submits N jobs and gets N `Phi-TKC render` processes.
+    let job_state = st.clone();
+    let job_id = id.clone();
+    tokio::spawn(async move {
+        run_job(job_state, &job_id).await;
+    });
 
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "id": id }))).into_response()
 }

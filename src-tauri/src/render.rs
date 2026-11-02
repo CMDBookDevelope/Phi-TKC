@@ -1177,8 +1177,12 @@ async fn render_impl(
     // "Hardware Encoder", "Video Codec" and "Hardware Acceleration" controls
     // decide whether it is used at all.  Other selections keep using the
     // ffmpeg encoder path.
+    // The Vulkan Video encoder is driven from swapchain-backed frames; a
+    // headless context has none, so fall back to the NV12 + ffmpeg path.
+    let headless_vulkan = crate::vulkan_readback::headless_vulkan();
     let want_vulkan_video = params.config.hardware_accel
         && params.config.video_codec == "h264"
+        && !headless_vulkan
         && matches!(params.config.encoder.as_str(), "auto" | "vulkan");
     let mut video_context = if want_vulkan_video {
         crate::vulkan_video::VideoContext::new(vw, vh, qp, 16)
@@ -1253,6 +1257,12 @@ async fn render_impl(
         let my_time = Rc::clone(&my_time);
         move || *(*my_time).borrow()
     }));
+    if headless_vulkan && !nv12_mode {
+        bail!(
+            "headless Vulkan export needs even dimensions and the NV12 readback path \
+             (got {vw}x{vh}); use an even resolution or run with a display"
+        );
+    }
     if nv12_mode && !crate::vulkan_readback::enable_offscreen_video() {
         bail!("failed to enable the Vulkan offscreen video mode");
     }

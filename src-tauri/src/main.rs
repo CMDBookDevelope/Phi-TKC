@@ -5,18 +5,15 @@ use clap::{CommandFactory, Parser};
 use app_lib::render::{render_cli, CliArgs};
 
 fn build_conf() -> macroquad::window::Conf {
-    // The Vulkan renderer needs a real Vulkan context, and miniquad's headless
-    // path is EGL/OpenGL only. Only the Tauri GUI process stays headless; the
-    // render/preview subprocesses (and the CLI directly) open a window, which
-    // also works under `xvfb-run` on servers.
-    let first = std::env::args().skip(1).next();
-    let is_preview = first.as_deref() == Some("preview");
-    let is_render = first.as_deref() == Some("render");
+    // Everything except the preview window is headless. The Vulkan backend now
+    // builds a surface-less context (`VulkanContext::new_headless`), so the CLI
+    // and the `render` subprocess never create an X11/Wayland window.
+    let is_preview = std::env::args().skip(1).next().as_deref() == Some("preview");
     macroquad::window::Conf {
         window_title: "Phi-TKC (GUI/CLI)".to_string(),
         window_width: 1920,
         window_height: 1440,
-        headless: !(is_preview || is_render || has_cli_intent()),
+        headless: !is_preview,
         platform: macroquad::miniquad::conf::Platform {
             rendering_backend: macroquad::miniquad::conf::RenderingBackend::Vulkan,
             ..Default::default()

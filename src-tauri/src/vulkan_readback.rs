@@ -261,6 +261,16 @@ impl Nv12Readback {
 }
 
 /// Put the current miniquad Vulkan context into offscreen export mode.
+/// True when the Vulkan context has no presentation surface (CLI/headless).
+///
+/// In that mode the exporter must use the offscreen NV12 path; the Vulkan Video
+/// encoder path records into swapchain-backed command buffers and would panic.
+pub fn headless_vulkan() -> bool {
+    macroquad::window::miniquad_context()
+        .vulkan_context()
+        .is_some_and(|context| !context.has_swapchain())
+}
+
 pub fn enable_offscreen_video() -> bool {
     let Some(context) = macroquad::window::miniquad_context().vulkan_context() else {
         return false;

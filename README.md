@@ -192,6 +192,10 @@ Phi-TKC -i song.pez --result --ending 5
 ./Phi-TKC #后面添加渲染变量
 ```
 
+> **一个进程只渲染一个任务。** CLI 没有内置队列，跑完即退出；
+> 要并行渲染多个谱面就启动多个 `Phi-TKC` / `phi-tk-cli` 进程（`&`、`xargs -P` 等）。
+> `preview` 是 GUI 预览按钮的内部子命令，不是 CLI 功能。
+
 ## 远程渲染服务器
 
 在电脑上启动 HTTP 服务，手机（Android/iOS）或同一局域网的浏览器就能上传谱面、查看进度并下载成片。
