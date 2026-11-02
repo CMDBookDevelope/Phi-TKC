@@ -207,7 +207,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Phi-TK-android-arm64
+          name: Phi-TKC-android-arm64
           path: |
             Phi-TK-android-arm64.apk
             Phi-TK-android-arm64.apk.sha256
