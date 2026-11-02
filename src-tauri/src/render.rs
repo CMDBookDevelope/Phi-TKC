@@ -2863,24 +2863,206 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct CliArgs {
+    /// Chart archive (.pez / .zip / .pgr / .rpe)
     #[arg(short, long)]
     pub input: String,
+    /// Output video path
     #[arg(short, long, default_value = "output.mp4")]
     pub output: String,
-    #[arg(short, long, default_value = "1920x1440")]
+    /// Resolution, e.g. 1920x1440
+    #[arg(short = 'r', long, default_value = "1920x1440")]
     pub resolution: String,
-    #[arg(short, long, default_value_t = 20)]
+    /// CRF / QP value (1-51)
+    #[arg(short = 'c', long, default_value_t = 20)]
     pub crf: u32,
-    #[clap(long, default_value = "/usr/lib/ptkc-assets", help = "Assets folder (falls back to the bundled assets if missing)")]
-    pub assets: String,
-    #[arg(long, default_value_t = 30)]
-    pub dark: u8,
-    #[arg(long, default_value_t = false)]
-    pub load: bool,
-    #[arg(long, default_value_t = false)]
-    pub finish: bool,
-    #[arg(long, default_value_t = 30)]
+    /// Frame rate
+    #[arg(short = 'f', long, default_value_t = 30)]
     pub fps: u32,
+    /// Assets folder (falls back to the bundled assets if missing)
+    #[arg(long, default_value = "/usr/lib/ptkc-assets")]
+    pub assets: String,
+
+    // ===== UI / scene =====
+    /// Background dimming percentage (0-100)
+    #[arg(short = 'd', long, default_value_t = 30)]
+    pub dim: u8,
+    /// Show the result (ending) screen
+    #[arg(short = 'R', long, default_value_t = false)]
+    pub result: bool,
+    /// Show the loading animation
+    #[arg(short = 'l', long, default_value_t = false)]
+    pub load: bool,
+    /// Result screen length in seconds (defaults to 3 with --result)
+    #[arg(long)]
+    pub ending: Option<f64>,
+    /// Player name shown in the UI
+    #[arg(short = 'n', long)]
+    pub name: Option<String>,
+    /// Player rks shown in the UI
+    #[arg(long, default_value_t = 6.16)]
+    pub rks: f32,
+    /// Player avatar image path
+    #[arg(long)]
+    pub avatar: Option<String>,
+    /// Combo text
+    #[arg(long, default_value = "PHI-TK POWERED")]
+    pub combo: String,
+    /// Watermark text (empty to disable)
+    #[arg(short = 'w', long)]
+    pub watermark: Option<String>,
+    /// UI elements to show, comma separated: score,combo,name,level,line,pb,pause
+    /// (also accepts `all` / `none`). Unlisted elements are hidden.
+    #[arg(long)]
+    pub ui: Option<String>,
+    /// UI elements to hide, comma separated (applied after --ui)
+    #[arg(long)]
+    pub hide_ui: Option<String>,
+    /// Draw a progress bar
+    #[arg(long, default_value_t = false)]
+    pub bar: bool,
+    /// Show the score target
+    #[arg(long, default_value_t = false)]
+    pub score_aim: bool,
+    /// Show chart debug info
+    #[arg(long, default_value_t = false)]
+    pub chart_debug: bool,
+    /// Mirror the chart horizontally
+    #[arg(long, default_value_t = false)]
+    pub flid_x: bool,
+    /// Chart stretch ratio (1.0 = square)
+    #[arg(long, default_value_t = 1.0)]
+    pub chart_ratio: f32,
+    /// Show the chart illustration as the background
+    #[arg(long)]
+    pub background: bool,
+    /// Resource pack path
+    #[arg(long)]
+    pub respack: Option<String>,
+
+    // ===== gameplay / effects =====
+    /// Chart speed multiplier
+    #[arg(short = 's', long, default_value_t = 1.0)]
+    pub speed: f32,
+    /// Note scale
+    #[arg(long, default_value_t = 1.0)]
+    pub note_scale: f32,
+    /// Music volume (0-1)
+    #[arg(long, default_value_t = 1.0)]
+    pub volume_music: f32,
+    /// SFX volume (0-1)
+    #[arg(long, default_value_t = 1.0)]
+    pub volume_sfx: f32,
+    /// Enable FXAA
+    #[arg(long, default_value_t = false)]
+    pub fxaa: bool,
+    /// Disable particle effects
+    #[arg(long, default_value_t = false)]
+    pub no_particle: bool,
+    /// Disable shader/background effects
+    #[arg(long, default_value_t = false)]
+    pub no_effect: bool,
+    /// Disable the doubled hint line
+    #[arg(long, default_value_t = false)]
+    pub no_double_hint: bool,
+    /// Aggressive mode
+    #[arg(long, default_value_t = false)]
+    pub aggressive: bool,
+    /// Split hold notes between hands
+    #[arg(long, default_value_t = false)]
+    pub hand_split: bool,
+    /// MSAA sample count (1, 2, 4, 8, ...)
+    #[arg(long, default_value_t = 4)]
+    pub sample_count: u32,
+
+    // ===== encoder =====
+    /// Video codec: h264 / hevc / av1
+    #[arg(long, default_value = "h264")]
+    pub codec: String,
+    /// Encoder: auto / nvenc / qsv / amf / vulkan / dx12 / cpu
+    #[arg(short = 'e', long, default_value = "auto")]
+    pub encoder: String,
+    /// FFmpeg preset (veryfast/fast/medium/slow/...)
+    #[arg(short = 'p', long, default_value = "medium")]
+    pub preset: String,
+    /// Container: mp4 / mov
+    #[arg(long, default_value = "mp4")]
+    pub format: String,
+    /// Rate control: CRF / CBR
+    #[arg(long, default_value = "CRF")]
+    pub bitrate_control: String,
+    /// Explicit bitrate (overrides --crf), e.g. 8000k
+    #[arg(short = 'b', long)]
+    pub bitrate: Option<String>,
+    /// Disable hardware acceleration
+    #[arg(long, default_value_t = false)]
+    pub no_hw_accel: bool,
+    /// Multi-threaded ffmpeg
+    #[arg(long, default_value_t = false)]
+    pub ffmpeg_thread: bool,
+
+    // ===== audio =====
+    /// Audio sample rate
+    #[arg(long, default_value_t = 48000)]
+    pub target_audio: u32,
+    /// Audio format: flac / aac / opus / ...
+    #[arg(long, default_value = "flac")]
+    pub audio_format: String,
+    /// Audio bit depth: 16 / 24 / 32
+    #[arg(long)]
+    pub audio_bit: Option<u32>,
+    /// Audio delay in frames
+    #[arg(long)]
+    pub audio_delay_frames: Option<i32>,
+}
+
+/// Enable/disable the requested UI elements.
+///
+/// `--ui` is an allow-list (unlisted elements are hidden; `all`/`none` are
+/// accepted), and `--hide-ui` is applied afterwards so a single element can be
+/// dropped from `--ui all`.
+fn apply_ui(config: &mut RenderConfig, ui: Option<&str>, hide: Option<&str>) {
+    if let Some(list) = ui {
+        let list = list.trim();
+        let all = list.eq_ignore_ascii_case("all");
+        let none = list.eq_ignore_ascii_case("none");
+        if !list.is_empty() {
+            config.ui_score = all;
+            config.ui_combo = all;
+            config.ui_name = all;
+            config.ui_level = all;
+            config.ui_line = all;
+            config.ui_pb = all;
+            config.ui_pause = all;
+        }
+        if !all && !none {
+            for item in list.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+                match item.to_ascii_lowercase().as_str() {
+                    "score" => config.ui_score = true,
+                    "combo" => config.ui_combo = true,
+                    "name" => config.ui_name = true,
+                    "level" => config.ui_level = true,
+                    "line" => config.ui_line = true,
+                    "pb" => config.ui_pb = true,
+                    "pause" => config.ui_pause = true,
+                    other => eprintln!("warning: unknown --ui element {other:?}"),
+                }
+            }
+        }
+    }
+    if let Some(list) = hide {
+        for item in list.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+            match item.to_ascii_lowercase().as_str() {
+                "score" => config.ui_score = false,
+                "combo" => config.ui_combo = false,
+                "name" => config.ui_name = false,
+                "level" => config.ui_level = false,
+                "line" => config.ui_line = false,
+                "pb" => config.ui_pb = false,
+                "pause" => config.ui_pause = false,
+                other => eprintln!("warning: unknown --hide-ui element {other:?}"),
+            }
+        }
+    }
 }
 
 /// Resolve the CLI's asset folder. The documented default is the legacy
@@ -2906,6 +3088,7 @@ fn resolve_cli_assets(arg: &str) -> PathBuf {
 pub async fn render_cli(args: CliArgs) -> Result<()> {
     let assets = resolve_cli_assets(&args.assets);
     macroquad::file::set_pc_assets_folder(&assets.display().to_string());
+
     let mut config = RenderConfig::default();
     config.resolution = {
         let parts: Vec<&str> = args.resolution.split(|c| c == 'x' || c == 'X').collect();
@@ -2919,27 +3102,58 @@ pub async fn render_cli(args: CliArgs) -> Result<()> {
         }
     };
     config.fps = args.fps;
-    config.bitrate = args.crf.to_string();
-    config.hardware_accel = true;
-    config.video_codec = "h264".to_string();
-    config.encoder = "auto".to_string();
-    config.target_audio = 48000;
-    config.audio_format = "flac".to_string();
-    config.combo = "PHI-TK POWERED".to_string();
-    config.player_name.clear();
-    config.player_rks = 6.16;
-    config.ui_name = true;
-    config.ui_level = true;
+    config.bitrate_control = args.bitrate_control.to_uppercase();
+    config.bitrate = args.bitrate.clone().unwrap_or_else(|| args.crf.to_string());
+    config.hardware_accel = !args.no_hw_accel;
+    config.video_codec = args.codec.clone();
+    config.encoder = args.encoder.clone();
+    config.ffmpeg_preset = args.preset.clone();
+    config.video = args.format.eq_ignore_ascii_case("mov");
+    config.ffmpeg_thread = args.ffmpeg_thread;
+
+    config.target_audio = args.target_audio;
+    config.audio_format = args.audio_format.clone();
+    config.audio_bit = args.audio_bit;
+    if let Some(delay) = args.audio_delay_frames {
+        config.audio_delay_frames = delay;
+    }
+
+    // UI defaults for the CLI (the GUI keeps its own preset defaults).
+    config.combo = args.combo.clone();
+    config.player_name = args.name.clone().unwrap_or_default();
+    config.player_rks = args.rks;
+    config.player_avatar = args.avatar.clone();
+    config.watermark = args.watermark.clone().unwrap_or_default();
+    config.bar = args.bar;
+    config.score_aim = args.score_aim;
+    config.chart_debug = args.chart_debug;
+    config.flid_x = args.flid_x;
+    config.chart_ratio = args.chart_ratio;
+    config.background = args.background;
+    config.res_pack_path = args.respack.clone();
+
+    config.speed = args.speed;
+    config.note_scale = args.note_scale;
+    config.volume_music = args.volume_music;
+    config.volume_sfx = args.volume_sfx;
+    config.fxaa = args.fxaa;
+    config.particle = !args.no_particle;
+    config.disable_effect = args.no_effect;
+    config.double_hint = !args.no_double_hint;
+    config.aggressive = args.aggressive;
+    config.hand_split = args.hand_split;
+    config.sample_count = args.sample_count;
 
     config.disable_loading = !args.load;
-    if args.finish {
-        config.ending_length = 3.0;
+    config.ending_length = args.ending.unwrap_or(if args.result { 3.0 } else { -2.0 });
+    if args.result {
         config.ui_score = true;
         config.ui_combo = true;
         config.ui_pb = true;
         config.ui_level = true;
         config.ui_name = true;
     }
+    apply_ui(&mut config, args.ui.as_deref(), args.hide_ui.as_deref());
 
     let input_path = PathBuf::from(&args.input);
     let mut chart_fs = fs::fs_from_file(&input_path)
@@ -2948,8 +3162,8 @@ pub async fn render_cli(args: CliArgs) -> Result<()> {
         .await
         .with_context(|| format!("无法读取谱面元数据: {}", input_path.display()))?;
 
-    if args.dark > 0 {
-        info.background_dim = (args.dark as f32).clamp(0.0, 100.0) / 100.0;
+    if args.dim > 0 {
+        info.background_dim = (args.dim as f32).clamp(0.0, 100.0) / 100.0;
     }
 
     let params = RenderParams {
