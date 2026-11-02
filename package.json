@@ -8,6 +8,8 @@
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --noEmit -p tsconfig.app.json --composite false",
+    "android:init": "tauri android init --ci --skip-targets-install",
+    "android:build": "tauri android build --ci --apk --target aarch64",
     "lint": "eslint . --fix",
     "prettier": "prettier --write ."
   },
