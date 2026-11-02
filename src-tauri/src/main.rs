@@ -80,33 +80,40 @@ fn main() {
         return;
     }
 
-    macroquad::Window::from_config(build_conf(), async {
-        if let Err(err) = run_app().await {
+    // Parse before creating the window: a typo like `--dark` must produce a clap
+    // error (exit 2) even on a machine without a display, instead of failing inside
+    // miniquad's X11/Wayland init.
+    let cli_args = if has_cli_intent() {
+        match CliArgs::try_parse() {
+            Ok(args) => Some(args),
+            Err(e) => e.exit(),
+        }
+    } else {
+        None
+    };
+
+    macroquad::Window::from_config(build_conf(), async move {
+        let result = match cli_args {
+            Some(cli_args) => {
+                // A separate runtime: rendering blocks on tokio and must not share
+                // the GUI's runtime.
+                let rt = match tokio::runtime::Runtime::new() {
+                    Ok(rt) => rt,
+                    Err(err) => {
+                        eprintln!("cannot start the runtime: {err:?}");
+                        std::process::exit(1);
+                    }
+                };
+                rt.block_on(render_cli(cli_args))
+            }
+            // GUI mode.
+            None => app_lib::run().await,
+        };
+        if let Err(err) = result {
             // A failed CLI render must exit non-zero for scripts; macroquad's attribute
             // macro used to ignore the returned Result and exit with status 0.
             eprintln!("Error: {err:?}");
             std::process::exit(1);
         }
     });
-}
-
-async fn run_app() -> Result<(), anyhow::Error> {
-    match CliArgs::try_parse() {
-        Ok(cli_args) => {
-            // 创建独立的 Tokio 运行时，执行渲染
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(render_cli(cli_args))?;
-            Ok(())
-        }
-        Err(e) => {
-            if has_cli_intent() {
-                // Clap prints usage errors on stderr (exit 2), which is what a CLI user
-                // expects. Help/version already returned above.
-                e.exit();
-            }
-            // GUI 模式，启动原有界面
-            app_lib::run().await?;
-            Ok(())
-        }
-    }
 }
