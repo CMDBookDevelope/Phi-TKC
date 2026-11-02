@@ -11,7 +11,7 @@ use axum::{
     body::Body,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Multipart, Path as UrlPath, State,
+        DefaultBodyLimit, Multipart, Path as UrlPath, State,
     },
     http::{header, StatusCode},
     response::{Html, IntoResponse, Response},
@@ -237,6 +237,8 @@ fn build_app(assets: PathBuf) -> Router {
         .route("/api/jobs/{id}/cancel", post(cancel))
         .route("/render", get(ws))
         .layer(CorsLayer::permissive())
+        // axum's default body limit is 2 MB, which rejects ordinary chart archives.
+        .layer(DefaultBodyLimit::max(MAX_UPLOAD))
         .with_state(state)
 }
 
@@ -565,11 +567,19 @@ async fn render_one(
     stdin.flush().await?;
     drop(stdin);
 
+    // Keep the tail of the renderer's stderr so a failed job reports the actual
+    // panic/ffmpeg error instead of only "exited with 101".
+    let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     if let Some(stderr) = child.stderr.take() {
+        let tail = stderr_tail.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                log::debug!("[render] {line}");
+                let mut guard = tail.lock().await;
+                if guard.len() >= 80 {
+                    guard.remove(0);
+                }
+                guard.push(line);
             }
         });
     }
@@ -631,7 +641,9 @@ async fn render_one(
 
     let status = child.wait().await?;
     if !status.success() {
-        anyhow::bail!("renderer exited with {status}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let tail = stderr_tail.lock().await.join("\n");
+        anyhow::bail!("renderer exited with {status}\n{tail}");
     }
     Ok(())
 }

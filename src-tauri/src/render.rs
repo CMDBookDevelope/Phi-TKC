@@ -873,9 +873,14 @@ async fn render_impl(
 ) -> Result<()> {
     use crate::ipc::client::*;
 
+    // Every entry point (`render_cli`, the GUI child's `main()`, the server's
+    // child process) goes through here, and everything below logs through the
+    // `log` crate. Without this the GUI/server child produced no logs at all,
+    // because only `render_cli` used to call `init_colored_logger`.
+    init_colored_logger();
+
     // `log_mode` used to choose between the pretty logger and machine-readable
-    // IPC events; events are always emitted on stdout now, and the logger is
-    // configured by the caller (GUI child process or `render_cli`).
+    // IPC events; events are always emitted on stdout now.
     let _ = (exit_after, log_mode);
     let process_start = Instant::now();
     let path = params.path;
@@ -2107,7 +2112,16 @@ async fn render_impl(
                 msg.push('\n');
             }
 
-            bail!(msg);
+            // `auto` (the default) means "use hardware if it works, otherwise
+            // software". Failing the whole render on a machine without NVENC/QSV/AMF
+            // made the default configuration unusable, even though libx264 was
+            // right there. An explicitly chosen hardware encoder still fails.
+            if matches!(params.config.encoder.as_str(), "auto" | "vulkan") {
+                warn!("{}", msg.trim_end());
+                warn!("Falling back to software encoding");
+            } else {
+                bail!(msg);
+            }
         }
     }
 
