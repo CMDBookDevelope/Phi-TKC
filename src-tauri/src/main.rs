@@ -67,6 +67,30 @@ fn main() {
     // Handle help/version before macroquad/miniquad initializes: its startup prints
     // GL_VERSION and the renderer name to stdout, which would corrupt CLI output.
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // `phi-tkc server ...` must not initialise miniquad: it is a pure HTTP process
+    // that spawns the existing `render` child for each job.
+    if args.first().map(String::as_str) == Some("server") {
+        // Drop the `server` subcommand token: ServerArgs only describes its own flags.
+        let mut argv: Vec<String> = std::env::args().collect();
+        if argv.len() > 1 {
+            argv.remove(1);
+        }
+        let server_args = app_lib::server::ServerArgs::parse_from(argv);
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
+            Err(err) => {
+                eprintln!("cannot start the runtime: {err:?}");
+                std::process::exit(1);
+            }
+        };
+        if let Err(err) = rt.block_on(app_lib::server::run(server_args)) {
+            eprintln!("server error: {err:?}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
         let _ = CliArgs::command().print_help();
         println!();

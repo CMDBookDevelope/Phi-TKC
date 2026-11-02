@@ -15,6 +15,39 @@ en:
     language:
       label: "Language"
       hint: "The app reloads after switching languages"
+    server:
+      label: "Render server"
+      hint: "Lets phones on the same network submit charts to this machine"
+      host: "Bind address"
+      hostHint: "0.0.0.0 accepts phones; 127.0.0.1 is local only"
+      port: "Port"
+      start: "Start server"
+      stop: "Stop server"
+      running: "Running on {url}"
+      stopped: "Not running"
+      open: "Open WebUI"
+      copy: "Copy link"
+      copied: "Link copied"
+      failed: "Could not start: {error}"
+    remote:
+      label: "Remote renderer"
+      hint: "Start the server on a PC first, then open its WebUI here"
+      address: "Renderer address"
+      placeholder: "192.168.1.10:6787"
+      test: "Test connection"
+      open: "Open WebUI"
+      connected: "Connected · v{version}"
+      offline: "Cannot connect: {error}"
+      live: "Live (WebSocket)"
+      fallback: "Polling"
+      noJobs: "No tasks yet"
+      download: "Download"
+      statusQueued: "Queued"
+      statusMixing: "Mixing"
+      statusRunning: "Rendering"
+      statusDone: "Done"
+      statusFailed: "Failed"
+      statusCanceled: "Canceled"
     selected:
       picked: "Selected folder: {name}"
       fallback: "Fallback selection: {count} files (root: {root})"
@@ -58,6 +91,39 @@ zh-CN:
     language:
       label: "语言"
       hint: "切换语言后应用会自动重新加载"
+    server:
+      label: "渲染服务器"
+      hint: "让同一局域网里的手机把谱面提交到这台电脑渲染"
+      host: "监听地址"
+      hostHint: "0.0.0.0 允许手机连接；127.0.0.1 仅本机"
+      port: "端口"
+      start: "启动服务器"
+      stop: "停止服务器"
+      running: "运行中：{url}"
+      stopped: "未启动"
+      open: "打开 WebUI"
+      copy: "复制链接"
+      copied: "链接已复制"
+      failed: "启动失败：{error}"
+    remote:
+      label: "远程渲染器"
+      hint: "先在电脑上启动服务器，再在这里打开它的 WebUI"
+      address: "渲染器地址"
+      placeholder: "192.168.1.10:6787"
+      test: "测试连接"
+      open: "打开 WebUI"
+      connected: "已连接 · v{version}"
+      offline: "无法连接：{error}"
+      live: "实时连接"
+      fallback: "轮询模式"
+      noJobs: "暂无任务"
+      download: "下载"
+      statusQueued: "排队中"
+      statusMixing: "混音中"
+      statusRunning: "渲染中"
+      statusDone: "已完成"
+      statusFailed: "失败"
+      statusCanceled: "已取消"
     selected:
       picked: "已选择文件夹：{name}"
       fallback: "回退选择：{count} 个文件（根：{root})"
@@ -88,15 +154,16 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { open } from '@tauri-apps/plugin-dialog';
 import { appConfigDir } from '@tauri-apps/api/path';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 defineOptions({ name: 'SettingsPanel' });
-import { RULES as rules, toast, changeLocale } from './common';
+import { RULES as rules, toast, toastError, changeLocale } from './common';
 import { mainColor, bgColor, subColor } from './colorStore';
 import { isMobile } from './platform';
 import ColorDot from './components/ColorDot.vue';
@@ -234,6 +301,241 @@ function confirmColor(type: 'main' | 'bg' | 'sub') {
   else if (type === 'bg') saveColor('bgColor', tempBgColor.value);
   else saveColor('subColor', tempSubColor.value);
 }
+
+// ===== Render server (desktop) =====
+// Started in-process by Tauri: the HTTP handler only queues jobs and spawns the
+// same `render` child the GUI task queue uses.
+const serverHost = ref(localStorage.getItem('serverHost') || '0.0.0.0');
+const serverPort = ref(Number(localStorage.getItem('serverPort')) || 6787);
+const serverRunning = ref(false);
+const serverBusy = ref(false);
+const serverError = ref('');
+
+const serverDisplayHost = computed(() =>
+  serverHost.value === '0.0.0.0' || serverHost.value === '::' ? '127.0.0.1' : serverHost.value,
+);
+const serverUrl = computed(() => `http://${serverDisplayHost.value}:${serverPort.value}/render`);
+
+async function refreshServer() {
+  try {
+    const status = (await invoke('render_server_status')) as { running: boolean; host: string; port: number };
+    serverRunning.value = status.running;
+    if (status.running) {
+      serverHost.value = status.host;
+      serverPort.value = status.port;
+    }
+  } catch {
+    /* command unavailable on older builds */
+  }
+}
+
+async function startServer() {
+  serverBusy.value = true;
+  serverError.value = '';
+  try {
+    localStorage.setItem('serverHost', serverHost.value);
+    localStorage.setItem('serverPort', String(serverPort.value));
+    const status = (await invoke('start_render_server', {
+      host: serverHost.value,
+      port: Number(serverPort.value),
+    })) as { running: boolean; port: number };
+    serverRunning.value = status.running;
+    serverPort.value = status.port;
+    toast(t('settings.server.running', { url: serverUrl.value }), 'success');
+  } catch (e) {
+    serverError.value = String((e as Error)?.message || e);
+    toastError(serverError.value);
+  } finally {
+    serverBusy.value = false;
+  }
+}
+
+async function stopServer() {
+  serverBusy.value = true;
+  try {
+    await invoke('stop_render_server');
+    serverRunning.value = false;
+  } catch (e) {
+    toastError(e);
+  } finally {
+    serverBusy.value = false;
+  }
+}
+
+async function openServerWebUI() {
+  try {
+    await openUrl(serverUrl.value);
+  } catch (e) {
+    toastError(e);
+  }
+}
+
+async function copyServerUrl() {
+  try {
+    await navigator.clipboard.writeText(serverUrl.value);
+    toast(t('settings.server.copied'), 'success');
+  } catch {
+    toastError(t('settings.server.copy'));
+  }
+}
+
+// ===== Remote renderer (mobile) =====
+const remoteAddress = ref(localStorage.getItem('remoteRenderer') || '192.168.1.10:6787');
+const remoteBusy = ref(false);
+const remoteVersion = ref('');
+const remoteError = ref('');
+
+const remoteBase = computed(() => {
+  let raw = remoteAddress.value.trim().replace(/\/+$/, '');
+  if (!raw) return '';
+  if (!/^https?:\/\//i.test(raw)) raw = `http://${raw}`;
+  return raw;
+});
+const remoteUrl = computed(() => `${remoteBase.value}/render`);
+
+type RemoteJob = {
+  id: string;
+  name: string;
+  status: string;
+  progress: number;
+  fps: number;
+  eta: number;
+  error?: string;
+  download?: string;
+};
+const remoteJobs = ref<RemoteJob[]>([]);
+const remoteLive = ref(false);
+const remotePolling = ref(false);
+let socket: WebSocket | null = null;
+let pollTimer: number | null = null;
+let watching = false;
+
+const JOB_STATUS_KEYS: Record<string, string> = {
+  queued: 'statusQueued',
+  mixing: 'statusMixing',
+  running: 'statusRunning',
+  done: 'statusDone',
+  failed: 'statusFailed',
+  canceled: 'statusCanceled',
+};
+const jobStatusText = (status: string) =>
+  t(`settings.remote.${JOB_STATUS_KEYS[status] || 'statusQueued'}`);
+const isActiveJob = (job: RemoteJob) => ['queued', 'mixing', 'running'].includes(job.status);
+
+function stopWatching() {
+  watching = false;
+  socket?.close();
+  socket = null;
+  remoteLive.value = false;
+  remotePolling.value = false;
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function startPolling() {
+  if (pollTimer !== null) {
+    remotePolling.value = true;
+    return;
+  }
+  remotePolling.value = true;
+  const tick = async () => {
+    try {
+      remoteJobs.value = (await invoke('remote_jobs', { base: remoteBase.value })) as RemoteJob[];
+    } catch {
+      /* server gone; keep the last snapshot */
+    }
+  };
+  void tick();
+  pollTimer = window.setInterval(tick, 1500);
+}
+
+function startWatching() {
+  stopWatching();
+  watching = true;
+  const wsUrl = `${remoteBase.value.replace(/^http/i, 'ws')}/api/ws`;
+  try {
+    const ws = new WebSocket(wsUrl);
+    socket = ws;
+    ws.onopen = () => {
+      remoteLive.value = true;
+      remotePolling.value = false;
+      if (pollTimer !== null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    };
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { type?: string; jobs?: RemoteJob[] };
+        if (data.type === 'jobs' && Array.isArray(data.jobs)) remoteJobs.value = data.jobs;
+      } catch {
+        /* ignore malformed frames */
+      }
+    };
+    ws.onerror = () => {
+      // Android WebView may refuse cleartext ws://; fall back to Rust polling.
+      if (watching && !remoteLive.value) startPolling();
+    };
+    ws.onclose = () => {
+      remoteLive.value = false;
+      if (watching) startPolling();
+    };
+  } catch {
+    startPolling();
+  }
+}
+
+async function openRemoteDownload(download?: string) {
+  if (!download) return;
+  try {
+    await openUrl(`${remoteBase.value}${download}`);
+  } catch (e) {
+    toastError(e);
+  }
+}
+
+async function testRemote(): Promise<boolean> {
+  if (!remoteBase.value) return false;
+  remoteBusy.value = true;
+  remoteError.value = '';
+  remoteVersion.value = '';
+  localStorage.setItem('remoteRenderer', remoteAddress.value.trim());
+  try {
+    const status = (await invoke('remote_status', { base: remoteBase.value })) as { version?: string };
+    remoteVersion.value = status.version || '?';
+    startWatching();
+    return true;
+  } catch (e) {
+    remoteError.value = String((e as Error)?.message || e);
+    stopWatching();
+    return false;
+  } finally {
+    remoteBusy.value = false;
+  }
+}
+
+async function openRemoteWebUI() {
+  if (!remoteBase.value) return;
+  localStorage.setItem('remoteRenderer', remoteAddress.value.trim());
+  try {
+    await openUrl(remoteUrl.value);
+  } catch (e) {
+    toastError(e);
+  }
+}
+
+onMounted(() => {
+  if (mobile) {
+    if (remoteAddress.value) void testRemote();
+  } else {
+    refreshServer();
+  }
+});
+
+onUnmounted(stopWatching);
+
 </script>
 
 <template>
@@ -253,6 +555,124 @@ function confirmColor(type: 'main' | 'bg' | 'sub') {
           density="compact"
           variant="outlined"
           @update:model-value="applyLocale" />
+      </div>
+
+      <!-- Render server: desktop only (phones cannot host renders) -->
+      <div v-if="!mobile" class="md3-card glass fluent-glass" v-glass>
+        <div class="card-label">{{ t('settings.server.label') }}</div>
+        <p class="server-hint">{{ t('settings.server.hint') }}</p>
+        <div class="server-row">
+          <v-text-field
+            v-model="serverHost"
+            :label="t('settings.server.host')"
+            :hint="t('settings.server.hostHint')"
+            persistent-hint
+            density="compact"
+            variant="outlined"
+            :disabled="serverRunning" />
+          <v-text-field
+            v-model.number="serverPort"
+            :label="t('settings.server.port')"
+            type="number"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="port-field"
+            :disabled="serverRunning" />
+        </div>
+        <div class="server-actions">
+          <v-btn
+            v-if="!serverRunning"
+            color="primary"
+            prepend-icon="mdi-play"
+            :loading="serverBusy"
+            @click="startServer">
+            {{ t('settings.server.start') }}
+          </v-btn>
+          <v-btn
+            v-else
+            color="error"
+            variant="tonal"
+            prepend-icon="mdi-stop"
+            :loading="serverBusy"
+            @click="stopServer">
+            {{ t('settings.server.stop') }}
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            prepend-icon="mdi-open-in-new"
+            :disabled="!serverRunning"
+            @click="openServerWebUI">
+            {{ t('settings.server.open') }}
+          </v-btn>
+          <v-btn
+            variant="text"
+            prepend-icon="mdi-content-copy"
+            :disabled="!serverRunning"
+            @click="copyServerUrl">
+            {{ t('settings.server.copy') }}
+          </v-btn>
+        </div>
+        <p v-if="serverRunning" class="server-status">{{ t('settings.server.running', { url: serverUrl }) }}</p>
+        <p v-else class="server-status">{{ t('settings.server.stopped') }}</p>
+      </div>
+
+      <!-- Remote renderer: mobile only, replaces the local render pages -->
+      <div v-if="mobile" class="md3-card glass fluent-glass" v-glass>
+        <div class="card-label">{{ t('settings.remote.label') }}</div>
+        <p class="server-hint">{{ t('settings.remote.hint') }}</p>
+        <v-text-field
+          v-model="remoteAddress"
+          :label="t('settings.remote.address')"
+          :placeholder="t('settings.remote.placeholder')"
+          density="compact"
+          variant="outlined"
+          hide-details
+          class="mt-2"
+          @keyup.enter="testRemote" />
+        <div class="server-actions">
+          <v-btn color="primary" prepend-icon="mdi-lan-connect" :loading="remoteBusy" @click="testRemote">
+            {{ t('settings.remote.test') }}
+          </v-btn>
+          <v-btn variant="tonal" prepend-icon="mdi-open-in-new" @click="openRemoteWebUI">
+            {{ t('settings.remote.open') }}
+          </v-btn>
+        </div>
+        <p v-if="remoteVersion" class="server-status ok">{{ t('settings.remote.connected', { version: remoteVersion }) }}</p>
+        <p v-else-if="remoteError" class="server-status bad">{{ t('settings.remote.offline', { error: remoteError }) }}</p>
+        <p v-if="remoteLive || remotePolling" class="live-pill">
+          <span class="dot" :class="{ live: remoteLive }"></span>
+          {{ remoteLive ? t('settings.remote.live') : t('settings.remote.fallback') }}
+        </p>
+
+        <div v-if="remoteJobs.length" class="remote-jobs">
+          <div v-for="job in remoteJobs.slice(0, 6)" :key="job.id" class="remote-job">
+            <div class="remote-job-head">
+              <span class="remote-job-name">{{ job.name || job.id }}</span>
+              <span class="remote-job-state" :class="job.status">{{ jobStatusText(job.status) }}</span>
+            </div>
+            <v-progress-linear
+              v-if="isActiveJob(job)"
+              :model-value="Math.round((job.progress || 0) * 100)"
+              height="6"
+              rounded
+              color="primary"
+              class="mt-1" />
+            <div v-if="isActiveJob(job)" class="remote-job-meta">
+              <span>{{ job.fps || 0 }} FPS</span>
+              <span>{{ Math.round((job.progress || 0) * 100) }}%</span>
+            </div>
+            <div v-if="job.error" class="remote-job-error">{{ job.error }}</div>
+            <a
+              v-if="job.status === 'done' && job.download"
+              class="remote-job-link"
+              href="#"
+              @click.prevent="openRemoteDownload(job.download)">
+              {{ t('settings.remote.download') }}
+            </a>
+          </div>
+        </div>
+        <p v-else class="server-status">{{ t('settings.remote.noJobs') }}</p>
       </div>
 
       <!-- Output Path (desktop only: mobile render output is fixed to the app data dir) -->
@@ -478,4 +898,107 @@ function confirmColor(type: 'main' | 'bg' | 'sub') {
     gap: 8px;
   }
 }
+.server-hint {
+  margin: -2px 0 10px;
+  font-size: 0.78rem;
+  opacity: 0.65;
+  line-height: 1.5;
+}
+.server-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.server-row .v-input:first-child {
+  flex: 1;
+}
+.port-field {
+  max-width: 120px;
+}
+.server-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.server-status {
+  margin: 12px 0 0;
+  font-size: 0.78rem;
+  opacity: 0.75;
+  word-break: break-all;
+}
+.server-status.ok { color: #6ee7a8; }
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  font-size: 0.74rem;
+  opacity: 0.75;
+}
+.live-pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ffcf6e;
+}
+.live-pill .dot.live {
+  background: #6ee7a8;
+  box-shadow: 0 0 8px rgba(110, 231, 168, 0.8);
+}
+.remote-jobs {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+}
+.remote-job {
+  padding: 9px 0;
+}
+.remote-job + .remote-job {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.remote-job-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+.remote-job-name {
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-job-state {
+  flex: none;
+  font-size: 0.68rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  opacity: 0.8;
+}
+.remote-job-state.done { color: #6ee7a8; }
+.remote-job-state.failed,
+.remote-job-state.canceled { color: #ff8f8f; }
+.remote-job-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  opacity: 0.6;
+  margin-top: 3px;
+}
+.remote-job-error {
+  font-size: 0.72rem;
+  color: #ff8f8f;
+  word-break: break-word;
+  margin-top: 4px;
+}
+.remote-job-link {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 0.76rem;
+  color: var(--main-color, #8ab4ff);
+  text-decoration: none;
+}
+.server-status.bad { color: #ff8f8f; }
 </style>

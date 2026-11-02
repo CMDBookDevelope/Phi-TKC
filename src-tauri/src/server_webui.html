@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#101014" />
+<title>Phi-TKC 渲染</title>
+<style>
+  :root {
+    --bg: #101014;
+    --card: rgba(255, 255, 255, 0.06);
+    --stroke: rgba(255, 255, 255, 0.12);
+    --text: #f2f2f7;
+    --muted: #9aa0ae;
+    --accent: #8ab4ff;
+    --ok: #6ee7a8;
+    --bad: #ff8f8f;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(1200px 600px at 10% -10%, #2a2f52 0%, transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, #3b2340 0%, transparent 55%),
+      var(--bg);
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+  h1 { font-size: 1.15rem; margin: 0; letter-spacing: .02em; }
+  .pill {
+    font-size: .72rem; color: var(--muted);
+    border: 1px solid var(--stroke); border-radius: 999px;
+    padding: 4px 10px; background: var(--card); white-space: nowrap;
+  }
+  .pill b { color: var(--ok); font-weight: 600; }
+  .card {
+    background: var(--card); border: 1px solid var(--stroke);
+    border-radius: 18px; padding: 16px; margin-bottom: 14px;
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  }
+  .card h2 { font-size: .82rem; color: var(--muted); font-weight: 600; margin: 0 0 12px; letter-spacing: .08em; text-transform: uppercase; }
+  .drop {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; min-height: 112px; border-radius: 14px; cursor: pointer;
+    border: 1px dashed rgba(255,255,255,.22); background: rgba(255,255,255,.03);
+    text-align: center; padding: 14px;
+  }
+  .drop:active, .drop:hover { background: rgba(255,255,255,.07); }
+  .drop strong { font-size: .95rem; font-weight: 600; }
+  .drop span { font-size: .76rem; color: var(--muted); word-break: break-all; }
+  input[type=file] { display: none; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  label.field { display: flex; flex-direction: column; gap: 5px; font-size: .72rem; color: var(--muted); }
+  select, input[type=number] {
+    width: 100%; padding: 10px 12px; border-radius: 11px; color: var(--text);
+    background: rgba(0,0,0,.28); border: 1px solid var(--stroke);
+    font-size: .92rem; appearance: none;
+  }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 2px; font-size: .9rem; }
+  .row + .row { border-top: 1px solid rgba(255,255,255,.06); }
+  .switch { position: relative; width: 44px; height: 26px; flex: none; }
+  .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; }
+  .switch i { position: absolute; inset: 0; border-radius: 999px; background: rgba(255,255,255,.14); transition: background .18s; }
+  .switch i::after {
+    content: ""; position: absolute; width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; top: 3px; left: 3px; transition: transform .18s;
+  }
+  .switch input:checked + i { background: var(--accent); }
+  .switch input:checked + i::after { transform: translateX(18px); }
+  button {
+    width: 100%; padding: 14px; border-radius: 14px; border: 0; cursor: pointer;
+    font-size: .98rem; font-weight: 600; color: #10131a;
+    background: linear-gradient(180deg, #a9c6ff, #7ea8ff);
+  }
+  button:disabled { opacity: .45; }
+  .bar { height: 8px; border-radius: 999px; background: rgba(255,255,255,.1); overflow: hidden; margin: 10px 0 8px; }
+  .bar > div { height: 100%; width: 0%; background: linear-gradient(90deg, #7ea8ff, #b18cff); transition: width .25s; }
+  .meta { display: flex; justify-content: space-between; font-size: .76rem; color: var(--muted); }
+  .job { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; }
+  .job + .job { border-top: 1px solid rgba(255,255,255,.07); }
+  .job-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .job-name { font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .state { font-size: .72rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--stroke); color: var(--muted); flex: none; }
+  .state.done { color: var(--ok); border-color: rgba(110,231,168,.4); }
+  .state.failed, .state.canceled { color: var(--bad); border-color: rgba(255,143,143,.4); }
+  .actions { display: flex; gap: 16px; margin-top: 6px; }
+  .link { color: var(--accent); font-size: .82rem; text-decoration: none; }
+  .err { color: var(--bad); font-size: .78rem; word-break: break-word; }
+  .hint { color: var(--muted); font-size: .72rem; line-height: 1.5; margin-top: 10px; }
+
+  /* ---- Desktop: wider canvas, four controls per row, denser job list ---- */
+  body.is-desktop .wrap { max-width: 960px; padding: 28px 24px 56px; }
+  body.is-desktop h1 { font-size: 1.3rem; }
+  body.is-desktop .grid { grid-template-columns: repeat(4, 1fr); }
+  body.is-desktop .drop { min-height: 96px; }
+  body.is-desktop .card { padding: 20px; }
+  body.is-desktop button { max-width: 260px; }
+  body.is-desktop .actions { gap: 22px; }
+
+  /* ---- Mobile: one column, larger touch targets, safe-area padding ---- */
+  body.is-mobile .wrap { padding-bottom: calc(48px + env(safe-area-inset-bottom)); }
+  body.is-mobile button { padding: 16px; font-size: 1rem; }
+  body.is-mobile select, body.is-mobile input[type=number] { padding: 12px; font-size: 1rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Phi-TKC 渲染</h1>
+    <div class="pill" id="status">连接中…</div>
+  </header>
+
+  <form class="card" id="form">
+    <h2>提交渲染</h2>
+    <label class="drop" for="file">
+      <strong>选择谱面压缩包</strong>
+      <span id="fileLabel">.pez / .zip / .pgr / .rpe</span>
+    </label>
+    <input id="file" type="file" accept=".pez,.zip,.pgr,.rpe,.json" />
+
+    <div class="grid">
+      <label class="field">分辨率
+        <select id="resolution">
+          <option>1920x1080</option>
+          <option selected>1920x1440</option>
+          <option>2560x1920</option>
+          <option>3840x2560</option>
+          <option>1280x960</option>
+        </select>
+      </label>
+      <label class="field">帧率
+        <select id="fps">
+          <option>30</option>
+          <option selected>60</option>
+          <option>120</option>
+        </select>
+      </label>
+      <label class="field">CRF / QP
+        <input id="crf" type="number" min="1" max="51" value="23" />
+      </label>
+      <label class="field">封装
+        <select id="video">
+          <option value="mp4" selected>MP4</option>
+          <option value="mov">MOV</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="row"><span>跳过加载动画</span>
+      <label class="switch"><input id="load" type="checkbox" checked /><i></i></label>
+    </div>
+    <div class="row"><span>结算画面</span>
+      <label class="switch"><input id="finish" type="checkbox" /><i></i></label>
+    </div>
+
+    <div style="height:12px"></div>
+    <button id="submit" type="submit">开始渲染</button>
+    <p class="hint" id="formHint">任务在电脑端排队渲染，完成后可直接下载。</p>
+  </form>
+
+  <div class="card">
+    <h2>任务</h2>
+    <div id="jobs"><p class="hint">暂无任务</p></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const isMobile = /android|iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && matchMedia('(pointer: coarse)').matches);
+  document.body.classList.add(isMobile ? 'is-mobile' : 'is-desktop');
+
+  const stateText = { queued: '排队中', mixing: '混音中', running: '渲染中', done: '已完成', failed: '失败', canceled: '已取消' };
+  let pollTimer = null;
+
+  const fmtEta = (s) => {
+    if (!s || !isFinite(s) || s <= 0) return '—';
+    const m = Math.floor(s / 60), r = Math.round(s % 60);
+    return m > 0 ? `约 ${m} 分 ${r} 秒` : `约 ${r} 秒`;
+  };
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  async function refreshStatus() {
+    try {
+      const res = await fetch('api/status', { cache: 'no-store' });
+      const data = await res.json();
+      $('status').innerHTML = `<b>在线</b> · v${data.version}${data.busy ? ' · 忙碌' : ''}`;
+    } catch {
+      $('status').textContent = '离线';
+    }
+  }
+
+  function jobEl(job) {
+    const pct = Math.round((job.progress || 0) * 100);
+    const active = job.status === 'running' || job.status === 'mixing';
+    const el = document.createElement('div');
+    el.className = 'job';
+    el.innerHTML = `
+      <div class="job-head">
+        <div class="job-name">${escapeHtml(job.name || job.id)}</div>
+        <div class="state ${job.status}">${stateText[job.status] || job.status}</div>
+      </div>
+      ${active ? `<div class="bar"><div style="width:${pct}%"></div></div>
+        <div class="meta"><span>${job.fps || 0} FPS</span><span>${pct}% · ${fmtEta(job.eta)}</span></div>` : ''}
+      ${job.error ? `<div class="err">${escapeHtml(job.error)}</div>` : ''}
+      <div class="actions">
+        ${job.status === 'done' && job.download ? `<a class="link" href="${job.download}">下载视频</a>` : ''}
+        ${['queued', 'mixing', 'running'].includes(job.status) ? `<a class="link" href="#" data-cancel="${job.id}">取消</a>` : ''}
+      </div>`;
+    return el;
+  }
+
+  async function refreshJobs() {
+    try {
+      const res = await fetch('api/jobs', { cache: 'no-store' });
+      const jobs = await res.json();
+      const box = $('jobs');
+      box.innerHTML = '';
+      if (!jobs.length) { box.innerHTML = '<p class="hint">暂无任务</p>'; return; }
+      jobs.slice(0, 20).forEach((job) => box.appendChild(jobEl(job)));
+      const busy = jobs.some((job) => ['queued', 'mixing', 'running'].includes(job.status));
+      if (busy && !pollTimer) pollTimer = setInterval(refreshJobs, 1000);
+      if (!busy && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    } catch { /* keep the last list */ }
+  }
+
+  $('jobs').addEventListener('click', async (ev) => {
+    const id = ev.target?.dataset?.cancel;
+    if (!id) return;
+    ev.preventDefault();
+    await fetch(`api/jobs/${id}/cancel`, { method: 'POST' });
+    refreshJobs();
+  });
+
+  $('file').addEventListener('change', () => {
+    const f = $('file').files[0];
+    $('fileLabel').textContent = f ? `${f.name} · ${(f.size / 1048576).toFixed(1)} MB` : '.pez / .zip / .pgr / .rpe';
+  });
+
+  $('form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const file = $('file').files[0];
+    if (!file) { $('formHint').textContent = '请先选择谱面文件'; return; }
+    const body = new FormData();
+    body.append('file', file);
+    body.append('resolution', $('resolution').value);
+    body.append('fps', $('fps').value);
+    body.append('crf', $('crf').value);
+    body.append('video', $('video').value);
+    body.append('load', $('load').checked ? 'true' : 'false');
+    body.append('finish', $('finish').checked ? 'true' : 'false');
+    $('submit').disabled = true;
+    $('formHint').textContent = '上传中…';
+    try {
+      const res = await fetch('api/render', { method: 'POST', body });
+      if (!res.ok) throw new Error(await res.text());
+      $('formHint').textContent = '已提交，正在排队…';
+      $('file').value = '';
+      $('fileLabel').textContent = '.pez / .zip / .pgr / .rpe';
+      refreshJobs();
+    } catch (e) {
+      $('formHint').textContent = `提交失败：${e.message || e}`;
+    } finally {
+      $('submit').disabled = false;
+    }
+  });
+
+  refreshStatus();
+  refreshJobs();
+  setInterval(refreshStatus, 5000);
+  setInterval(() => { if (!pollTimer) refreshJobs(); }, 5000);
+})();
+</script>
+</body>
+</html>

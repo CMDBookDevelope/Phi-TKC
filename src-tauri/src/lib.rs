@@ -9,6 +9,7 @@ mod gpu_info;
 pub mod ipc;
 mod preview;
 pub mod render;
+pub mod server;
 mod task;
 mod vulkan_encode;
 mod vulkan_readback;
@@ -117,6 +118,11 @@ pub async fn run() -> Result<()> {
             save_binary_file,
             load_chart_illustration,
             get_msaa_sample_counts,
+            remote_status,
+            remote_jobs,
+            start_render_server,
+            stop_render_server,
+            render_server_status,
         ])
         .on_window_event(|_, event| match event {
             //WindowEvent::CloseRequested { api, .. } => {
@@ -681,6 +687,59 @@ async fn load_chart_illustration(
         let cover_path = cache_dir.join(format!("{:016x}.{extension}", hasher.finish()));
         tokio::fs::write(&cover_path, data).await?;
         Ok(cover_path.display().to_string())
+    })
+    .await
+}
+
+/// Probe a remote `phi-tkc server` from the app.
+///
+/// Done in Rust rather than the WebView so it is not subject to CORS, the
+/// `http:default` capability scope, or Android's cleartext-HTTP block.
+#[tauri::command]
+async fn remote_status(base: String) -> Result<serde_json::Value, InvokeError> {
+    wrap_async(async move {
+        let url = format!("{}/api/status", base.trim_end_matches('/'));
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(6))
+            .build()?;
+        let response = client.get(&url).send().await?;
+        if !response.status().is_success() {
+            anyhow::bail!("HTTP {}", response.status());
+        }
+        Ok(response.json::<serde_json::Value>().await?)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn start_render_server(host: String, port: u16) -> Result<server::ServerStatus, InvokeError> {
+    wrap_async(server::start_managed(host, port)).await
+}
+
+#[tauri::command]
+fn stop_render_server() -> bool {
+    server::stop_managed()
+}
+
+#[tauri::command]
+fn render_server_status() -> server::ServerStatus {
+    server::managed_status()
+}
+
+/// `GET /api/jobs` on the remote renderer (polling fallback when the WebSocket
+/// cannot be established, e.g. a WebView that blocks cleartext `ws://`).
+#[tauri::command]
+async fn remote_jobs(base: String) -> Result<serde_json::Value, InvokeError> {
+    wrap_async(async move {
+        let url = format!("{}/api/jobs", base.trim_end_matches('/'));
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(6))
+            .build()?;
+        let response = client.get(&url).send().await?;
+        if !response.status().is_success() {
+            anyhow::bail!("HTTP {}", response.status());
+        }
+        Ok(response.json::<serde_json::Value>().await?)
     })
     .await
 }
