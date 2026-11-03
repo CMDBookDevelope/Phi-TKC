@@ -1,0 +1,43 @@
+name: AutoRelease
+
+# One click here = one release with every platform's artifacts.
+#
+# It only dispatches the two build workflows; each of them publishes into the
+# same release because the tag is derived from the version and the commit sha
+# (`v<version>-<short sha>`). Both dispatches below therefore target the same
+# commit, so the second workflow to finish appends to the release created by
+# the first instead of creating a second one.
+#
+# Running Desktop and Mobile by hand works exactly the same way (same commit ->
+# same tag -> one release). This workflow just saves the second click.
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch desktop + mobile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger both build workflows
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Dispatching desktop.yml and mobile.yml on ${REF}"
+          gh workflow run desktop.yml --repo "$REPO" --ref "$REF"
+          gh workflow run mobile.yml --repo "$REPO" --ref "$REF"
+
+          sleep 8
+          {
+            echo "## Triggered runs"
+            echo '```'
+            gh run list --repo "$REPO" --limit 6
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
