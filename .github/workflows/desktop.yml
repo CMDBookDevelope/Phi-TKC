@@ -125,7 +125,7 @@ jobs:
         run: |
           git clone --depth 1 --filter=blob:none --sparse \
             --branch render-lib \
-            https://github.com/CMDBookDevelope/Phi-TK-render-lib.git prpr-lib
+            https://github.com/CMDBookDevelope/Phi-TKC-render-lib.git prpr-lib
           git -C prpr-lib sparse-checkout set "prpr-avc/static-lib/${{ matrix.rust-target }}"
 
       - name: Install frontend dependencies

@@ -34,7 +34,7 @@ anyhow = { version = "1.0.70", features = ["backtrace"] }
 
 #macroquad = { path = "D:/Github/prpr-macroquad", default-features = false}
 macroquad = { git = "https://github.com/CMDBookDevelope/prpr-macroquad", default-features = false }
-prpr = { git = "https://github.com/CMDBookDevelope/Phi-TK-render-lib", package = "prpr", branch = "render-lib" }
+prpr = { git = "https://github.com/CMDBookDevelope/Phi-TKC-render-lib", package = "prpr", branch = "render-lib" }
 
 # prpr = { path = "../../phira/prpr" }
 
@@ -78,7 +78,7 @@ opt-level = 3
 winreg = "0.55.0"
 
 # `sasa` uses oboe on Android instead of cpal. Keep this in sync with prpr's own
-# target split (Phi-TK-render-lib/prpr/Cargo.toml): if the app pulled sasa with the
+# target split (Phi-TKC-render-lib/prpr/Cargo.toml): if the app pulled sasa with the
 # default cpal feature on Android, cpal's oboe 0.4 and sasa's oboe 0.5 would both be
 # linked into the .so and the linker would reject the duplicate C++ symbols.
 [target.'cfg(target_os = "android")'.dependencies]

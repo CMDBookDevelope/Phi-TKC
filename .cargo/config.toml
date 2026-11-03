@@ -1,5 +1,5 @@
 # The prpr-avc FFmpeg static libraries for Apple targets
-# (Phi-TK-render-lib @ render-lib, prpr-avc/static-lib/aarch64-apple-*) are built with
+# (Phi-TKC-render-lib @ render-lib, prpr-avc/static-lib/aarch64-apple-*) are built with
 # the VideoToolbox hardware decoder enabled, so their object files reference symbols
 # from CoreVideo / VideoToolbox / CoreMedia / CoreFoundation.
 #
