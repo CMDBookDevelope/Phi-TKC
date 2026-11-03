@@ -58,7 +58,15 @@
 
   .page-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 4px 4px 14px; }
   .page-head h1 { font-size: 1.25rem; letter-spacing: .04em; margin: 0; }
-  .page-head .sub { font-size: .74rem; opacity: .65; }
+
+  /* main.css paints the specular highlight with --bg-color-rgb. On this flat
+     dark backdrop that is invisible, so the WebUI uses a neutral light one. */
+  .glass::after {
+    background: radial-gradient(circle,
+      rgba(255,255,255,.16) 0%,
+      rgba(255,255,255,.05) 30%,
+      rgba(255,255,255,0) 100%);
+  }
 
   .card { border-radius: 20px; padding: 18px; margin-bottom: 14px; }
   .card h2 {
@@ -77,17 +85,56 @@
   .drop:hover, .drop.over { background: rgba(var(--main-color-rgb), .12); border-color: rgba(var(--main-color-rgb), .8); }
   .drop strong { font-size: .96rem; }
   .drop span { font-size: .74rem; opacity: .66; word-break: break-all; }
-  input[type=file] { display: none; }
+  /* Only the chart drop zone's input is hidden; avatar/respack stay visible. */
+  #file { display: none; }
 
   .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
   .field { display: flex; flex-direction: column; gap: 6px; font-size: .72rem; opacity: .9; }
   .field > span { opacity: .7; }
-  select, input[type=number] {
-    width: 100%; padding: 10px 12px; border-radius: 11px; color: inherit; font: inherit; font-size: .9rem;
+
+  /* One shell for every control. Text fields used to fall back to the browser
+     default while number fields got the glass style, which is why the player
+     name / bitrate override looked out of place. */
+  .field > select,
+  .field > input[type=text],
+  .field > input[type=number],
+  .field > input[type=search],
+  .field > input[type=url],
+  .field > input[type=email],
+  .field > input[type=password],
+  .field > input[type=tel],
+  .field > input[type=date] {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 11px;
+    color: inherit; font: inherit; font-size: .9rem;
     background: rgba(0,0,0,.25); border: 1px solid rgba(var(--main-color-rgb), .22);
-    outline: none; appearance: none;
+    outline: none; appearance: none; transition: border-color .18s, background .18s;
   }
-  select:focus, input[type=number]:focus { border-color: rgba(var(--main-color-rgb), .8); }
+  .field > input[type=file] {
+    width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 11px;
+    color: inherit; font: inherit; font-size: .82rem; cursor: pointer;
+    background: rgba(0,0,0,.25); border: 1px solid rgba(var(--main-color-rgb), .22);
+    outline: none; transition: border-color .18s, background .18s;
+  }
+  .field > select:hover,
+  .field > input:not([type=checkbox]):not([type=radio]):not([type=color]):hover {
+    background: rgba(0,0,0,.32);
+  }
+  .field > select:focus,
+  .field > input:not([type=checkbox]):not([type=radio]):not([type=color]):focus {
+    border-color: rgba(var(--main-color-rgb), .8);
+    background: rgba(0,0,0,.34);
+  }
+  .field > input::placeholder { color: inherit; opacity: .38; }
+
+  /* File pickers keep the same shell; the native button becomes a ghost chip. */
+  .field > input[type=file]::file-selector-button {
+    margin-right: 10px; padding: 5px 12px; border-radius: 8px; cursor: pointer;
+    color: inherit; font: inherit; font-size: .8rem;
+    background: rgba(var(--main-color-rgb), .18);
+    border: 1px solid rgba(var(--main-color-rgb), .4);
+    transition: background .18s;
+  }
+  .field > input[type=file]::file-selector-button:hover { background: rgba(var(--main-color-rgb), .3); }
 
   .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px; font-size: .9rem; }
   .row + .row { border-top: 1px solid rgba(var(--main-color-rgb), .10); }
@@ -200,7 +247,6 @@
     <section class="view active" id="view-render">
       <div class="page-head">
         <h1>渲染</h1>
-        <span class="sub">提交一个谱面，服务端会立刻起一个渲染进程</span>
       </div>
 
       <form class="card glass fluent-glass" id="form">
@@ -309,7 +355,6 @@
     <section class="view" id="view-tasks">
       <div class="page-head">
         <h1>任务</h1>
-        <span class="sub">实时进度 · 完成/失败都会留在这里</span>
       </div>
       <div class="card glass fluent-glass">
         <h2>任务列表</h2>
@@ -321,7 +366,6 @@
     <section class="view" id="view-settings">
       <div class="page-head">
         <h1>设置</h1>
-        <span class="sub">主题色与服务器信息</span>
       </div>
 
       <div class="card glass fluent-glass">
@@ -359,7 +403,6 @@
     <section class="view" id="view-about">
       <div class="page-head">
         <h1>关于</h1>
-        <span class="sub">Phi-TKC</span>
       </div>
       <div class="about glass fluent-glass" id="aboutBox">
         <canvas class="snow-canvas" id="snow"></canvas>
