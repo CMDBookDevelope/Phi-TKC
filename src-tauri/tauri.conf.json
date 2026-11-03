@@ -47,7 +47,7 @@
   },
   "productName": "Phi-TKC",
   "mainBinaryName": "Phi-TKC",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "identifier": "com.cnmdbook.phi.tkc",
   "plugins": {},
   "app": {
