@@ -495,9 +495,12 @@
     const box = $('jobs');
     if (!jobs.length) { box.innerHTML = '<div class="hint">暂无任务</div>'; return; }
     box.innerHTML = '';
-    for (const job of jobs) {
+    // Only the most recent job keeps a progress bar; older ones collapse to a
+    // status line so the page does not accumulate dead progress bars.
+    jobs.forEach((job, index) => {
       const el = document.createElement('div');
       el.className = 'job';
+      const latest = index === 0;
       const pct = Math.max(0, Math.min(100, Math.round((job.progress || 0) * 100)));
       const meta = [];
       if (job.fps) meta.push(job.fps + ' FPS');
@@ -507,15 +510,15 @@
           <span class="job-name">${escapeHtml(job.name || job.id)}</span>
           <span class="state ${job.status}">${stateText[job.status] || job.status}</span>
         </div>
-        <div class="bar"><div style="width:${pct}%"></div></div>
-        <div class="meta"><span>${pct}%</span><span>${meta.join(' · ')}</span></div>
+        ${latest ? `<div class="bar"><div style="width:${pct}%"></div></div>
+        <div class="meta"><span>${pct}%</span><span>${meta.join(' · ')}</span></div>` : ''}
         ${job.error ? `<div class="err">${escapeHtml(job.error)}</div>` : ''}
         ${job.status === 'done' ? `<div class="job-actions"><a class="link" href="${job.download}" target="_blank" rel="noreferrer">下载结果</a></div>` : ''}
         ${job.status === 'running' || job.status === 'mixing' || job.status === 'queued'
             ? `<div class="job-actions"><span class="link" data-cancel="${job.id}">取消</span></div>` : ''}
       `;
       box.appendChild(el);
-    }
+    });
     box.querySelectorAll('[data-cancel]').forEach((b) =>
       b.addEventListener('click', () => fetch('/api/jobs/' + b.dataset.cancel + '/cancel', { method: 'POST' })));
   }

@@ -89,6 +89,18 @@ fn install_panic_logger() {
     }));
 }
 
+/// `miniquad`'s legacy Android backend references an external `quad_main` symbol
+/// (`src/native/android.rs`), even though Tauri/wry never calls it. Without a
+/// definition the dynamic loader refuses to load `libapp_lib.so`:
+///
+///   UnsatisfiedLinkError: dlopen failed: cannot locate symbol "quad_main"
+///
+/// Winamin/Phi-TK's android branch defines it for its native preview; we keep a
+/// no-op so the library loads. Nothing in the Tauri app calls it.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "C" fn quad_main() {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub async fn run() -> Result<()> {
     #[cfg(target_os = "android")]
