@@ -70,6 +70,20 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: {{apple.bundle-version-short}}
         CFBundleVersion: "{{apple.bundle-version}}"
+        # --- App permissions / capabilities ---------------------------------
+        # Charts and rendered videos are imported/exported through the Files app;
+        # exposing the Documents folder makes that possible without iCloud.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        # No custom encryption beyond HTTPS, so App Store Connect need not ask.
+        ITSAppUsesNonExemptEncryption: false
+        # "Remote renderer" connects to a Phi-TKC server on the local network over
+        # plain HTTP (`http://192.168.x.x:6787`). iOS 14+ needs the local-network
+        # purpose string, and ATS needs an exception for raw IP hosts.
+        NSLocalNetworkUsageDescription: 连接同一局域网内的 Phi-TKC 渲染服务器，提交谱面并取回渲染结果。
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
         {{~#each apple.plist-pairs}}
         {{this.key}}: {{this.value}}{{/each}}
     entitlements:
