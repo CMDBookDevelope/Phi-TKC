@@ -11,9 +11,9 @@ use axum::{
     body::Body,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        DefaultBodyLimit, Multipart, Path as UrlPath, State,
+        DefaultBodyLimit, Multipart, Path as UrlPath, Query, State,
     },
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -33,7 +33,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader},
     sync::{broadcast, Mutex},
 };
 use tokio_util::io::ReaderStream;
@@ -365,7 +365,43 @@ async fn cancel(State(st): State<AppState>, UrlPath(id): UrlPath<String>) -> Res
     }
 }
 
-async fn download(State(st): State<AppState>, UrlPath(id): UrlPath<String>) -> Response {
+#[derive(serde::Deserialize)]
+struct DownloadQuery {
+    /// `?inline=1` streams the file for in-page playback instead of forcing a
+    /// download (the WebUI player uses this). Kept as a string because the UI
+    /// sends `1`, not `true`.
+    inline: Option<String>,
+}
+
+impl DownloadQuery {
+    fn is_inline(&self) -> bool {
+        matches!(self.inline.as_deref(), Some("1") | Some("true") | Some("yes"))
+    }
+}
+
+/// Parse `Range: bytes=start-end`. Returns `None` for absent/unsupported
+/// ranges, in which case the whole file is served.
+fn parse_range(value: &str, total: u64) -> Option<(u64, u64)> {
+    let spec = value.trim().strip_prefix("bytes=")?;
+    let (start, end) = spec.split_once('-')?;
+    let start: u64 = start.trim().parse().ok()?;
+    let end: u64 = if end.trim().is_empty() {
+        total.saturating_sub(1)
+    } else {
+        end.trim().parse().ok()?
+    };
+    if start > end || start >= total {
+        return None;
+    }
+    Some((start, end.min(total - 1)))
+}
+
+async fn download(
+    State(st): State<AppState>,
+    UrlPath(id): UrlPath<String>,
+    Query(query): Query<DownloadQuery>,
+    headers: HeaderMap,
+) -> Response {
     let output = {
         let jobs = st.jobs.lock().await;
         match jobs.get(&id) {
@@ -373,21 +409,59 @@ async fn download(State(st): State<AppState>, UrlPath(id): UrlPath<String>) -> R
             _ => return (StatusCode::NOT_FOUND, "job not ready").into_response(),
         }
     };
-    let Ok(file) = tokio::fs::File::open(&output).await else {
+    let Ok(meta) = tokio::fs::metadata(&output).await else {
         return (StatusCode::NOT_FOUND, "output missing").into_response();
     };
+    let total = meta.len();
     let name = output
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("output.mp4");
-    let stream = ReaderStream::new(file);
-    Response::builder()
-        .header(header::CONTENT_TYPE, "application/octet-stream")
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{name}\""),
-        )
-        .body(Body::from_stream(stream))
+    // Browsers need a video MIME type to play the file in a <video> tag.
+    let inline = query.is_inline();
+    let content_type = if inline {
+        "video/mp4"
+    } else {
+        "application/octet-stream"
+    };
+    let disposition = if inline {
+        format!("inline; filename=\"{name}\"")
+    } else {
+        format!("attachment; filename=\"{name}\"")
+    };
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| parse_range(value, total));
+
+    let builder = Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .header(header::ACCEPT_RANGES, "bytes");
+
+    if let Some((start, end)) = range {
+        let Ok(mut file) = tokio::fs::File::open(&output).await else {
+            return (StatusCode::NOT_FOUND, "output missing").into_response();
+        };
+        if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "seek failed").into_response();
+        }
+        let len = end - start + 1;
+        let stream = ReaderStream::new(file.take(len));
+        return builder
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}"))
+            .header(header::CONTENT_LENGTH, len)
+            .body(Body::from_stream(stream))
+            .unwrap();
+    }
+
+    let Ok(file) = tokio::fs::File::open(&output).await else {
+        return (StatusCode::NOT_FOUND, "output missing").into_response();
+    };
+    builder
+        .header(header::CONTENT_LENGTH, total)
+        .body(Body::from_stream(ReaderStream::new(file)))
         .unwrap()
 }
 

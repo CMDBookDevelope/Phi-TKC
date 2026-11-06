@@ -223,6 +223,11 @@
   body.is-mobile .btn { width: 100%; padding: 14px; }
   body.is-mobile .card { padding: 15px; }
   body.is-mobile .content { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
+.player-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.82);backdrop-filter:blur(18px)}
+.player-overlay[hidden]{display:none}
+.player-box{position:relative;width:min(92vw,1280px);max-height:88vh;border-radius:18px;overflow:hidden;background:#000;box-shadow:0 24px 80px rgba(0,0,0,.6)}
+.player-box video{display:block;width:100%;max-height:88vh;background:#000}
+.player-close{position:absolute;top:10px;right:10px;width:38px;height:38px;border-radius:50%;border:none;cursor:pointer;color:#fff;background:rgba(0,0,0,.55);font-size:18px}
 </style>
 </head>
 <body>
@@ -559,7 +564,7 @@
         ${latest ? `<div class="bar"><div style="width:${pct}%"></div></div>
         <div class="meta"><span>${pct}%</span><span>${meta.join(' · ')}</span></div>` : ''}
         ${job.error ? `<div class="err">${escapeHtml(job.error)}</div>` : ''}
-        ${job.status === 'done' ? `<div class="job-actions"><a class="link" href="${job.download}" target="_blank" rel="noreferrer">下载结果</a></div>` : ''}
+        ${job.status === 'done' ? `<div class="job-actions"><span class="link" data-play="${job.id}">在线播放</span><a class="link" href="${job.download}" target="_blank" rel="noreferrer">下载结果</a></div>` : ''}
         ${job.status === 'running' || job.status === 'mixing' || job.status === 'queued'
             ? `<div class="job-actions"><span class="link" data-cancel="${job.id}">取消</span></div>` : ''}
       `;
@@ -567,6 +572,8 @@
     });
     box.querySelectorAll('[data-cancel]').forEach((b) =>
       b.addEventListener('click', () => fetch('/api/jobs/' + b.dataset.cancel + '/cancel', { method: 'POST' })));
+    box.querySelectorAll('[data-play]').forEach((b) =>
+      b.addEventListener('click', () => playJob(b.dataset.play)));
   }
 
   function escapeHtml(text) {
@@ -692,6 +699,26 @@
   }
   $('year').textContent = new Date().getFullYear();
 
+  // ============ In-page player ============
+  // Streams the finished MP4 straight from the server (Range requests are
+  // supported, so seeking works) instead of forcing a download first.
+  const player = $('player');
+  const playerVideo = $('player-video');
+  function playJob(id) {
+    playerVideo.src = '/api/jobs/' + id + '/download?inline=1';
+    player.hidden = false;
+    playerVideo.play().catch(() => {});
+  }
+  function closePlayer() {
+    playerVideo.pause();
+    playerVideo.removeAttribute('src');
+    playerVideo.load();
+    player.hidden = true;
+  }
+  $('player-close').addEventListener('click', closePlayer);
+  player.addEventListener('click', (e) => { if (e.target === player) closePlayer(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !player.hidden) closePlayer(); });
+
   // ============ Boot ============
   refreshStatus();
   refreshJobs();
@@ -700,5 +727,11 @@
   connectWs();
 })();
 </script>
+<div id="player" class="player-overlay" hidden>
+  <div class="player-box">
+    <video id="player-video" controls playsinline preload="metadata"></video>
+    <button id="player-close" class="player-close" title="关闭">✕</button>
+  </div>
+</div>
 </body>
 </html>
