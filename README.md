@@ -238,6 +238,12 @@ Phi-TKC/
 └── arts/                  # 文档图片
 ```
 
+## 致谢 / Acknowledgements
+
+- **噪域（`blockAreaList`）支持**移植自 [Ameiro-sudo/Phi-TK](https://github.com/Ameiro-sudo/Phi-TK) 的 `noise-build` 分支。
+  感谢该 fork 的修改者（仓库作者及其贡献者）对 Phigros 9th-chapter 噪域、区块遮挡、触摸判定与着色器效果所做的
+  逆向分析与实现工作；本仓库在其基础上只保留了与图形后端无关的平面渲染路径，并改写为纯 Vulkan（不依赖 OpenGL）版本。
+
 ## 许可证
 
 本项目采用 GNU v3.0 开源许可证，详见 LICENSE 文件。
