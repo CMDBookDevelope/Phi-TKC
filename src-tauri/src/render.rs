@@ -900,9 +900,11 @@ async fn render_impl(
     // because only `render_cli` used to call `init_colored_logger`.
     init_colored_logger();
 
-    // `log_mode` used to choose between the pretty logger and machine-readable
-    // IPC events; events are always emitted on stdout now.
-    let _ = (exit_after, log_mode);
+    // `log_mode` means "a human is watching this terminal": print the pretty
+    // logs and the progress bar, and keep stdout free of IPC events. The GUI and
+    // server child pass `false` and parse the events instead.
+    set_enabled(!log_mode);
+    let _ = exit_after;
     let process_start = Instant::now();
     let path = params.path;
 
