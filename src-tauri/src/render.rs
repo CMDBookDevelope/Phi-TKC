@@ -2541,17 +2541,16 @@ async fn render_impl(
 
     let total_frames = frames;
 
-    let frames10 = (out_frames / 10).max(1);
-    let mut next_mark = frames10;
-    let mut step_time = Instant::now();
     // Crate-based progress bar (indicatif). It draws on stderr, so the `info!`
     // log lines on stdout stay readable. The GUI/server child passes
     // `log_mode == false` and reports progress through IPC instead, so it gets
     // a hidden bar.
     let progress = if log_mode {
+        // One repaint per second: a 20 Hz bar is wasted work and scrolls the
+        // terminal when stderr is not a TTY.
         let pb = ProgressBar::with_draw_target(
             Some(out_frames),
-            ProgressDrawTarget::stderr(),
+            ProgressDrawTarget::stderr_with_hz(1),
         );
         pb.set_style(
             ProgressStyle::default_bar()
@@ -2563,11 +2562,6 @@ async fn render_impl(
     } else {
         ProgressBar::hidden()
     };
-    let show = |done: u64, _label: &str, step_time: &mut Instant| {
-        progress.set_position(done);
-        *step_time = Instant::now();
-    };
-
     // log
     let mut dma_wait_time: f64 = 0.0;
     let mut output_index:u64 = 0;
@@ -2646,12 +2640,10 @@ async fn render_impl(
             draw_rectangle(0., 0., 0., 0., Color::default());
         }
 
-        let done = ffmpeg_frames.load(Ordering::Relaxed).min(out_frames);
-        if done >= next_mark {
-            let label = format!("{:.2}s", step_time.elapsed().as_secs_f32());
-            show(done, &label, &mut step_time);
-            next_mark = done + frames10;
-        }
+        // Move the bar on every frame; indicatif throttles the actual redraw
+        // (1 Hz), and the old code only advanced it once per 10% of the frames,
+        // which made a 30 s render look like it updated every ~3 s.
+        progress.set_position(frame.saturating_sub(skip).min(out_frames));
 
         if let Some(pipe) = &mut nv12_pipe {
             let frame_slot = nv12_frame_slot.unwrap();
@@ -2821,9 +2813,7 @@ async fn render_impl(
         out_frames as f64 / nv12_submit_time.max(1e-9)
     );
     let written = ffmpeg_frames.load(Ordering::Relaxed);
-    if written > 0 {
-        show(written.min(out_frames), "Final frame", &mut step_time);
-    }
+    progress.set_position(out_frames);
     progress.finish();
     let busy = (loop_wall - dma_wait_time - pool_wait_time - slot_wait_time - fence_wait_time)
         .max(1e-9);
