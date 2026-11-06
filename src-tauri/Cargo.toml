@@ -1,6 +1,6 @@
 [package]
 name = "Phi-TKC"
-version = "1.0.6-noise"
+version = "1.0.6-beta-noise"
 description = "Phi-TKC"
 authors = ["Mivik", "Link", "CNMDBook"]
 license = "GPL-v3"
@@ -86,9 +86,3 @@ sasa = { git = "https://github.com/Winamin/sasa", default-features = false, feat
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 sasa = { git = "https://github.com/Winamin/sasa" }
-
-# Local-only while the 噪域 (block area) port is under test: build against the
-# working copy instead of the `render-lib` branch on GitHub. Remove together
-# with the matching block in Phi-TK-cli once the render-lib is pushed.
-[patch."https://github.com/CMDBookDevelope/Phi-TKC-render-lib"]
-prpr = { path = "../../Phi-TKC-render-lib/prpr" }
