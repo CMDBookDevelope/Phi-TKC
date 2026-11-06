@@ -138,7 +138,6 @@ jobs:
             --out "${OUTPUT_APK}" \
             "${ALIGNED_APK}"
           "${BUILD_TOOLS_DIR}/apksigner" verify --verbose "${OUTPUT_APK}"
-          sha256sum "${OUTPUT_APK}" > "${OUTPUT_APK}.sha256"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -146,7 +145,6 @@ jobs:
           name: android-apk
           path: |
             Phi-TKC-android-arm64.apk
-            Phi-TKC-android-arm64.apk.sha256
           if-no-files-found: error
 
   ios:
