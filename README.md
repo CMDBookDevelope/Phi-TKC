@@ -240,9 +240,12 @@ Phi-TKC/
 
 ## 致谢 / Acknowledgements
 
-- **噪域（`blockAreaList`）支持**移植自 [Ameiro-sudo/Phi-TK](https://github.com/Ameiro-sudo/Phi-TK) 的 `noise-build` 分支。
-  感谢该 fork 的修改者（仓库作者及其贡献者）对 Phigros 9th-chapter 噪域、区块遮挡、触摸判定与着色器效果所做的
-  逆向分析与实现工作；本仓库在其基础上只保留了与图形后端无关的平面渲染路径，并改写为纯 Vulkan（不依赖 OpenGL）版本。
+- **噪域（`blockAreaList`）数据模型与事件求值**移植自 [Ameiro-sudo/Phi-TK](https://github.com/Ameiro-sudo/Phi-TK) 的 `noise-build` 分支
+  （`block.rs` / `block_timeline.rs`）。感谢该 fork 的修改者（仓库作者及其贡献者）对 Phigros 9th-chapter 噪域、
+  区块遮挡与触摸判定所做的逆向分析与实现工作。
+- **噪域渲染**参考 [ziheng18/block-area-edit](https://github.com/ziheng18/block-area-edit)（GPL-3.0-only）的「实机贴合」模型：
+  可见区域 = 普通块覆盖 **异或** 奇数个减算块覆盖，填充默认噪域红 `#FF5454`，生效 `0.72` / 未生效 `0.15` 不透明度。
+  原仓库是单文件 HTML/JS 编辑器，本仓库把其中的遮罩与配色语义用 Rust 重写为逐帧多边形细分（不含编辑器界面）。
 
 ## 许可证
 

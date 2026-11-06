@@ -47,7 +47,7 @@
   },
   "productName": "Phi-TKC",
   "mainBinaryName": "Phi-TKC",
-  "version": "1.0.6-beta-noise",
+  "version": "1.0.7",
   "identifier": "com.cnmdbook.phi.tkc",
   "plugins": {},
   "app": {

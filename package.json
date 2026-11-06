@@ -1,6 +1,6 @@
 {
   "name": "phi-tkc",
-  "version": "1.0.6-beta-noise",
+  "version": "1.0.7",
   "private": true,
   "scripts": {
     "dev": "vite",
