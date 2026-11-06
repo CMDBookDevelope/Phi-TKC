@@ -559,7 +559,7 @@ fn build_config(
     config.audio_bit = number("audio-bit").map(|v| v as u32);
     config.audio_delay_frames = number("audio-delay-frames").map(|v| v as i32).unwrap_or(0);
 
-    config.combo = text("combo").unwrap_or("PHI-TK POWERED").to_owned();
+    config.combo = text("combo").unwrap_or("AUTOPLAY").to_owned();
     config.player_name = text("name").unwrap_or("").to_owned();
     config.player_rks = number("rks").unwrap_or(6.16);
     config.player_avatar = avatar.map(|path| path.display().to_string());

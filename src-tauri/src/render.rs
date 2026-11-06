@@ -2950,7 +2950,7 @@ pub struct CliArgs {
     #[arg(long)]
     pub avatar: Option<String>,
     /// Combo text
-    #[arg(long, default_value = "PHI-TK POWERED")]
+    #[arg(long, default_value = "AUTOPLAY")]
     pub combo: String,
     /// Watermark text (empty to disable)
     #[arg(short = 'w', long)]
