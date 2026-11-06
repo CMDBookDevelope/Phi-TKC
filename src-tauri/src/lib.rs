@@ -15,6 +15,15 @@ mod vulkan_encode;
 mod vulkan_readback;
 mod vulkan_video;
 
+// The Android build renders in-process with the NDK MediaCodec/MediaMuxer
+// pipeline instead of spawning `render` + ffmpeg (Android forbids fork/exec).
+#[cfg(target_os = "android")]
+mod android_media;
+#[cfg(target_os = "android")]
+pub mod android_render;
+#[cfg(target_os = "android")]
+pub mod android_uri;
+
 use anyhow::{bail, Context, Result};
 use common::{ensure_dir, output_dir, respack_dir, CONFIG_DIR, DATA_DIR};
 use fs4::tokio::AsyncFileExt;

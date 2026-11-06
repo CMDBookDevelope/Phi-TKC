@@ -10,25 +10,31 @@ Phi-TKC 现在会通过 GitHub Actions 打包移动端产物（见 `.github/work
 `gen/android`、`gen/apple` 不入库：本机没有 macOS/Xcode 与 Android SDK，无法在本地生成；
 CI 每次运行都会 `tauri {android,ios} init --ci` 重新生成。
 
-## 为什么移动端功能不完整
+## Android 现在可以真正渲染
 
-核心渲染管线是**桌面架构**：
+Android 走的是**进程内原生渲染管线**（移植自 `Winamin/Phi-TK` 的 `android` 分支）：
 
-1. `src-tauri/src/task.rs` 渲染时会 **spawn 自身二进制**（`current_exe render ...`）作为子进程；
-2. 该子进程再调用**外部 ffmpeg 可执行文件**编码（`render.rs`），并把帧通过管道喂过去；
-3. 硬件加速探测依赖 `nvidia-smi` / `vainfo` / `system_profiler` 等**外部命令**。
+1. `src-tauri/src/android_render.rs` 直接用 Vulkan 渲染 + `Nv12Readback` 回读，**不 spawn 子进程**；
+2. 编码用 NDK 的 `libmediandk.so`（`AMediaCodec` H.264/HEVC + AAC，`AMediaMuxer` 封装 MP4），
+   **完全不需要 ffmpeg 可执行文件**；
+3. `task.rs` 的 `run_android()` 在进程内 `spawn_blocking` 跑渲染，用原子变量汇报进度；
+4. 渲染日志写 logcat（`adb logcat -s PhiTK`）和输出视频旁的 `.log` 文件。
 
-iOS **禁止应用 spawn 子进程**，Android 上也没有可用的 ffmpeg 可执行文件，因此这套管线在移动端
-无法工作。移动端版本因此被定位为「能装、能开、可配置」的伴生版本，渲染相关入口会被替换为明确
-的说明页（`src/components/MobileUnsupported.vue`）。
+因此 Android 的渲染 / RPE / 批量渲染入口**不再屏蔽**（`src/platform.ts` 的 `isAndroid()`）。
+
+iOS 仍然不行：iOS 禁止 spawn 子进程、也没有可用的 ffmpeg，而且这条 NDK 管线在 iOS 上没有对应实现
+（`AudioToolbox`/`VideoToolbox` 需要另一套代码），所以 iOS 继续显示说明页。
+
+**注意**：Android 的视频编码参数会被规范化成 CBR（MediaCodec 不接受 CRF），
+码率取 `--bitrate`（缺省 8M），分辨率必须是偶数。
 
 ## 功能支持矩阵
 
 | 功能 | 桌面端 | 移动端 | 说明 |
 | --- | --- | --- | --- |
-| 渲染谱面（RenderView） | ✅ | ❌ 屏蔽 | 需要子进程 + 外部 ffmpeg |
-| 批量渲染（BatchRenderView） | ✅ | ❌ 屏蔽 | 同上 |
-| RPE 绑定（RPEView） | ✅ | ❌ 屏蔽 | 需要选目录 + 读任意路径 |
+| 渲染谱面（RenderView） | ✅ | Android ✅ / iOS ❌ | Android 用进程内 Vulkan + MediaCodec；iOS 仍屏蔽 |
+| 批量渲染（BatchRenderView） | ✅ | Android ✅ / iOS ❌ | 同上 |
+| RPE 绑定（RPEView） | ✅ | Android ✅ / iOS ❌ | Android 可解析并渲染 RPE |
 | 预览（Play/预览窗口） | ✅ | ❌ 屏蔽 | 独立 macroquad 窗口，移动端没有等价物 |
 | 任务列表（TasksView） | ✅ | ✅ 可用 | 移动端基本为空；「在文件夹中显示」已隐藏 |
 | 设置：主题色 / 自定义背景 / 语言 | ✅ | ✅ 可用 | 语言支持 English / 简体中文，切换后重载；背景写入应用沙箱（AppData） |

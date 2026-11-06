@@ -22,6 +22,15 @@ function currentPlatform(): string {
   }
 }
 
+/**
+ * Android renders in-process with the NDK MediaCodec pipeline (`android_render`),
+ * so — unlike iOS — the desktop render routes are usable there.
+ */
+export function isAndroid(): boolean {
+  if (currentPlatform() === 'android') return true;
+  return currentPlatform() === 'unknown' && /android/i.test(navigator.userAgent);
+}
+
 export function isMobile(): boolean {
   const p = currentPlatform();
   if (p === 'ios' || p === 'android') return true;

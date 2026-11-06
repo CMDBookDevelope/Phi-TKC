@@ -5015,7 +5015,7 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 [[package]]
 name = "prpr"
 version = "0.4.0"
-source = "git+https://github.com/CMDBookDevelope/Phi-TKC-render-lib?branch=render-lib#aeef3897a49530c7699993741e55b5e8c6983b7a"
+source = "git+https://github.com/CMDBookDevelope/Phi-TKC-render-lib?branch=render-lib#492d8a4b3742289b40153fef3c25c82279d9e4ee"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -5096,7 +5096,7 @@ dependencies = [
 [[package]]
 name = "prpr-avc"
 version = "0.1.0"
-source = "git+https://github.com/CMDBookDevelope/Phi-TKC-render-lib?branch=render-lib#aeef3897a49530c7699993741e55b5e8c6983b7a"
+source = "git+https://github.com/CMDBookDevelope/Phi-TKC-render-lib?branch=render-lib#492d8a4b3742289b40153fef3c25c82279d9e4ee"
 dependencies = [
  "anyhow",
  "tracing",

@@ -4,7 +4,12 @@ use crate::Path;
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use env_logger::{Builder, Env};
-use log::{Level, LevelFilter};
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+// `macroquad::prelude::*` also glob-imports miniquad's `info!`/`warn!`
+// macros, which print raw lines on stderr and ignore RUST_LOG. Importing
+// the `log` macros explicitly shadows them, so every log line goes through
+// `init_colored_logger` (stdout + the coloured format).
+use log::{info, warn, Level, LevelFilter};
 use std::sync::Once;
 use term_size::dimensions;
 use macroquad::{miniquad::{MipmapFilter, RenderPass as MQRenderPass, Texture, TextureFormat, TextureParams, TextureWrap}, prelude::*, window::miniquad_context};
@@ -214,7 +219,7 @@ impl RenderConfig {
     }
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderParams {
     pub path: PathBuf,
@@ -2539,19 +2544,27 @@ async fn render_impl(
     let frames10 = (out_frames / 10).max(1);
     let mut next_mark = frames10;
     let mut step_time = Instant::now();
-    let show = |done: u64, label: &str, step_time: &mut Instant| {
-        let p = (done as f64 / out_frames.max(1) as f64).min(1.0);
-        let pct = (p * 100.0).ceil() as i8;
-        let fill = (p * 20.).round() as usize;
-        info!(
-            "Rendering: [{}{}] {:>3}% | Time: {} | Frames: {}/{}",
-            "█".repeat(fill),
-            " ".repeat(20 - fill),
-            pct,
-            label,
-            done,
-            out_frames
+    // Crate-based progress bar (indicatif). It draws on stderr, so the `info!`
+    // log lines on stdout stay readable. The GUI/server child passes
+    // `log_mode == false` and reports progress through IPC instead, so it gets
+    // a hidden bar.
+    let progress = if log_mode {
+        let pb = ProgressBar::with_draw_target(
+            Some(out_frames),
+            ProgressDrawTarget::stderr(),
         );
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner} [{elapsed_precise}] [{bar:32}] {pos}/{len} ({percent}%) ETA {eta_precise}")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+        pb
+    } else {
+        ProgressBar::hidden()
+    };
+    let show = |done: u64, _label: &str, step_time: &mut Instant| {
+        progress.set_position(done);
         *step_time = Instant::now();
     };
 
@@ -2811,6 +2824,7 @@ async fn render_impl(
     if written > 0 {
         show(written.min(out_frames), "Final frame", &mut step_time);
     }
+    progress.finish();
     let busy = (loop_wall - dma_wait_time - pool_wait_time - slot_wait_time - fence_wait_time)
         .max(1e-9);
     info!(

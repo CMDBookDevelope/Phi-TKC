@@ -112,8 +112,127 @@ impl Task {
         })
     }
 
+    /// Android has no `fork`/`exec`, so the renderer runs in-process with the
+    /// NDK MediaCodec/MediaMuxer pipeline (no ffmpeg). Progress is polled from
+    /// atomic counters that the render thread updates.
+    #[cfg(target_os = "android")]
+    async fn run_android(&self) -> Result<()> {
+        use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+        if self.request_cancel.load(Ordering::Relaxed) {
+            *self.status.lock().await = TaskStatus::Canceled;
+            return Ok(());
+        }
+        *self.status.lock().await = TaskStatus::Loading;
+
+        let progress = Arc::new(AtomicU64::new(0));
+        let current_fps = Arc::new(AtomicU64::new(0));
+        let progress_out = Arc::clone(&progress);
+        let fps_out = Arc::clone(&current_fps);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_out = Arc::clone(&cancel);
+        let request = crate::android_render::RenderRequest {
+            params: self.params.clone(),
+            output_path: self.output.clone(),
+            asset_dir: ASSET_PATH
+                .get()
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from("assets")),
+            request_cancel: Some(cancel_out),
+        };
+
+        *self.status.lock().await = TaskStatus::Mixing;
+        let finished = Arc::new(std::sync::Mutex::new(None::<Result<()>>));
+        let finished_out = Arc::clone(&finished);
+        tokio::task::spawn_blocking(move || {
+            let result = crate::android_render::run(request, move |value, fps| {
+                progress_out.store((value.max(0.) * 10000.) as u64, AtomicOrdering::Relaxed);
+                fps_out.store(fps.max(0.) as u64, AtomicOrdering::Relaxed);
+            });
+            if let Ok(mut guard) = finished_out.lock() {
+                *guard = Some(result);
+            }
+        });
+
+        let start = Instant::now();
+        loop {
+            if self.request_cancel.load(Ordering::Relaxed) {
+                cancel.store(true, Ordering::Relaxed);
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let value = progress.load(AtomicOrdering::Relaxed) as f64 / 10000.;
+            let fps = current_fps.load(AtomicOrdering::Relaxed);
+            let done = finished.lock().ok().and_then(|mut guard| guard.take());
+            let elapsed = start.elapsed().as_secs_f64();
+            let estimate = if value > 0.01 {
+                elapsed / value - elapsed
+            } else {
+                0.0
+            };
+            match done {
+                Some(Ok(())) => {
+                    if self.request_cancel.load(Ordering::Relaxed) {
+                        let _ = tokio::fs::remove_file(&self.output).await;
+                        *self.status.lock().await = TaskStatus::Canceled;
+                        return Ok(());
+                    }
+                    let log = tokio::fs::read_to_string(self.output.with_extension("log"))
+                        .await
+                        .unwrap_or_default();
+                    let name = self
+                        .output
+                        .file_name()
+                        .map(|value| value.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "output.mp4".to_string());
+                    let source = self.output.clone();
+                    let published = tokio::task::spawn_blocking(move || {
+                        crate::android_uri::publish_video(&source, &name)
+                    })
+                    .await
+                    .unwrap_or_else(|error| Err(anyhow::anyhow!("publish task failed: {error}")));
+                    let target = match published {
+                        Ok(target) => target,
+                        Err(error) => {
+                            *self.status.lock().await = TaskStatus::Failed {
+                                error: format!("无法保存视频：{error:#}\n\n{log}"),
+                            };
+                            return Ok(());
+                        }
+                    };
+                    let _ = tokio::fs::remove_file(&self.output).await;
+                    let _ = tokio::fs::remove_file(self.output.with_extension("log")).await;
+                    *self.status.lock().await = TaskStatus::Done {
+                        duration: elapsed,
+                        output: format!("{log}\n\nSaved to: {target}"),
+                    };
+                    return Ok(());
+                }
+                Some(Err(error)) => {
+                    let log = tokio::fs::read_to_string(self.output.with_extension("log"))
+                        .await
+                        .unwrap_or_default();
+                    *self.status.lock().await = TaskStatus::Failed {
+                        error: format!("{error:#}\n\n{log}"),
+                    };
+                    return Ok(());
+                }
+                None => {
+                    *self.status.lock().await = TaskStatus::Rendering {
+                        progress: value,
+                        fps,
+                        estimate,
+                    };
+                }
+            }
+        }
+    }
+
     pub async fn run(&self) -> Result<()> {
         info!("Task #{} started ({})", self.id, self.params.path.display());
+
+        // Android cannot spawn itself plus ffmpeg, so it renders in-process.
+        #[cfg(target_os = "android")]
+        return self.run_android().await;
 
         // A task canceled while it was still queued must not spawn a renderer at all.
         if self.request_cancel.load(Ordering::Relaxed) {
@@ -142,6 +261,10 @@ impl Task {
         stdin.flush().await?;
 
         let mut lines = BufReader::new(stdout).lines();
+        // Non-JSON lines on stdout are the renderer's log records (they go through
+        // `log`, which `init_colored_logger` sends to stdout). Collect them so the
+        // task's output dialog shows the render log instead of dropping it.
+        let mut child_log = String::new();
         let mut total = 0;
         let mut frame_count: u64 = 0;
         let start = Instant::now();
@@ -165,6 +288,10 @@ impl Task {
             };
             let Some(line) = line else { break };
             let Ok(event): Result<IPCEvent, _> = serde_json::from_str(line.trim()) else {
+                if child_log.len() < (1 << 20) {
+                    child_log.push_str(&line);
+                    child_log.push('\n');
+                }
                 continue;
             };
             match event {
@@ -240,7 +367,7 @@ impl Task {
                         .unwrap_or_else(|_| "Invalid output".to_owned());
                     *self.status.lock().await = TaskStatus::Done {
                         duration,
-                        output: format!("[STDOUT]\n{stdout}\n\n[STDERR]\n{stderr}"),
+                        output: format!("[LOG]\n{child_log}\n\n[STDOUT]\n{stdout}\n\n[STDERR]\n{stderr}"),
                     };
                     return Ok(());
                 }
@@ -256,9 +383,10 @@ impl Task {
         if !output.status.success() {
             *self.status.lock().await = TaskStatus::Failed {
                 error: format!(
-                    "Child process exited abnormally ({:?})\n\n{}",
+                    "Child process exited abnormally ({:?})\n\n[LOG]\n{}\n\n[STDERR]\n{}",
                     output.status.code(),
-                    String::from_utf8(output.stderr)?
+                    child_log,
+                    String::from_utf8_lossy(&output.stderr)
                 ),
             };
             return Ok(());

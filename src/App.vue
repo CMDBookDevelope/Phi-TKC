@@ -31,7 +31,7 @@ import { VSonner } from 'vuetify-sonner';
 
 import { mainColor, bgColor, subColor, loadCustomColors } from './colorStore';
 import { routeComponent } from './appState';
-import { isMobile } from './platform';
+import { isAndroid, isMobile } from './platform';
 import MobileUnsupported from './components/MobileUnsupported.vue';
 
 const { t } = useI18n();
@@ -42,6 +42,8 @@ const vuetifyTheme = useTheme();
 // Mobile (iOS/iPadOS/Android): the nav rail becomes a temporary overlay drawer
 // opened from the app bar.
 const mobile = isMobile();
+// Android ships the NDK MediaCodec renderer, so its render routes stay enabled.
+const android = isAndroid();
 // The desktop rail is permanent, but Vuetify still honours `v-model`; starting closed
 // left the desktop app with no navigation at all (the app bar is mobile-only).
 const navOpen = ref(!mobile);
@@ -370,7 +372,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
         <Suspense timeout="0">
           <template #default>
             <MobileUnsupported
-              v-if="mobile && mobileUnsupportedRoutes.includes(String(route.name))"
+              v-if="mobile && !android && mobileUnsupportedRoutes.includes(String(route.name))"
               ref="routeComponent"
               class="page-view"
               :feature="t(String(route.name))"
