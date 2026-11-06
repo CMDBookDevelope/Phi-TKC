@@ -136,6 +136,7 @@ phi-tk-cli # or wrapper.sh \
 | `--hide-ui` | 隐藏的 UI 元素（在 `--ui` 之后应用） | 同上 | 无 |
 | `--bar` | 显示进度条 | 布尔 | false |
 | `--score-aim` | 显示目标分数 | 布尔 | false |
+| `--ui-above-ba` | UI 显示在噪域（blockAreaList）之上 | 布尔 | false |
 | `--chart-debug` | 显示谱面调试信息 | 布尔 | false |
 | `--flid-x` | 水平镜像谱面 | 布尔 | false |
 | `--chart-ratio` | 谱面拉伸比例 | 浮点 | 1.0 |

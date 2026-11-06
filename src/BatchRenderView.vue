@@ -249,6 +249,7 @@ function loadDefaultConfig(): RenderConfig {
     endingLength: -2.0,
     disableLoading: true,
     chartDebug: false,
+    blockAreaUi: false,
     flidX: false,
     chartRatio: 1,
     bufferSize: 256,

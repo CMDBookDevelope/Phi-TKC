@@ -640,6 +640,7 @@ fn build_config(
     config.watermark = text("watermark").unwrap_or("").to_owned();
     config.bar = flag("bar", false);
     config.score_aim = flag("score-aim", false);
+    config.block_area_ui = flag("ui-above-ba", false);
     config.chart_debug = flag("chart-debug", false);
     config.flid_x = flag("flid-x", false);
     config.chart_ratio = number("chart-ratio").unwrap_or(1.0);

@@ -49,6 +49,8 @@ en:
   disable-loading: Skip Loading
   disable-loading-tips: May have issues
   chart_debug: Debug Mode
+  block-area-ui: 噪域Block Area
+  block-area-ui-tips: Draw the HUD above the block-area effect
   chart_ratio: Chart Scale
   buffer_size: Buffer Size
   target_audio: Sample Rate
@@ -148,6 +150,8 @@ zh-CN:
   disable-loading: 渲染时跳过加载
   disable-loading-tips: 可能有问题
   chart_debug: 调试模式
+  block-area-ui: 噪域Block Area
+  block-area-ui-tips: 开启后 UI 绘制在噪域效果之上
   chart_ratio: 谱面缩放
   buffer_size: 缓冲区
   target_audio: 采样率
@@ -359,6 +363,7 @@ const playerRks = ref('15.0');
 const challengeRank = ref('45');
 const challengeColor = ref(t('challenge-colors').split(',')[4]);
 const chartDebug = ref(false);
+const blockAreaUi = ref(false);
 const flidX = ref(false);
 const handSplit = ref(false);
 const disableLoading = ref(false);
@@ -408,6 +413,7 @@ const DEFAULT_PRESET: Preset = {
     endingLength: -2.0,
     disableLoading: true,
     chartDebug: false,
+    blockAreaUi: false,
     flidX: false,
     chartRatio: 1,
     bufferSize: 256,
@@ -516,6 +522,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
     endingLength: parseFloat(endingLength.value),
     disableLoading: disableLoading.value,
     chartDebug: chartDebug.value,
+    blockAreaUi: blockAreaUi.value,
     flidX: flidX.value,
     chartRatio: chartRatio.value,
     bufferSize: Number(bufferSize.value),
@@ -570,6 +577,7 @@ function applyConfig(c: RenderConfig) {
   endingLength.value = String(c.endingLength);
   disableLoading.value = c.disableLoading;
   chartDebug.value = c.chartDebug;
+  blockAreaUi.value = c.blockAreaUi ?? false;
   flidX.value = c.flidX;
   chartRatio.value = c.chartRatio;
   bufferSize.value = Number(c.bufferSize);
@@ -897,6 +905,9 @@ async function replacePreset() {
                   <v-icon :icon="render.includes(item) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline'" size="16" />
                   <span>{{ item }}</span>
                 </div>
+              </div>
+              <div class="switch-grid">
+                <TipSwitch v-model="blockAreaUi" :label="t('block-area-ui')" :tooltip="t('block-area-ui-tips')" density="compact" color="primary" />
               </div>
             </div>
           </div>

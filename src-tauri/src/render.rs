@@ -96,6 +96,8 @@ pub struct RenderConfig {
     pub note_speed_factor: f32,
     pub bar: bool,
     pub score_aim: bool,
+    /// Draw the HUD above 噪域 (`blockAreaList`) instead of under it.
+    pub block_area_ui: bool,
 
     pub ui_score: bool,
     pub ui_combo: bool,
@@ -165,6 +167,7 @@ impl Default for RenderConfig {
             ui_pause: true,
             bar: false,
             score_aim: false,
+            block_area_ui: false,
 
             ffmpeg_thread: false,
 
@@ -214,6 +217,7 @@ impl RenderConfig {
             ui_pause: self.ui_pause,
             bar: self.bar,
             score_aim: self.score_aim,
+            block_area_ui: self.block_area_ui,
             ..Default::default()
         }
     }
@@ -2546,11 +2550,9 @@ async fn render_impl(
     // `log_mode == false` and reports progress through IPC instead, so it gets
     // a hidden bar.
     let progress = if log_mode {
-        // One repaint per second: a 20 Hz bar is wasted work and scrolls the
-        // terminal when stderr is not a TTY.
         let pb = ProgressBar::with_draw_target(
             Some(out_frames),
-            ProgressDrawTarget::stderr_with_hz(1),
+            ProgressDrawTarget::stderr_with_hz(20),
         );
         pb.set_style(
             ProgressStyle::default_bar()
@@ -2974,6 +2976,9 @@ pub struct CliArgs {
     /// Show the score target
     #[arg(long, default_value_t = false)]
     pub score_aim: bool,
+    /// Draw the UI above 噪域 (blockAreaList) instead of under it
+    #[arg(long, default_value_t = false)]
+    pub ui_above_ba: bool,
     /// Show chart debug info
     #[arg(long, default_value_t = false)]
     pub chart_debug: bool,
@@ -3189,6 +3194,7 @@ pub async fn render_cli(args: CliArgs) -> Result<()> {
     config.watermark = args.watermark.clone().unwrap_or_default();
     config.bar = args.bar;
     config.score_aim = args.score_aim;
+    config.block_area_ui = args.ui_above_ba;
     config.chart_debug = args.chart_debug;
     config.flid_x = args.flid_x;
     config.chart_ratio = args.chart_ratio;

@@ -57,6 +57,7 @@ export interface RenderConfig {
   endingLength: number;
   disableLoading: boolean;
   chartDebug: boolean;
+  blockAreaUi: boolean;
   flidX: boolean;
   showProgressText: boolean;
   showTimeText: boolean;
