@@ -1,6 +1,6 @@
 [package]
 name = "Phi-TKC"
-version = "1.0.8"
+version = "1.0.9"
 description = "Phi-TKC"
 authors = ["Mivik", "Link", "CNMDBook"]
 license = "GPL-v3"

@@ -113,7 +113,8 @@ textarea,
   border-radius: 50%;
   pointer-events: none; /* 防止遮挡鼠标事件 */
   transform: translate(-50%, -50%);
-  transition: opacity 0.2s ease; /* 平滑显示/隐藏 */
+  /* 淡入/淡出由 v-glass 指令用 rAF 驱动（离开后 1.5s 渐隐），
+     这里不能再加 transition，否则会和逐帧写入打架。 */
   left: var(--highlight-x, 50%);
   top: var(--highlight-y, 50%);
   opacity: var(--highlight-opacity, 0); /* 初始透明，由 v-glass 指令切换 */

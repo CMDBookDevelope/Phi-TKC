@@ -75,33 +75,84 @@ const vuetify = createVuetify({
 const app = createApp(App);
 app.use(i18n).use(router).use(vuetify);
 
-// Registers the global v-glass directive: a mouse-following specular highlight.
-// `.glass::after` in assets/main.css consumes the custom properties it writes.
+// Registers the global v-glass directive: a pointer-following specular
+// highlight. `.glass::after` in assets/main.css consumes the custom properties
+// it writes.
+//
+// The highlight appears as soon as the pointer enters and, once the pointer
+// leaves (mouse out / finger lifted), fades out over 1.5 s instead of snapping
+// off. The fade is driven here rather than by a CSS transition so touch and
+// mouse behave the same and re-entering can cancel it mid-flight.
+const GLASS_FADE_IN = 200;
+const GLASS_FADE_OUT = 1500;
+
 app.directive('glass', {
   mounted(el: HTMLElement) {
-    const handleMove = (e: MouseEvent) => {
-      const rect = el.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      el.style.setProperty('--highlight-x', `${x}px`);
-      el.style.setProperty('--highlight-y', `${y}px`);
-      el.style.setProperty('--highlight-opacity', '1');
-    };
-    const handleLeave = () => {
-      el.style.setProperty('--highlight-opacity', '0');
+    let raf = 0;
+    let from = 0;
+    let to = 0;
+    let started = 0;
+    let duration = 0;
+
+    const read = () => parseFloat(el.style.getPropertyValue('--highlight-opacity')) || 0;
+    const write = (v: number) => el.style.setProperty('--highlight-opacity', v.toFixed(3));
+
+    const animate = (target: number, ms: number) => {
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+      from = read();
+      to = target;
+      duration = ms;
+      started = performance.now();
+      if (Math.abs(to - from) < 0.001) {
+        write(to);
+        return;
+      }
+      const step = (now: number) => {
+        const t = duration <= 0 ? 1 : Math.min((now - started) / duration, 1);
+        const k = t * t * (3 - 2 * t); // smoothstep
+        write(from + (to - from) * k);
+        if (t < 1) {
+          raf = requestAnimationFrame(step);
+        } else {
+          raf = 0;
+          write(to);
+        }
+      };
+      raf = requestAnimationFrame(step);
     };
 
-    el.addEventListener('mousemove', handleMove);
-    el.addEventListener('mouseleave', handleLeave);
+    const handleMove = (e: PointerEvent) => {
+      const rect = el.getBoundingClientRect();
+      el.style.setProperty('--highlight-x', `${e.clientX - rect.left}px`);
+      el.style.setProperty('--highlight-y', `${e.clientY - rect.top}px`);
+      animate(1, GLASS_FADE_IN);
+    };
+    const handleLeave = () => animate(0, GLASS_FADE_OUT);
+
+    // Pointer events cover the mouse and touch alike: on a touchscreen the
+    // finger is implicitly captured, `pointerleave` arrives when it lifts.
+    el.addEventListener('pointermove', handleMove);
+    el.addEventListener('pointerdown', handleMove);
+    el.addEventListener('pointerup', handleLeave);
+    el.addEventListener('pointerleave', handleLeave);
+    el.addEventListener('pointercancel', handleLeave);
 
     // Stored on the element so `unmounted` can detach the exact handlers.
-    (el as any).__glassHandlers = { handleMove, handleLeave };
+    (el as any).__glassHandlers = { handleMove, handleLeave, cancel: () => raf && cancelAnimationFrame(raf) };
   },
   unmounted(el: HTMLElement) {
     const handlers = (el as any).__glassHandlers;
     if (handlers) {
-      el.removeEventListener('mousemove', handlers.handleMove);
-      el.removeEventListener('mouseleave', handlers.handleLeave);
+      el.removeEventListener('pointermove', handlers.handleMove);
+      el.removeEventListener('pointerdown', handlers.handleMove);
+      el.removeEventListener('pointerup', handlers.handleLeave);
+      el.removeEventListener('pointerleave', handlers.handleLeave);
+      el.removeEventListener('pointercancel', handlers.handleLeave);
+      handlers.cancel?.();
+      delete (el as any).__glassHandlers;
     }
   },
 });
