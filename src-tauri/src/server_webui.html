@@ -20,6 +20,18 @@
       var(--bg-color);
     color: var(--main-color);
   }
+  /* API background: same random-image source as the desktop app. The scrim
+     keeps text readable over bright artwork. */
+  .api-bg {
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background-position: center; background-size: cover; background-repeat: no-repeat;
+    opacity: 0; transition: opacity .6s ease;
+  }
+  .api-bg.on { opacity: 1; }
+  .api-bg-scrim {
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(13,13,13,.30) 0%, rgba(13,13,13,.55) 45%, rgba(13,13,13,.88) 100%);
+  }
   .app { display: flex; gap: 18px; max-width: 1180px; margin: 0 auto; padding: 18px; min-height: 100dvh; }
 
   /* ---- Left navigation: same items as the desktop drawer ---- */
@@ -231,6 +243,8 @@
 </style>
 </head>
 <body>
+<div id="apiBg" class="api-bg" aria-hidden="true"></div>
+<div class="api-bg-scrim" aria-hidden="true"></div>
 <div class="app">
   <aside class="rail glass fluent-glass">
     <div class="brand">
@@ -392,7 +406,8 @@
         </div>
         <div class="actions">
           <button class="btn ghost" id="resetColors">恢复默认</button>
-          <span class="hint">与桌面端共用一套配色变量，刷新后仍会保留</span>
+          <button class="btn ghost" id="refreshBg">换个背景</button>
+          <span class="hint">与桌面端共用一套配色变量，背景与桌面端同源（api.yppp.net）</span>
         </div>
       </div>
 
@@ -448,11 +463,26 @@
   </main>
 </div>
 
+<div id="player" class="player-overlay" hidden>
+  <div class="player-box">
+    <video id="player-video" controls playsinline preload="metadata"></video>
+    <button id="player-close" class="player-close" title="关闭">✕</button>
+  </div>
+</div>
+
 <script>
 (() => {
   'use strict';
 
   const $ = (id) => document.getElementById(id);
+  // A single missing element used to abort the whole boot (that is how the
+  // in-page player once broke the status bar and the submit form), so surface
+  // any uncaught error on the page instead of failing silently.
+  window.addEventListener('error', (e) => {
+    const hint = $('formHint');
+    if (hint) hint.textContent = '页面脚本错误：' + (e.message || e.error);
+    console.error('[webui]', e.message || e.error);
+  });
   const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || matchMedia('(pointer: coarse)').matches;
   document.body.classList.add(isMobile ? 'is-mobile' : 'is-desktop');
 
@@ -490,6 +520,49 @@
     applyColors();
   });
   applyColors();
+
+  // ============ API background (same random-image endpoint as the desktop app) ============
+  // The desktop UI paints api.yppp.net's image behind everything and caches it in
+  // localStorage as `BgBase64`; the WebUI mirrors that so both look the same.
+  const API_BACKGROUND_URL = 'https://api.yppp.net/api.php';
+  const bgLayer = $('apiBg');
+  const showBackground = (url) => {
+    bgLayer.style.backgroundImage = `url("${url}")`;
+    bgLayer.classList.add('on');
+  };
+  async function loadApiBackground() {
+    const cached = localStorage.getItem('BgBase64');
+    if (cached) { showBackground(cached); return; }
+    try {
+      const res = await fetch(API_BACKGROUND_URL, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('read failed'));
+        reader.readAsDataURL(blob);
+      });
+      showBackground(base64);
+      try {
+        localStorage.setItem('BgBase64', base64);
+      } catch (err) {
+        // A random API image can be several MB; localStorage has a ~5 MB quota.
+        console.warn('背景缓存写入失败（图片过大）', err);
+      }
+    } catch (err) {
+      // Direct URL still works as a plain CSS background.
+      console.warn('API 背景加载失败，改用直连地址', err);
+      showBackground(API_BACKGROUND_URL + '?t=' + Date.now());
+    }
+  }
+  $('refreshBg').addEventListener('click', () => {
+    localStorage.removeItem('BgBase64');
+    bgLayer.classList.remove('on');
+    bgLayer.style.backgroundImage = '';
+    void loadApiBackground();
+  });
+  void loadApiBackground();
 
   // ============ Pointer-follow glass highlight (port of the v-glass directive) ============
   // Fades out over 1.5 s after the pointer leaves / the finger lifts.
@@ -752,11 +825,5 @@
   connectWs();
 })();
 </script>
-<div id="player" class="player-overlay" hidden>
-  <div class="player-box">
-    <video id="player-video" controls playsinline preload="metadata"></video>
-    <button id="player-close" class="player-close" title="关闭">✕</button>
-  </div>
-</div>
 </body>
 </html>
