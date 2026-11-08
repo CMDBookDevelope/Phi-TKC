@@ -31,11 +31,11 @@ en:
       failed: "Could not start: {error}"
     remote:
       label: "Remote renderer"
-      hint: "Start the server on a PC first, then open its WebUI here"
-      address: "Renderer address"
+      hint: "The phone renders locally by default. Connect to a render server to render there instead."
+      address: "Server address"
       placeholder: "192.168.1.10:6787"
-      test: "Test connection"
-      open: "Open WebUI"
+      connect: "Connect"
+      disconnect: "Disconnect"
       connected: "Connected · v{version}"
       offline: "Cannot connect: {error}"
       live: "Live (WebSocket)"
@@ -107,11 +107,11 @@ zh-CN:
       failed: "启动失败：{error}"
     remote:
       label: "远程渲染器"
-      hint: "先在电脑上启动服务器，再在这里打开它的 WebUI"
-      address: "渲染器地址"
+      hint: "默认用手机本地渲染；连接渲染服务器后改为在服务器上渲染"
+      address: "服务器地址"
       placeholder: "192.168.1.10:6787"
-      test: "测试连接"
-      open: "打开 WebUI"
+      connect: "连接"
+      disconnect: "断开"
       connected: "已连接 · v{version}"
       offline: "无法连接：{error}"
       live: "实时连接"
@@ -381,6 +381,7 @@ async function copyServerUrl() {
 
 // ===== Remote renderer (mobile) =====
 const remoteAddress = ref(localStorage.getItem('remoteRenderer') || '192.168.1.10:6787');
+const remoteConnected = ref(localStorage.getItem('remoteConnected') === '1');
 const remoteBusy = ref(false);
 const remoteVersion = ref('');
 const remoteError = ref('');
@@ -497,7 +498,7 @@ async function openRemoteDownload(download?: string) {
   }
 }
 
-async function testRemote(): Promise<boolean> {
+async function connectRemote(): Promise<boolean> {
   if (!remoteBase.value) return false;
   remoteBusy.value = true;
   remoteError.value = '';
@@ -506,15 +507,27 @@ async function testRemote(): Promise<boolean> {
   try {
     const status = (await invoke('remote_status', { base: remoteBase.value })) as { version?: string };
     remoteVersion.value = status.version || '?';
+    remoteConnected.value = true;
+    localStorage.setItem('remoteConnected', '1');
     startWatching();
     return true;
   } catch (e) {
     remoteError.value = String((e as Error)?.message || e);
+    remoteConnected.value = false;
+    localStorage.removeItem('remoteConnected');
     stopWatching();
     return false;
   } finally {
     remoteBusy.value = false;
   }
+}
+
+function disconnectRemote() {
+  remoteConnected.value = false;
+  remoteVersion.value = '';
+  remoteError.value = '';
+  localStorage.removeItem('remoteConnected');
+  stopWatching();
 }
 
 async function openRemoteWebUI() {
@@ -529,7 +542,8 @@ async function openRemoteWebUI() {
 
 onMounted(() => {
   if (mobile) {
-    if (remoteAddress.value) void testRemote();
+    // Only reconnects automatically if the user was connected before.
+    if (remoteConnected.value && remoteAddress.value) void connectRemote();
   } else {
     refreshServer();
   }
@@ -618,7 +632,9 @@ onUnmounted(stopWatching);
         <p v-else class="server-status">{{ t('settings.server.stopped') }}</p>
       </div>
 
-      <!-- Remote renderer: mobile only, replaces the local render pages -->
+      <!-- Remote renderer: mobile only. Local GPU rendering is the default; once
+           connected the phone renders on the server instead. This has nothing to
+           do with the WebUI. -->
       <div v-if="mobile" class="md3-card glass fluent-glass" v-glass>
         <div class="card-label">{{ t('settings.remote.label') }}</div>
         <p class="server-hint">{{ t('settings.remote.hint') }}</p>
@@ -630,50 +646,27 @@ onUnmounted(stopWatching);
           variant="outlined"
           hide-details
           class="mt-2"
-          @keyup.enter="testRemote" />
+          :disabled="remoteConnected"
+          @keyup.enter="connectRemote" />
         <div class="server-actions">
-          <v-btn color="primary" prepend-icon="mdi-lan-connect" :loading="remoteBusy" @click="testRemote">
-            {{ t('settings.remote.test') }}
+          <v-btn
+            color="primary"
+            prepend-icon="mdi-lan-connect"
+            :loading="remoteBusy"
+            :disabled="remoteConnected || !remoteAddress"
+            @click="connectRemote">
+            {{ t('settings.remote.connect') }}
           </v-btn>
-          <v-btn variant="tonal" prepend-icon="mdi-open-in-new" @click="openRemoteWebUI">
-            {{ t('settings.remote.open') }}
+          <v-btn
+            variant="tonal"
+            prepend-icon="mdi-lan-disconnect"
+            :disabled="!remoteConnected"
+            @click="disconnectRemote">
+            {{ t('settings.remote.disconnect') }}
           </v-btn>
         </div>
-        <p v-if="remoteVersion" class="server-status ok">{{ t('settings.remote.connected', { version: remoteVersion }) }}</p>
+        <p v-if="remoteConnected" class="server-status ok">{{ t('settings.remote.connected', { version: remoteVersion }) }}</p>
         <p v-else-if="remoteError" class="server-status bad">{{ t('settings.remote.offline', { error: remoteError }) }}</p>
-        <p v-if="remoteLive || remotePolling" class="live-pill">
-          <span class="dot" :class="{ live: remoteLive }"></span>
-          {{ remoteLive ? t('settings.remote.live') : t('settings.remote.fallback') }}
-        </p>
-
-        <div v-if="remoteJobs.length" class="remote-jobs">
-          <div v-for="job in remoteJobs.slice(0, 6)" :key="job.id" class="remote-job">
-            <div class="remote-job-head">
-              <span class="remote-job-name">{{ job.name || job.id }}</span>
-              <span class="remote-job-state" :class="job.status">{{ jobStatusText(job.status) }}</span>
-            </div>
-            <v-progress-linear
-              v-if="isActiveJob(job)"
-              :model-value="Math.round((job.progress || 0) * 100)"
-              height="6"
-              rounded
-              color="primary"
-              class="mt-1" />
-            <div v-if="isActiveJob(job)" class="remote-job-meta">
-              <span>{{ job.fps || 0 }} FPS</span>
-              <span>{{ Math.round((job.progress || 0) * 100) }}%</span>
-            </div>
-            <div v-if="job.error" class="remote-job-error">{{ job.error }}</div>
-            <a
-              v-if="job.status === 'done' && job.download"
-              class="remote-job-link"
-              href="#"
-              @click.prevent="openRemoteDownload(job.download)">
-              {{ t('settings.remote.download') }}
-            </a>
-          </div>
-        </div>
-        <p v-else class="server-status">{{ t('settings.remote.noJobs') }}</p>
       </div>
 
       <!-- Output Path (desktop only: mobile render output is fixed to the app data dir) -->

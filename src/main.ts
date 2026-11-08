@@ -5,7 +5,7 @@ import { createApp } from 'vue';
 
 import { changeLocale } from './common';
 import { i18n, SUPPORTED_LOCALES } from './i18n';
-import { isMobile } from './platform';
+import { isMobile, isAndroid } from './platform';
 
 import App from './App.vue';
 import router from './router';
@@ -71,6 +71,9 @@ const vuetify = createVuetify({
     VProgressCircular: { color: 'primary' },
   },
 });
+
+// Platform classes drive the Android status-bar inset and mobile ergonomics.
+document.body.classList.add(isAndroid() ? 'is-android' : isMobile() ? 'is-ios' : 'is-desktop');
 
 const app = createApp(App);
 app.use(i18n).use(router).use(vuetify);

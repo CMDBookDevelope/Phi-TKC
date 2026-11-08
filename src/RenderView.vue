@@ -133,6 +133,9 @@ import moment from 'moment';
 import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
 import gsap from 'gsap';
+import { isAndroid } from './platform';
+
+const android = isAndroid();
 
 const { t } = useI18n();
 
@@ -290,7 +293,8 @@ watch([aspectWidth, aspectHeight], ([newWidth, newHeight]) => {
 
 async function postRender() {
   try {
-    if (!(await invoke('test_ffmpeg'))) {
+    // Android encodes in-process with MediaCodec, so there is no ffmpeg to find.
+    if (!isAndroid() && !(await invoke('test_ffmpeg'))) {
       await dialog.message(t('ffmpeg-not-found'));
       await invoke('open_app_folder');
       await shell.open('https://github.com/BtbN/FFmpeg-Builds/releases');
@@ -542,7 +546,7 @@ function resetAndGoChoose() {
           <v-icon icon="mdi-gamepad-variant" size="18" />
           <span>{{ t('play') }}</span>
         </button>
-        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="previewChart">
+        <button class="bar-btn bar-btn-tonal" v-if="step === 'options' && !android" @click="previewChart">
           <v-icon icon="mdi-eye" size="18" />
           <span>{{ t('preview') }}</span>
         </button>

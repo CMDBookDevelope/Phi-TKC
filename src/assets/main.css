@@ -28,6 +28,12 @@ body,
   color: var(--main-color);
 }
 
+/* Android draws edge-to-edge, so the system status bar overlaps the app bar.
+   The WebView does not report a safe-area inset, so pad by the status bar height. */
+body.is-android {
+  padding-top: 26px;
+}
+
 /* 选中白名单 */
 input,
 textarea,

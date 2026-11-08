@@ -794,7 +794,9 @@ async fn render_one(
     let mut lines = BufReader::new(stdout).lines();
     let mut total: u64 = 0;
     let mut frames: u64 = 0;
-    let start = Instant::now();
+    // Realtime FPS over the last ten frames, exactly like `task.rs` / the CLI:
+    // averaging since the start made the number ramp up from zero.
+    let mut last_fps_time = Instant::now();
     let mut fps: u64 = params.config.fps as u64;
 
     loop {
@@ -821,10 +823,11 @@ async fn render_one(
             IPCEvent::Frame => {
                 frames += 1;
                 if frames % 10 == 0 {
-                    let elapsed = start.elapsed().as_secs_f64();
+                    let elapsed = last_fps_time.elapsed().as_secs_f64();
                     if elapsed > 0.0 {
-                        fps = (frames as f64 / elapsed).round() as u64;
+                        fps = (10.0 / elapsed).round() as u64;
                     }
+                    last_fps_time = Instant::now();
                 }
                 job.view.progress = if total > 0 {
                     (frames as f64 / total as f64).min(1.0)
