@@ -40,9 +40,13 @@ jobs:
             # app is built with the MinGW toolchain (this is what the old CI did).
             toolchain: stable-x86_64-pc-windows-gnu
             rust-target: x86_64-pc-windows-gnu
-            args: --bundles nsis
+            # `--target` has to be explicit. Without it tauri CLI (<= 2.11.x) hands
+            # the bundler the triple it was compiled for (msvc), and the NSIS step
+            # that adds WebView2Loader.dll for -gnu builds is skipped - the
+            # installer then ships an app that cannot start.
+            args: --target x86_64-pc-windows-gnu --bundles nsis
             artifact: desktop-windows-nsis
-            files: src-tauri/target/release/bundle/nsis/*.exe
+            files: src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/*.exe
           - label: linux-x86_64-deb
             # 22.04 keeps the deb's glibc requirement low enough for older distros.
             platform: ubuntu-22.04
@@ -135,6 +139,22 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         with:
           args: ${{ matrix.args }}
+
+      # The GNU build links WebView2Loader.dll dynamically. If the bundler skips
+      # it the installer still builds fine and only fails on the user's machine,
+      # so verify the payload here instead of trusting the build.
+      - name: Check the Windows installer ships WebView2Loader.dll
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          setup=$(ls src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/*.exe | head -n 1)
+          listing="$(7z l "$setup")"
+          grep -q 'WebView2Loader\.dll' <<<"$listing" || {
+            echo "::error::$setup does not contain WebView2Loader.dll"
+            exit 1
+          }
+          echo "OK: $setup ships WebView2Loader.dll"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
