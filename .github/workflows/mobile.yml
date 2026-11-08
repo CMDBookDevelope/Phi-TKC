@@ -100,7 +100,20 @@ jobs:
           ls -l "${DEST}"
 
       - name: Build unsigned release APK
-        run: pnpm tauri android build --ci --apk --target aarch64
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Gradle downloads its distribution on first use and that CDN regularly
+          # answers 504; retry instead of failing the whole mobile release.
+          for attempt in 1 2 3; do
+            if pnpm tauri android build --ci --apk --target aarch64; then
+              exit 0
+            fi
+            echo "::warning::android build failed (attempt ${attempt}/3), retrying in 30s"
+            sleep 30
+          done
+          echo "::error::android build failed after 3 attempts"
+          exit 1
 
       - name: Sign APK with a CI debug key
         # Mirrors Winamin/Phi-TK's android workflow: a throwaway self-signed key

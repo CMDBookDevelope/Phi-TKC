@@ -136,9 +136,22 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build bundles
-        uses: tauri-apps/tauri-action@v0
-        with:
-          args: ${{ matrix.args }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Tauri fetches the NSIS / AppImage bundler tools on first use, and that
+          # CDN answers with a 5xx often enough to have failed whole releases.
+          # The build itself is idempotent, so retry it instead of going red on a
+          # transient download error.
+          for attempt in 1 2 3; do
+            if pnpm tauri build ${{ matrix.args }}; then
+              exit 0
+            fi
+            echo "::warning::tauri build failed (attempt ${attempt}/3), retrying in 20s"
+            sleep 20
+          done
+          echo "::error::tauri build failed after 3 attempts"
+          exit 1
 
       # The GNU build links WebView2Loader.dll dynamically. If the bundler skips
       # it the installer still builds fine and only fails on the user's machine,
