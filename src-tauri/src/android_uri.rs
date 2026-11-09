@@ -102,6 +102,37 @@ pub fn resolve(path: &Path) -> Result<PathBuf> {
     import_content_uri(&text)
 }
 
+/// The process' `JavaVM`.
+///
+/// `ndk-context` is never initialised by Tauri (asking it panics), and defining
+/// `JNI_OnLoad` collides with the one Tauri already exports. The JNI invocation
+/// API is still reachable through `JNI_GetCreatedJavaVMs`, which ART exports.
+#[cfg(target_os = "android")]
+fn java_vm() -> Result<&'static jni::JavaVM> {
+    use std::sync::OnceLock;
+    static JVM: OnceLock<&'static jni::JavaVM> = OnceLock::new();
+    if let Some(vm) = JVM.get() {
+        return Ok(*vm);
+    }
+    unsafe {
+        let name = b"JNI_GetCreatedJavaVMs\0";
+        let symbol = libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr() as *const _);
+        anyhow::ensure!(!symbol.is_null(), "JNI_GetCreatedJavaVMs is not available");
+        let get_vms: unsafe extern "system" fn(
+            *mut *mut jni::sys::JavaVM,
+            jni::sys::jsize,
+            *mut jni::sys::jsize,
+        ) -> jni::sys::jint = std::mem::transmute(symbol);
+        let mut vm: *mut jni::sys::JavaVM = std::ptr::null_mut();
+        let mut count: jni::sys::jsize = 0;
+        let rc = get_vms(&mut vm, 1, &mut count);
+        anyhow::ensure!(rc == 0 && count == 1 && !vm.is_null(), "no JavaVM in this process");
+        let vm: &'static jni::JavaVM = Box::leak(Box::new(jni::JavaVM::from_raw(vm)?));
+        let _ = JVM.set(vm);
+        Ok(vm)
+    }
+}
+
 #[cfg(target_os = "android")]
 fn import_content_uri(uri: &str) -> Result<PathBuf> {
     use jni::{
@@ -118,15 +149,26 @@ fn import_content_uri(uri: &str) -> Result<PathBuf> {
     uri.hash(&mut hasher);
     let hash = hasher.finish();
 
-    let ctx = ndk_context::android_context();
-    let vm = unsafe { JavaVM::from_raw(ctx.vm().cast()) }?;
+    let vm = java_vm()?;
     let mut env = vm.attach_current_thread()?;
-    let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+
+    // `ActivityThread.currentApplication()` is a hidden but stable entry point;
+    // hidden-API restrictions apply to Java reflection, not to JNI calls, and it
+    // saves us from having to be handed the Activity by Tauri.
+    let app = env
+        .call_static_method(
+            "android/app/ActivityThread",
+            "currentApplication",
+            "()Landroid/app/Application;",
+            &[],
+        )?
+        .l()?;
+    anyhow::ensure!(!app.is_null(), "no Android application context");
 
     // ParcelFileDescriptor.detachFd() hands us a raw fd, which is far simpler
     // (and cheaper) than streaming a Java InputStream through JNI byte arrays.
     let resolver = env
-        .call_method(&context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])?
+        .call_method(&app, "getContentResolver", "()Landroid/content/ContentResolver;", &[])?
         .l()?;
     let uri_text = JObject::from(env.new_string(uri)?);
     let uri_obj = env
@@ -150,9 +192,11 @@ fn import_content_uri(uri: &str) -> Result<PathBuf> {
         anyhow::bail!("The picker did not return a readable file");
     }
     let fd = env.call_method(&fd_obj, "detachFd", "()I", &[])?.i()?;
+    debug_log(&format!("import: fd={fd}"));
     let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
     let mut data = Vec::new();
     file.read_to_end(&mut data)?;
+    debug_log(&format!("import: read {} bytes", data.len()));
 
     // The URI usually has no useful extension; sniff the archive magic instead.
     let ext = if data.starts_with(b"PK\x03\x04") {

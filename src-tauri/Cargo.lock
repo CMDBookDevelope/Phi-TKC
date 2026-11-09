@@ -22,7 +22,6 @@ dependencies = [
  "libc",
  "log",
  "macroquad",
- "ndk-context",
  "open",
  "prpr",
  "rayon",

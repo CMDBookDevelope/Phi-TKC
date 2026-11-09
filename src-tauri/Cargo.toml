@@ -85,7 +85,7 @@ winreg = "0.55.0"
 sasa = { git = "https://github.com/Winamin/sasa", default-features = false, features = ["oboe"] }
 # Content-URI handling for charts picked through Android's document picker.
 jni = "0.21"
-ndk-context = "0.1"
+libc = "0.2"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 sasa = { git = "https://github.com/Winamin/sasa" }
