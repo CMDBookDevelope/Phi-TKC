@@ -40,6 +40,7 @@ use tokio_util::io::ReaderStream;
 use tower_http::cors::CorsLayer;
 
 use crate::render::{IPCEvent, RenderConfig, RenderParams};
+use prpr::info::ChartInfo;
 
 const WEBUI: &str = include_str!("server_webui.html");
 /// The desktop stylesheet is served as-is so the WebUI shares the PC UI's glass
@@ -81,6 +82,9 @@ struct JobView {
     #[serde(skip_serializing_if = "Option::is_none")]
     download: Option<String>,
     created_at: u64,
+    /// Seconds the render took; only present once the job is `done`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration: Option<f64>,
 }
 
 struct Job {
@@ -88,7 +92,19 @@ struct Job {
     input: PathBuf,
     output: PathBuf,
     config: RenderConfig,
+    /// Metadata supplied by the app (it already parsed the chart). The server
+    /// normally loads it from the uploaded file, but the phone also sends the
+    /// user's aspect-ratio / dim edits, which only exist on the client side.
+    info: Option<ChartInfo>,
     cancel: Arc<AtomicBool>,
+}
+
+/// JSON body the app posts in the `params` multipart field: the whole
+/// `RenderParams` minus the local chart path.
+#[derive(serde::Deserialize)]
+struct PostedParams {
+    info: ChartInfo,
+    config: RenderConfig,
 }
 
 type Jobs = Arc<Mutex<HashMap<String, Job>>>;
@@ -539,15 +555,50 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
             return (StatusCode::BAD_REQUEST, format!("cannot read chart info: {e}")).into_response();
         }
     };
-    // Same meaning as the CLI's `--dim`: only override when the client sends > 0.
-    if let Some(dim) = fields.get("dim").and_then(|v| v.parse::<f32>().ok()) {
-        if dim > 0.0 {
-            info.background_dim = dim.clamp(0.0, 100.0) / 100.0;
+    // The app posts the full `RenderConfig` + chart metadata as JSON so every
+    // option the phone UI exposes survives the trip. The WebUI keeps using the
+    // individual `--flag` style fields below.
+    let posted = fields
+        .get("params")
+        .and_then(|text| serde_json::from_str::<PostedParams>(text).ok());
+    let mut config = match &posted {
+        Some(posted) => posted.config.clone(),
+        None => build_config(&fields, respack.as_deref(), avatar.as_deref()),
+    };
+    // Paths in the posted config point at the phone's filesystem; the uploaded
+    // copies in this job directory are the ones the renderer can read.
+    if let Some(path) = respack.as_deref() {
+        config.res_pack_path = Some(path.display().to_string());
+    }
+    if let Some(path) = avatar.as_deref() {
+        config.player_avatar = Some(path.display().to_string());
+    }
+    // The uploaded archive is the source of truth for the paths *inside* it
+    // (`chart`, `music`, `illustration`); the client only owns the editable
+    // metadata. Trusting the posted struct wholesale made "Cannot find chart
+    // file" possible whenever a field was missing on the client side.
+    let mut info = info;
+    if let Some(posted) = posted {
+        let posted = posted.info;
+        info.name = posted.name;
+        info.level = posted.level;
+        info.charter = posted.charter;
+        info.composer = posted.composer;
+        info.illustrator = posted.illustrator;
+        info.aspect_ratio = posted.aspect_ratio;
+        info.background_dim = posted.background_dim;
+        info.tip = posted.tip;
+        info.hold_partial_cover = posted.hold_partial_cover;
+    } else {
+        // Same meaning as the CLI's `--dim`: only override when the client sends > 0.
+        if let Some(dim) = fields.get("dim").and_then(|v| v.parse::<f32>().ok()) {
+            if dim > 0.0 {
+                info.background_dim = dim.clamp(0.0, 100.0) / 100.0;
+            }
         }
     }
 
-    let video = fields.get("video").map(|v| v == "mov").unwrap_or(false);
-    let ext = if video { "mov" } else { "mp4" };
+    let ext = if config.video { "mov" } else { "mp4" };
     let safe_name: String = info
         .name
         .chars()
@@ -555,7 +606,6 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
         .collect();
     let output = dir.join(format!("{}.{ext}", if safe_name.is_empty() { "render" } else { &safe_name }));
 
-    let config = build_config(&fields, respack.as_deref(), avatar.as_deref());
     let job = Job {
         view: JobView {
             id: id.clone(),
@@ -567,10 +617,12 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
             error: None,
             download: None,
             created_at: now_secs(),
+            duration: None,
         },
         input,
         output,
         config,
+        info: Some(info),
         cancel: Arc::new(AtomicBool::new(false)),
     };
     st.jobs.lock().await.insert(id.clone(), job);
@@ -676,13 +728,14 @@ fn build_config(
 }
 
 async fn run_job(state: AppState, id: &str) {
-    let (input, output, config, cancel, name) = {
+    let (input, output, config, info, cancel, name) = {
         let jobs = state.jobs.lock().await;
         let Some(job) = jobs.get(id) else { return };
         (
             job.input.clone(),
             job.output.clone(),
             job.config.clone(),
+            job.info.clone(),
             job.cancel.clone(),
             job.view.name.clone(),
         )
@@ -693,12 +746,13 @@ async fn run_job(state: AppState, id: &str) {
     })
     .await;
 
-    let result = render_one(&state, id, &input, &output, &config, &cancel).await;
+    let result = render_one(&state, id, &input, &output, &config, info.as_ref(), &cancel).await;
     match result {
         Ok(()) => {
             set_status(&state, id, |view| {
                 view.status = "done";
                 view.progress = 1.0;
+                view.duration = Some(now_secs().saturating_sub(view.created_at) as f64);
                 view.download = Some(format!("/api/jobs/{id}/download"));
             })
             .await;
@@ -744,10 +798,16 @@ async fn render_one(
     input: &Path,
     output: &Path,
     config: &RenderConfig,
+    info: Option<&ChartInfo>,
     cancel: &AtomicBool,
 ) -> Result<()> {
-    let mut chart_fs = fs::fs_from_file(input)?;
-    let info = fs::load_info(chart_fs.deref_mut()).await?;
+    let info = match info {
+        Some(info) => info.clone(),
+        None => {
+            let mut chart_fs = fs::fs_from_file(input)?;
+            fs::load_info(chart_fs.deref_mut()).await?
+        }
+    };
     let params = RenderParams {
         path: input.to_path_buf(),
         info,

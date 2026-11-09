@@ -3,6 +3,9 @@
 /.vscode/
 /.vs/
 
+# Tauri 移动端工程由 `tauri android/ios init` 生成（CI 里也是现场生成）。
+/src-tauri/gen/
+
 # ===== AI 工具相关文件（不提交）=====
 .claude/
 .codex/

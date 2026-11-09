@@ -42,6 +42,12 @@ en:
   save-log: Save Log
   log-saved: Log saved
 
+  source-local: This device
+  source-remote: Server
+  download: Download
+  remote-offline: Server unreachable, showing local tasks only
+  remote-job: Remote job
+
 zh-CN:
   empty: 空空如也
 
@@ -85,15 +91,22 @@ zh-CN:
   save-log: 保存日志
   log-saved: 日志已保存
 
+  source-local: 本机
+  source-remote: 服务器
+  download: 下载
+  remote-offline: 服务器连不上，只显示本机任务
+  remote-job: 远程任务
+
 </i18n>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Task, TaskStatus } from './model';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
+import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { toast } from './common';
 import moment from 'moment';
 import { toastError } from './common';
@@ -103,6 +116,26 @@ const { t } = useI18n();
 const mobile = isMobile();
 
 const tasks = ref<Task[]>();
+
+/// A job as returned by `GET /api/jobs` on a remote `phi-tkc server`.
+interface RemoteJob {
+  id: string;
+  name: string;
+  status: string;
+  progress?: number;
+  fps?: number;
+  eta?: number;
+  error?: string | null;
+  download?: string | null;
+  createdAt?: number;
+  duration?: number;
+}
+
+const remoteJobs = ref<RemoteJob[]>([]);
+const remoteBase = ref('');
+const remoteEnabled = ref(false);
+const remoteOnline = ref(false);
+const remoteError = ref('');
 
 const ACTIVE_STATUSES = ['pending', 'loading', 'mixing', 'rendering'];
 const POLL_ACTIVE_MS = 300;
@@ -117,22 +150,61 @@ async function updateList() {
   }
 }
 
-await updateList();
+// The connected server's jobs are merged into the same list. `localStorage` is
+// re-read on every tick so connecting/disconnecting in Settings is picked up
+// without a restart (the same window does not get a `storage` event).
+// `localStorage` stores what the user typed ("192.168.1.10:6787"); reqwest
+// needs an absolute URL, so the scheme is added here like Settings does.
+function normalizeBase(raw: string): string {
+  let value = raw.trim().replace(/\/+$/, '');
+  if (!value) return '';
+  if (!/^https?:\/\//i.test(value)) value = `http://${value}`;
+  return value;
+}
+
+async function updateRemote() {
+  remoteBase.value = normalizeBase(localStorage.getItem('remoteRenderer') || '');
+  const enabled = localStorage.getItem('remoteConnected') === '1' && !!remoteBase.value;
+  remoteEnabled.value = enabled;
+  if (!enabled) {
+    remoteJobs.value = [];
+    remoteOnline.value = false;
+    remoteError.value = '';
+    return;
+  }
+  try {
+    const list = (await invoke('remote_jobs', { base: remoteBase.value })) as RemoteJob[];
+    remoteJobs.value = Array.isArray(list) ? list : [];
+    remoteOnline.value = true;
+    remoteError.value = '';
+  } catch (e) {
+    remoteJobs.value = [];
+    remoteOnline.value = false;
+    remoteError.value = String((e as Error)?.message || e);
+  }
+}
+
+await Promise.all([updateList(), updateRemote()]);
 
 // Adaptive polling: a fixed interval can stack calls when IPC is slower than the tick,
 // so chain the next tick only after the previous one settles.
 let stopped = false;
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
+function remoteBusy() {
+  return remoteJobs.value.some((job) => ['queued', 'mixing', 'running'].includes(job.status));
+}
+
 function scheduleNextPoll() {
   if (stopped) return;
-  const busy = tasks.value?.some((task) => ACTIVE_STATUSES.includes(task.status.type)) ?? false;
+  const busy =
+    (tasks.value?.some((task) => ACTIVE_STATUSES.includes(task.status.type)) ?? false) || remoteBusy();
   pollTimer = setTimeout(poll, busy ? POLL_ACTIVE_MS : POLL_IDLE_MS);
 }
 
 async function poll() {
   try {
-    await updateList();
+    await Promise.all([updateList(), updateRemote()]);
   } catch (e) {
     console.error('Failed to refresh tasks:', e);
   }
@@ -156,6 +228,64 @@ function formatDuration(seconds: number) {
   if (secs > 0) return `${secs}s`;
   return '';
 }
+
+function remoteStatus(job: RemoteJob): TaskStatus {
+  switch (job.status) {
+    case 'queued': return { type: 'pending' };
+    case 'mixing': return { type: 'mixing' };
+    case 'running':
+      return {
+        type: 'rendering',
+        progress: job.progress ?? 0,
+        fps: Math.round(job.fps ?? 0),
+        estimate: job.eta ?? 0,
+      };
+    case 'done': return { type: 'done', duration: job.duration ?? 0, output: job.download ?? '' };
+    case 'canceled': return { type: 'canceled' };
+    default: return { type: 'failed', error: job.error || 'unknown error' };
+  }
+}
+
+interface Row {
+  key: string;
+  source: 'local' | 'remote';
+  name: string;
+  path: string;
+  cover: string;
+  status: TaskStatus;
+  task?: Task;
+  job?: RemoteJob;
+}
+
+// Union of this device's queue and the connected server's jobs. Local tasks
+// keep their order; remote ones are newest-first, exactly as the server lists
+// them.
+const rows = computed<Row[]>(() => {
+  const out: Row[] = [];
+  for (const task of tasks.value ?? []) {
+    out.push({
+      key: `local-${task.id}`,
+      source: 'local',
+      name: task.name,
+      path: task.path,
+      cover: task.cover,
+      status: task.status,
+      task,
+    });
+  }
+  for (const job of remoteJobs.value) {
+    out.push({
+      key: `remote-${job.id}`,
+      source: 'remote',
+      name: job.name || t('remote-job'),
+      path: job.id,
+      cover: '',
+      status: remoteStatus(job),
+      job,
+    });
+  }
+  return out;
+});
 
 function describeStatus(status: TaskStatus): string {
   switch (status.type) {
@@ -183,11 +313,11 @@ function statusColor(statusType: string): string {
 
 const errorDialog = ref(false), errorDialogMessage = ref('');
 const outputDialog = ref(false), outputDialogMessage = ref('');
-const detailDialog = ref(false), selectedTask = ref<Task | null>(null);
+const detailDialog = ref(false), selectedRow = ref<Row | null>(null);
 const contextMenu = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
-const contextMenuTask = ref<Task | null>(null);
+const contextMenuRow = ref<Row | null>(null);
 
 async function showInFolder(path: string) {
   try { await invoke('show_in_folder', { path }); } catch (e) { toastError(e); }
@@ -200,6 +330,26 @@ async function showFolder() {
 async function cancelTask(id: number) {
   try {
     await invoke('cancel_task', { id });
+  } catch (e) {
+    toastError(e);
+  }
+}
+
+async function cancelRow(row: Row) {
+  if (row.source === 'local' && row.task) return cancelTask(row.task.id);
+  if (row.source === 'remote' && row.job) {
+    try {
+      await invoke('remote_cancel', { base: remoteBase.value, id: row.job.id });
+    } catch (e) {
+      toastError(e);
+    }
+  }
+}
+
+async function downloadRemote(job: RemoteJob) {
+  if (!job.download) return;
+  try {
+    await openUrl(`${remoteBase.value}${job.download}`);
   } catch (e) {
     toastError(e);
   }
@@ -219,26 +369,29 @@ async function saveLog(text: string, name: string) {
   }
 }
 
-function showOutput(task: Task) {
-  if (task.status.type === 'done') {
-    outputDialogMessage.value = task.status.output;
-    outputDialog.value = true;
+function showOutput(row: Row) {
+  if (row.status.type !== 'done') return;
+  if (row.source === 'remote' && row.job) {
+    void downloadRemote(row.job);
+    return;
   }
+  outputDialogMessage.value = row.status.output;
+  outputDialog.value = true;
 }
 
-const showContextMenu = (event: MouseEvent, task: Task) => {
+const showContextMenu = (event: MouseEvent, row: Row) => {
   event.preventDefault();
   contextMenu.value = true;
   contextMenuX.value = event.clientX;
   contextMenuY.value = event.clientY;
-  contextMenuTask.value = task;
+  contextMenuRow.value = row;
 };
 
 // Touch-friendly replacement for the right-click menu: anchor it to the button.
-const showContextMenuFromButton = (event: MouseEvent, task: Task) => {
+const showContextMenuFromButton = (event: MouseEvent, row: Row) => {
   const target = event.currentTarget as HTMLElement;
   const rect = target.getBoundingClientRect();
-  contextMenuTask.value = task;
+  contextMenuRow.value = row;
   contextMenuX.value = rect.left;
   contextMenuY.value = rect.bottom;
   contextMenu.value = true;
@@ -246,11 +399,11 @@ const showContextMenuFromButton = (event: MouseEvent, task: Task) => {
 
 const closeContextMenu = () => {
   contextMenu.value = false;
-  contextMenuTask.value = null;
+  contextMenuRow.value = null;
 };
 
-const showDetail = (task: Task) => {
-  selectedTask.value = task;
+const showDetail = (row: Row) => {
+  selectedRow.value = row;
   detailDialog.value = true;
   closeContextMenu();
 };
@@ -270,35 +423,40 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
       </v-btn>
     </div>
 
-    <!-- Empty state -->
-    <div v-if="!tasks || !tasks.length" class="empty-state">
-      <v-icon icon="mdi-inbox-outline" size="64" />
-      <p>{{ t('empty') }}</p>
-    </div>
-
     <!-- Task list -->
-    <div v-else class="task-list">
+    <div class="task-list">
+      <div v-if="remoteEnabled && !remoteOnline" class="remote-offline glass">
+        <v-icon icon="mdi-cloud-off-outline" size="18" class="mr-2" />
+        <span>{{ t('remote-offline') }}</span>
+      </div>
+
       <div
-        v-for="task in tasks"
-        :key="task.id"
+        v-for="row in rows"
+        :key="row.key"
         class="task-card glass fluent-glass"
         v-glass
-        @contextmenu="showContextMenu($event, task)"
+        @contextmenu="showContextMenu($event, row)"
       >
         <!-- Cover (left 35%) -->
         <div class="task-cover">
           <div
             class="cover-image"
-            :style="{ backgroundImage: 'url(' + convertFileSrc(task.cover) + ')' }"
+            :style="row.cover ? { backgroundImage: 'url(' + convertFileSrc(row.cover) + ')' } : {}"
           ></div>
+          <div v-if="!row.cover" class="cover-placeholder">
+            <v-icon icon="mdi-cloud-render-outline" size="40" />
+          </div>
         </div>
 
         <!-- Info (right 65%) -->
         <div class="task-info">
           <div class="task-header">
-            <h3 class="task-name" :title="task.name">{{ task.name }}</h3>
-            <span class="status-chip" :class="'chip-' + statusColor(task.status.type)">
-              {{ t('chip.' + task.status.type) }}
+            <h3 class="task-name" :title="row.name">{{ row.name }}</h3>
+            <span v-if="row.source === 'remote'" class="source-chip">
+              <v-icon icon="mdi-cloud-outline" size="12" class="mr-1" />{{ t('source-remote') }}
+            </span>
+            <span class="status-chip" :class="'chip-' + statusColor(row.status.type)">
+              {{ t('chip.' + row.status.type) }}
             </span>
             <v-btn
               icon="mdi-dots-vertical"
@@ -306,57 +464,69 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
               size="x-small"
               class="task-menu-btn"
               :title="t('details')"
-              @click.stop="showContextMenuFromButton($event, task)"
+              @click.stop="showContextMenuFromButton($event, row)"
             />
           </div>
 
-          <p class="task-path" :title="task.path">{{ task.path }}</p>
+          <p class="task-path" :title="row.path">
+            {{ row.source === 'remote' ? t('remote-job') + ' · ' + row.path : row.path }}
+          </p>
 
           <div class="task-status">
             <v-progress-circular
-              v-if="['loading', 'mixing', 'pending'].includes(task.status.type)"
-              indeterminate :color="statusColor(task.status.type)" size="20" width="2"
+              v-if="['loading', 'mixing', 'pending'].includes(row.status.type)"
+              indeterminate :color="statusColor(row.status.type)" size="20" width="2"
             />
             <v-progress-circular
-              v-else-if="task.status.type === 'rendering'"
-              :model-value="task.status.progress * 100"
-              :color="statusColor(task.status.type)" size="20" width="2"
+              v-else-if="row.status.type === 'rendering'"
+              :model-value="row.status.progress * 100"
+              :color="statusColor(row.status.type)" size="20" width="2"
             />
-            <span class="status-text">{{ describeStatus(task.status) }}</span>
+            <span class="status-text">{{ describeStatus(row.status) }}</span>
           </div>
 
           <v-progress-linear
-            v-if="task.status.type === 'rendering'"
-            :model-value="task.status.progress * 100"
-            :color="statusColor(task.status.type)" height="3" rounded
+            v-if="row.status.type === 'rendering'"
+            :model-value="row.status.progress * 100"
+            :color="statusColor(row.status.type)" height="3" rounded
           />
 
           <div class="task-actions">
-            <template v-if="['loading', 'mixing', 'rendering', 'pending'].includes(task.status.type)">
-              <v-btn variant="text" size="small" color="primary" @click="cancelTask(task.id)">
+            <template v-if="['loading', 'mixing', 'rendering', 'pending'].includes(row.status.type)">
+              <v-btn variant="text" size="small" color="primary" @click="cancelRow(row)">
                 <v-icon icon="mdi-cancel" size="16" class="mr-1" />
                 <span>{{ t('cancel') }}</span>
               </v-btn>
             </template>
-            <template v-else-if="task.status.type === 'failed'">
-              <v-btn variant="text" size="small" color="primary" @click="errorDialogMessage = task.status.error; errorDialog = true;">
+            <template v-else-if="row.status.type === 'failed'">
+              <v-btn variant="text" size="small" color="primary" @click="errorDialogMessage = row.status.error; errorDialog = true;">
                 <v-icon icon="mdi-alert-circle-outline" size="16" class="mr-1" />
                 <span>{{ t('details') }}</span>
               </v-btn>
             </template>
-            <template v-else-if="task.status.type === 'done'">
-              <v-btn variant="text" size="small" color="primary" @click="showOutput(task)">
-                <v-icon icon="mdi-text-box-outline" size="16" class="mr-1" />
-                <span>{{ t('show-output') }}</span>
+            <template v-else-if="row.status.type === 'done'">
+              <v-btn variant="text" size="small" color="primary" @click="showOutput(row)">
+                <v-icon :icon="row.source === 'remote' ? 'mdi-download' : 'mdi-text-box-outline'" size="16" class="mr-1" />
+                <span>{{ row.source === 'remote' ? t('download') : t('show-output') }}</span>
               </v-btn>
               <!-- Desktop shell integration only (explorer / gdbus / open). -->
-              <v-btn v-if="!mobile" variant="text" size="small" color="primary" @click="showInFolder(task.output)">
+              <v-btn
+                v-if="!mobile && row.source === 'local' && row.task"
+                variant="text" size="small" color="primary"
+                @click="showInFolder(row.task.output)"
+              >
                 <v-icon icon="mdi-folder-open-outline" size="16" class="mr-1" />
                 <span>{{ t('show-in-folder') }}</span>
               </v-btn>
             </template>
           </div>
         </div>
+      </div>
+
+      <!-- Empty state -->
+      <div v-if="!rows.length" class="empty-state">
+        <v-icon icon="mdi-inbox-outline" size="64" />
+        <p>{{ t('empty') }}</p>
       </div>
     </div>
 
@@ -399,7 +569,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
     <!-- Context menu -->
     <v-menu v-model="contextMenu" :target="[contextMenuX, contextMenuY]">
       <v-list class="ctx-menu">
-        <v-list-item @click="showDetail(contextMenuTask!)">
+        <v-list-item @click="showDetail(contextMenuRow!)">
           <template v-slot:prepend>
             <v-icon>mdi-information</v-icon>
           </template>
@@ -410,28 +580,28 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 
     <!-- Detail dialog -->
     <v-dialog v-model="detailDialog" width="auto" min-width="500px">
-      <v-card v-if="selectedTask">
+      <v-card v-if="selectedRow">
         <v-card-title>{{ t('details') }}</v-card-title>
         <v-divider />
         <v-card-text>
           <div class="detail-list">
-            <div class="detail-row"><span class="detail-label">{{ t('detail.name') }}</span><span>{{ selectedTask.name }}</span></div>
-            <div class="detail-row"><span class="detail-label">{{ t('detail.path') }}</span><span>{{ selectedTask.path }}</span></div>
-            <div class="detail-row"><span class="detail-label">{{ t('detail.status') }}</span><span>{{ describeStatus(selectedTask.status) }}</span></div>
-            <div class="detail-row" v-if="selectedTask.status.type === 'rendering'">
-              <span class="detail-label">{{ t('detail.progress') }}</span><span>{{ Math.round(selectedTask.status.progress * 100) }}%</span>
+            <div class="detail-row"><span class="detail-label">{{ t('detail.name') }}</span><span>{{ selectedRow.name }}</span></div>
+            <div class="detail-row"><span class="detail-label">{{ t('detail.path') }}</span><span class="break-all">{{ selectedRow.source === 'remote' ? t('remote-job') + ' · ' + selectedRow.path : selectedRow.path }}</span></div>
+            <div class="detail-row"><span class="detail-label">{{ t('detail.status') }}</span><span>{{ describeStatus(selectedRow.status) }}</span></div>
+            <div class="detail-row" v-if="selectedRow.status.type === 'rendering'">
+              <span class="detail-label">{{ t('detail.progress') }}</span><span>{{ Math.round(selectedRow.status.progress * 100) }}%</span>
             </div>
-            <div class="detail-row" v-if="selectedTask.status.type === 'rendering'">
-              <span class="detail-label">{{ t('detail.fps') }}</span><span>{{ selectedTask.status.fps }} FPS</span>
+            <div class="detail-row" v-if="selectedRow.status.type === 'rendering'">
+              <span class="detail-label">{{ t('detail.fps') }}</span><span>{{ selectedRow.status.fps }} FPS</span>
             </div>
-            <div class="detail-row" v-if="selectedTask.status.type === 'done' && selectedTask.status.duration">
-              <span class="detail-label">{{ t('detail.duration') }}</span><span>{{ formatDuration(selectedTask.status.duration) }}</span>
+            <div class="detail-row" v-if="selectedRow.status.type === 'done' && selectedRow.status.duration">
+              <span class="detail-label">{{ t('detail.duration') }}</span><span>{{ formatDuration(selectedRow.status.duration) }}</span>
             </div>
-            <div class="detail-row" v-if="selectedTask.status.type === 'done' && selectedTask.output">
-              <span class="detail-label">{{ t('detail.output') }}</span><span class="break-all">{{ selectedTask.output }}</span>
+            <div class="detail-row" v-if="selectedRow.status.type === 'done' && selectedRow.status.output">
+              <span class="detail-label">{{ t('detail.output') }}</span><span class="break-all">{{ selectedRow.status.type === 'done' ? selectedRow.status.output : '' }}</span>
             </div>
-            <div class="detail-row" v-if="selectedTask.status.type === 'failed' && selectedTask.status.error">
-              <span class="detail-label">{{ t('detail.error') }}</span><span class="error-text">{{ selectedTask.status.error }}</span>
+            <div class="detail-row" v-if="selectedRow.status.type === 'failed' && selectedRow.status.error">
+              <span class="detail-label">{{ t('detail.error') }}</span><span class="error-text">{{ selectedRow.status.error }}</span>
             </div>
           </div>
         </v-card-text>
@@ -498,6 +668,9 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   height: 180px;
+  /* The list is a scrolling flex column: keep cards at their intended height
+     instead of shrinking them all to fit one screen. */
+  flex-shrink: 0;
 }
 
 .task-card:hover {
@@ -590,6 +763,42 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
   border-radius: 12px;
 }
 
+/* Marks jobs that live on the connected render server. */
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: rgba(var(--main-color-rgb), 0.8);
+  border: 1px solid rgba(var(--main-color-rgb), 0.25);
+  white-space: nowrap;
+}
+
+.task-cover {
+  position: relative;
+}
+.cover-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(var(--main-color-rgb), 0.35);
+}
+
+.remote-offline {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--sub-color);
+  background: rgba(var(--bg-color-rgb), 0.35);
+}
+
 /* ===== Actions ===== */
 .task-actions {
   display: flex;
@@ -667,10 +876,20 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 
 /* ===== Responsive ===== */
 @media (max-width: 600px) {
-  .tasks-container { padding: 16px; }
-  .task-card { flex-direction: column; height: auto; }
-  .task-cover { width: 100%; min-height: 140px; }
-  .task-info { width: 100%; }
+  .tasks-container {
+    padding: 12px 12px 16px;
+  }
+  /* Keep the cover as a small thumbnail instead of stacking it on top: the
+     information (name/status/actions) is what people come here for, and a
+     phone screen only fits a couple of cards otherwise. */
+  .task-card { flex-direction: row; height: auto; min-height: 124px; }
+  .task-cover { width: 92px; min-height: 92px; align-self: stretch; }
+  .cover-image { min-height: 92px; }
+  .task-info { width: auto; flex: 1; padding: 10px 12px; gap: 4px; }
+  .task-name { font-size: 15px; }
+  .task-path { font-size: 11px; }
+  .task-actions { gap: 2px; }
+  .tasks-title { font-size: 20px; }
 }
 
 /* ===== Mobile (touch) ===== */

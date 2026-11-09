@@ -178,6 +178,8 @@ pub async fn run() -> Result<()> {
             get_msaa_sample_counts,
             remote_status,
             remote_jobs,
+            remote_post_render,
+            remote_cancel,
             start_render_server,
             stop_render_server,
             render_server_status,
@@ -339,11 +341,28 @@ fn show_in_folder(path: &Path) -> Result<(), InvokeError> {
     .map_err(InvokeError::from_anyhow)
 }
 
+/// Turn a picker result into a real file path.
+///
+/// Android hands back `content://` URIs; `android_uri::resolve` imports those
+/// into the app cache. Every command that receives a chart path goes through
+/// this so the renderer never has to know about content URIs.
+fn localize_chart_path(path: &Path) -> Result<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android_uri::resolve(path)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(path.to_path_buf())
+    }
+}
+
 #[tauri::command]
 async fn parse_chart(path: &Path) -> Result<ChartInfo, InvokeError> {
     wrap_async(async move {
+        let path = localize_chart_path(path)?;
         let mut fs: Box<dyn FileSystem + Send + Sync + 'static> =
-            fs::fs_from_file(path).with_context(|| mtl!("read-chart-failed"))?;
+            fs::fs_from_file(&path).with_context(|| mtl!("read-chart-failed"))?;
         let info = fs::load_info(fs.deref_mut())
             .await
             .with_context(|| mtl!("load-info-failed"))?;
@@ -353,8 +372,9 @@ async fn parse_chart(path: &Path) -> Result<ChartInfo, InvokeError> {
 }
 
 #[tauri::command]
-async fn preview_chart(params: RenderParams) -> Result<(), InvokeError> {
+async fn preview_chart(mut params: RenderParams) -> Result<(), InvokeError> {
     wrap_async(async move {
+        params.path = localize_chart_path(&params.path)?;
         let mut child = Command::new(std::env::current_exe()?)
             .arg("preview")
             .arg(ASSET_PATH.get().unwrap())
@@ -373,8 +393,9 @@ async fn preview_chart(params: RenderParams) -> Result<(), InvokeError> {
     .await
 }
 #[tauri::command]
-async fn post_render(queue: State<'_, TaskQueue>, params: RenderParams, output_path: Option<String>) -> Result<(), InvokeError> {
+async fn post_render(queue: State<'_, TaskQueue>, mut params: RenderParams, output_path: Option<String>) -> Result<(), InvokeError> {
     wrap_async(async move {
+        params.path = localize_chart_path(&params.path)?;
         let output_path = output_path.map(PathBuf::from);
         queue.post(params, output_path).await?;
         Ok(())
@@ -433,7 +454,7 @@ async fn batch_add_tasks(
                 create_default_render_config()
             });
             let params = RenderParams {
-                path: PathBuf::from(path),
+                path: localize_chart_path(Path::new(&path))?,
                 config,
                 info: ChartInfo::default(),
             };
@@ -726,6 +747,7 @@ async fn load_chart_illustration(
 ) -> Result<String, InvokeError> {
     wrap_async(async move {
         use std::hash::{Hash, Hasher};
+        let path = localize_chart_path(&path)?;
         let mut fs: Box<dyn FileSystem + Send + Sync + 'static> =
             fs::fs_from_file(&path).with_context(|| mtl!("read-chart-failed"))?;
         let data = fs
@@ -800,4 +822,181 @@ async fn remote_jobs(base: String) -> Result<serde_json::Value, InvokeError> {
         Ok(response.json::<serde_json::Value>().await?)
     })
     .await
+}
+
+fn multipart_text(boundary: &str, name: &str, value: &str, body: &mut Vec<u8>) {
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
+            .as_bytes(),
+    );
+}
+
+fn multipart_file(boundary: &str, name: &str, file_name: &str, data: &[u8], body: &mut Vec<u8>) {
+    let file_name = file_name.replace(['"', '\r', '\n'], "_");
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{file_name}\"\r\n\
+             Content-Type: application/octet-stream\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(data);
+    body.extend_from_slice(b"\r\n");
+}
+
+/// Submit a render to a `phi-tkc server` instance.
+///
+/// Done in Rust (not the WebView) for three reasons: the chart file lives on the
+/// native side, Android blocks cleartext HTTP from the WebView, and sending the
+/// whole `RenderConfig` as JSON keeps every phone-side option intact instead of
+/// re-encoding a subset as query fields.
+#[tauri::command]
+async fn remote_post_render(base: String, params: RenderParams) -> Result<serde_json::Value, InvokeError> {
+    wrap_async(remote_render_upload(base, params)).await
+}
+
+/// The actual multipart upload behind [`remote_post_render`], split out so it can
+/// be exercised without a running Tauri app.
+async fn remote_render_upload(base: String, params: RenderParams) -> Result<serde_json::Value> {
+    {
+        let base = base.trim_end_matches('/').to_string();
+        let boundary = format!("----PhiTKC{:016x}", {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+                .hash(&mut hasher);
+            hasher.finish()
+        });
+
+        let mut body = Vec::new();
+        // `path` stays local: the server reads the uploaded copy.
+        let posted = serde_json::json!({ "info": params.info, "config": params.config });
+        multipart_text(&boundary, "params", &serde_json::to_string(&posted)?, &mut body);
+
+        let chart = tokio::fs::read(&params.path).await?;
+        let chart_name = params
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("chart.pez");
+        multipart_file(&boundary, "file", chart_name, &chart, &mut body);
+
+        for (field, path) in [
+            ("respack", params.config.res_pack_path.as_ref()),
+            ("avatar", params.config.player_avatar.as_ref()),
+        ] {
+            let Some(path) = path else { continue };
+            let path = Path::new(path);
+            let Ok(data) = tokio::fs::read(path).await else { continue };
+            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or(field);
+            multipart_file(&boundary, field, name, &data, &mut body);
+        }
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()?;
+        let response = client
+            .post(format!("{base}/api/render"))
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(body)
+            .send()
+            .await?;
+        let status = response.status();
+        let text = response.text().await?;
+        if !status.is_success() {
+            anyhow::bail!("HTTP {status}: {text}");
+        }
+        Ok(serde_json::from_str::<serde_json::Value>(&text)?)
+    }
+}
+
+#[tauri::command]
+async fn remote_cancel(base: String, id: String) -> Result<serde_json::Value, InvokeError> {
+    wrap_async(async move {
+        let url = format!("{}/api/jobs/{id}/cancel", base.trim_end_matches('/'));
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(6))
+            .build()?;
+        let response = client.post(&url).send().await?;
+        if !response.status().is_success() {
+            anyhow::bail!("HTTP {}", response.status());
+        }
+        Ok(response.json::<serde_json::Value>().await?)
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// End-to-end smoke test for the phone → server upload path.
+    ///
+    /// Ignored by default because it needs a real `phi-tkc server` on 127.0.0.1:6787
+    /// and the test chart. Run with:
+    ///   cargo test --offline remote_render_upload -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn remote_render_upload_smoke() {
+        let Ok(chart) = std::env::var("PHI_TKC_TEST_CHART") else {
+            eprintln!("PHI_TKC_TEST_CHART is not set; skipping");
+            return;
+        };
+        let chart = std::path::Path::new(&chart);
+        assert!(chart.exists(), "test chart is missing");
+
+        let mut config = RenderConfig::default();
+        config.resolution = (320, 180);
+        config.fps = 10;
+        config.bitrate = "45".to_owned();
+        let mut info = ChartInfo::default();
+        info.name = "remote-upload-test".to_owned();
+
+        let params = RenderParams {
+            path: chart.to_path_buf(),
+            info,
+            config,
+        };
+        let response = remote_render_upload("http://127.0.0.1:6787".to_owned(), params)
+            .await
+            .expect("upload failed");
+        let id = response.get("id").and_then(|id| id.as_str()).expect("no job id");
+        println!("submitted job {id}");
+
+        // Wait for the job to finish and make sure it actually rendered.
+        let client = reqwest::Client::new();
+        for _ in 0..120 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let jobs: serde_json::Value = client
+                .get("http://127.0.0.1:6787/api/jobs")
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let job = jobs
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|job| job.get("id").and_then(|id| id.as_str()) == Some(id))
+                .expect("job disappeared");
+            match job.get("status").and_then(|s| s.as_str()).unwrap_or("") {
+                "done" => {
+                    println!("done: {}", job.get("duration").unwrap_or(&serde_json::Value::Null));
+                    return;
+                }
+                "failed" | "canceled" => panic!("job ended as {}", job["status"]),
+                _ => {}
+            }
+        }
+        panic!("job did not finish in time");
+    }
 }

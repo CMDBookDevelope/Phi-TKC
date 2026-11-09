@@ -57,6 +57,7 @@
     duration: Duration
 
     ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and put it in the specific folder.
+    remote-submitted: 'Sent to the render server (job {id})'
 
   zh-CN:
     already-running: Phi TKC 已经在运行
@@ -116,6 +117,7 @@
     duration: 耗时
 
     ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并放置在指定文件夹内。
+    remote-submitted: 已提交到渲染服务器（任务 {id}）
 
 </i18n>
 
@@ -176,19 +178,29 @@ async function chooseChart(folder?: boolean) {
   if (choosingChart.value) return;
   choosingChart.value = true;
   try {
+    // Android's document picker cannot translate an extension whitelist into a
+    // MIME filter for chart archives, and the dialog never resolves — so the
+    // picker is opened unfiltered there and the chart parser rejects non-charts.
     let file = folder
       ? await dialog.open({ directory: true })
-      : await dialog.open({
-          filters: [
-            {
-              name: t('choose.filter-name'),
-              extensions: ['zip', 'pez', 'json'],
-            },
-            anyFilter(),
-          ],
-        });
+      : await dialog.open(
+          isAndroid()
+            ? {}
+            : {
+                filters: [
+                  {
+                    name: t('choose.filter-name'),
+                    extensions: ['zip', 'pez', 'json'],
+                  },
+                  anyFilter(),
+                ],
+              },
+        );
     if (!file) return;
     await loadChart(file as string);
+  } catch (e) {
+    // Cancelling the system picker is a normal outcome, not an error.
+    if (!/cancel/i.test(String(e))) toastError(e);
   } finally {
     choosingChart.value = false;
   }
@@ -291,8 +303,30 @@ watch([aspectWidth, aspectHeight], ([newWidth, newHeight]) => {
   }
 });
 
-async function postRender() {
+// Set by the Settings page: when a render server is connected, renders are
+// submitted there instead of running on this device.
+function remoteServer(): string {
+  if (localStorage.getItem('remoteConnected') !== '1') return '';
+  let value = (localStorage.getItem('remoteRenderer') || '').trim().replace(/\/+$/, '');
+  if (!value) return '';
+  if (!/^https?:\/\//i.test(value)) value = `http://${value}`;
+  return value;
+}
+
+async function postRender(): Promise<boolean | 'remote'> {
   try {
+    let params = await buildParams();
+    if (!params) return false;
+
+    const base = remoteServer();
+    if (base) {
+      const result = await invoke<{ id?: string }>('remote_post_render', { base, params });
+      toast(t('remote-submitted', { id: result?.id ?? '' }), 'success');
+      // The remote job shows up in the union task list; this device has no local
+      // task to attach the progress screen to.
+      return 'remote';
+    }
+
     // Android encodes in-process with MediaCodec, so there is no ffmpeg to find.
     if (!isAndroid() && !(await invoke('test_ffmpeg'))) {
       await dialog.message(t('ffmpeg-not-found'));
@@ -300,8 +334,6 @@ async function postRender() {
       await shell.open('https://github.com/BtbN/FFmpeg-Builds/releases');
       return false;
     }
-    let params = await buildParams();
-    if (!params) return false;
     const outputPath = localStorage.getItem('outputPath');
     await invoke('post_render', { params, outputPath: outputPath || null });
     return true;
@@ -452,7 +484,12 @@ async function moveNext() {
     return;
   }
   if (step.value === 'options') {
-    if (await postRender()) {
+    const result = await postRender();
+    if (result === 'remote') {
+      router.push({ name: 'tasks' });
+      return;
+    }
+    if (result) {
       stepIndex.value++;
     }
     return;
@@ -945,7 +982,6 @@ function resetAndGoChoose() {
 
 .book-card {
   min-width: 100%;
-  max-height: 62px;
   border-radius: 16px;
   cursor: pointer;
   position: relative;
@@ -962,7 +998,8 @@ function resetAndGoChoose() {
 
 .book-face {
   min-width: 100%;
-  height: 100%;
+  display: flex;
+  flex-direction: column;
   padding: 18px 20px;
   border-radius: 16px;
   border-width: 1px;
@@ -977,7 +1014,7 @@ function resetAndGoChoose() {
 }
 
 .book-desc {
-  margin: 10px 0 0;
+  margin: 4px 0 0;
   font-size: 12px;
   color: rgba(var(--main-color-rgb), 0.45);
 }
@@ -1218,6 +1255,28 @@ function resetAndGoChoose() {
   }
   .bar-btn span {
     display: none;
+  }
+  /* The primary action (next / render) becomes a full-width bottom CTA so it
+     sits in the thumb zone instead of the top-right corner, and keeps its label
+     while the secondary icon buttons stay compact. */
+  .bar-btn-filled {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: calc(74px + env(safe-area-inset-bottom));
+    height: 52px;
+    justify-content: center;
+    border-radius: 16px;
+    font-size: 16px;
+    font-weight: 700;
+    z-index: 30;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+  .bar-btn-filled span {
+    display: inline;
+  }
+  .render-container {
+    padding-bottom: 84px;
   }
   .config-card {
     padding: 20px;

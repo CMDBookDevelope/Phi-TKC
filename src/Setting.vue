@@ -651,6 +651,7 @@ onUnmounted(stopWatching);
         <div class="server-actions">
           <v-btn
             color="primary"
+            variant="flat"
             prepend-icon="mdi-lan-connect"
             :loading="remoteBusy"
             :disabled="remoteConnected || !remoteAddress"
@@ -801,6 +802,7 @@ onUnmounted(stopWatching);
 
 .settings-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -812,6 +814,9 @@ onUnmounted(stopWatching);
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* Cards live in a fixed-height scrolling flex column; without this they are
+     shrunk to fit the viewport and their buttons spill under the next card. */
+  flex-shrink: 0;
 }
 
 .card-label {

@@ -31,7 +31,15 @@ body,
 /* Android draws edge-to-edge, so the system status bar overlaps the app bar.
    The WebView does not report a safe-area inset, so pad by the status bar height. */
 body.is-android {
-  padding-top: 26px;
+  /* Edge-to-edge WebView: the status bar overlays the page. Individual fixed
+     elements (app bar, bottom nav) offset themselves in App.vue; a body pad
+     would only move the scrolling content and double the inset. */
+  padding-top: 0;
+}
+
+/* Android gesture bar sits on top of the WebView as well. */
+body.is-android .tk-bottomnav {
+  padding-bottom: 24px;
 }
 
 /* 选中白名单 */
@@ -292,6 +300,26 @@ input[type='number'] {
 }
 .v-list-item:hover {
   background: rgba(var(--main-color-rgb), 0.1) !important;
+}
+
+/* Tonal buttons / chips:
+   Vuetify paints them with an `opacity: 0.12` underlay of `currentColor`.
+   Inside the glass (backdrop-filter) cards some WebViews composite that
+   underlay at full opacity, which leaves the label exactly the same colour as
+   the background — invisible. Use an explicit translucent fill instead. */
+.v-btn--variant-tonal {
+  background: rgba(var(--main-color-rgb), 0.18) !important;
+  color: var(--main-color) !important;
+}
+.v-btn--variant-tonal .v-btn__underlay {
+  opacity: 0 !important;
+}
+
+/* Filled primary buttons: resolve the theme colour through our own variables so
+   a missing `--v-theme-*` can never leave the label the same colour as the fill. */
+.v-btn.bg-primary {
+  background: var(--main-color) !important;
+  color: #0d0d0f !important;
 }
 
 /* Chips */

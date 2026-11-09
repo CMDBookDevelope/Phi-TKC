@@ -83,20 +83,94 @@ pub(crate) fn debug_log(message: &str) {
     }
 }
 
-/// The Android file picker may hand back `content://` URIs. The Tauri dialog
-/// plugin already imports those into the cache directory, so anything left is a
-/// plain path that only needs an existence check.
+/// Make sure `path` is a real file the renderer can open.
+///
+/// Android's document picker returns `content://` URIs, not filesystem paths
+/// (the Tauri dialog plugin passes the URI through). Those are imported into the
+/// app cache through the ContentResolver so everything downstream — chart
+/// parsing, the render subprocess, the illustration loader — only ever sees a
+/// normal path.
 pub fn resolve(path: &Path) -> Result<PathBuf> {
     let text = path.to_string_lossy();
-    anyhow::ensure!(
-        !text.starts_with("content://"),
-        "content:// URIs must be imported by the file picker"
-    );
-    anyhow::ensure!(
-        path.exists(),
-        "The chart is no longer available. Please select it again."
-    );
-    Ok(path.to_path_buf())
+    if !text.starts_with("content://") {
+        anyhow::ensure!(
+            path.exists(),
+            "The chart is no longer available. Please select it again."
+        );
+        return Ok(path.to_path_buf());
+    }
+    import_content_uri(&text)
+}
+
+#[cfg(target_os = "android")]
+fn import_content_uri(uri: &str) -> Result<PathBuf> {
+    use jni::{
+        objects::{JObject, JValue},
+        JavaVM,
+    };
+    use std::{
+        hash::{Hash, Hasher},
+        io::Read,
+        os::fd::FromRawFd,
+    };
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    uri.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    let ctx = ndk_context::android_context();
+    let vm = unsafe { JavaVM::from_raw(ctx.vm().cast()) }?;
+    let mut env = vm.attach_current_thread()?;
+    let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+
+    // ParcelFileDescriptor.detachFd() hands us a raw fd, which is far simpler
+    // (and cheaper) than streaming a Java InputStream through JNI byte arrays.
+    let resolver = env
+        .call_method(&context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])?
+        .l()?;
+    let uri_text = JObject::from(env.new_string(uri)?);
+    let uri_obj = env
+        .call_static_method(
+            "android/net/Uri",
+            "parse",
+            "(Ljava/lang/String;)Landroid/net/Uri;",
+            &[JValue::Object(&uri_text)],
+        )?
+        .l()?;
+    let mode = JObject::from(env.new_string("r")?);
+    let fd_obj = env
+        .call_method(
+            &resolver,
+            "openFileDescriptor",
+            "(Landroid/net/Uri;Ljava/lang/String;)Landroid/os/ParcelFileDescriptor;",
+            &[JValue::Object(&uri_obj), JValue::Object(&mode)],
+        )?
+        .l()?;
+    if fd_obj.is_null() {
+        anyhow::bail!("The picker did not return a readable file");
+    }
+    let fd = env.call_method(&fd_obj, "detachFd", "()I", &[])?.i()?;
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    let mut data = Vec::new();
+    file.read_to_end(&mut data)?;
+
+    // The URI usually has no useful extension; sniff the archive magic instead.
+    let ext = if data.starts_with(b"PK\x03\x04") {
+        "pez"
+    } else if data.first() == Some(&b'{') {
+        "json"
+    } else {
+        "bin"
+    };
+    let path = std::env::temp_dir().join(format!("picked-{hash:016x}.{ext}"));
+    std::fs::write(&path, &data)?;
+    debug_log(&format!("imported {uri} -> {} ({} bytes)", path.display(), data.len()));
+    Ok(path)
+}
+
+#[cfg(not(target_os = "android"))]
+fn import_content_uri(uri: &str) -> Result<PathBuf> {
+    anyhow::bail!("content URIs are only used on Android: {uri}")
 }
 
 /// Move the finished video somewhere the user can find it.

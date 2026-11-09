@@ -1,6 +1,6 @@
 [package]
 name = "Phi-TKC"
-version = "1.1.1"
+version = "1.1.2"
 description = "Phi-TKC"
 authors = ["Mivik", "Link", "CNMDBook"]
 license = "GPL-v3"
@@ -83,6 +83,9 @@ winreg = "0.55.0"
 # linked into the .so and the linker would reject the duplicate C++ symbols.
 [target.'cfg(target_os = "android")'.dependencies]
 sasa = { git = "https://github.com/Winamin/sasa", default-features = false, features = ["oboe"] }
+# Content-URI handling for charts picked through Android's document picker.
+jni = "0.21"
+ndk-context = "0.1"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 sasa = { git = "https://github.com/Winamin/sasa" }

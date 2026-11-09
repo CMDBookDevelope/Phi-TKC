@@ -60,6 +60,16 @@ const navItems = [
   { key: 'about', icon: 'mdi-information-outline', activeIcon: 'mdi-information' },
 ];
 
+// Bottom bar destinations. Batch rendering is desktop-only, so it does not earn
+// one of the five thumb slots; settings takes the last one.
+const mobileNavItems = [
+  { key: 'render', icon: 'mdi-play-circle-outline', activeIcon: 'mdi-play-circle' },
+  { key: 'rpe', icon: 'mdi-book-open-page-variant-outline', activeIcon: 'mdi-book-open-page-variant' },
+  { key: 'tasks', icon: 'mdi-server-network-outline', activeIcon: 'mdi-server-network' },
+  { key: 'about', icon: 'mdi-information-outline', activeIcon: 'mdi-information' },
+  { key: 'setting', icon: 'mdi-cog-outline', activeIcon: 'mdi-cog' },
+];
+
 const navigateTo = (name: string) => {
   router.push({ name });
   // The permanent desktop rail must stay open; only the mobile overlay closes.
@@ -323,20 +333,25 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 
     <v-sonner position="top-center" />
 
-    <v-app-bar v-if="mobile" class="glass fluent-glass tk-appbar" density="compact" flat>
-      <v-app-bar-nav-icon @click="navOpen = !navOpen" />
+    <v-app-bar
+      v-if="mobile"
+      class="glass fluent-glass tk-appbar"
+      :style="android ? { top: '26px' } : undefined"
+      density="compact"
+      flat
+    >
       <v-app-bar-title>Phi-TKC</v-app-bar-title>
     </v-app-bar>
 
     <v-navigation-drawer
+      v-if="!mobile"
       v-model="navOpen"
-      :permanent="!mobile"
-      :temporary="mobile"
+      permanent
       class="glass fluent-glass tk-nav"
       width="250"
       :rail-width="64"
-      :rail="!mobile"
-      :expand-on-hover="!mobile"
+      rail
+      expand-on-hover
     >
       <div class="nav-logo">
         <img src="/phi-tklogo.png" alt="Phi-TKC" class="tklogo" />
@@ -367,7 +382,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
       </template>
     </v-navigation-drawer>
 
-    <v-main class="tk-main">
+    <v-main class="tk-main" :style="android ? { paddingTop: '74px' } : undefined">
       <router-view v-slot="{ Component }">
         <Suspense timeout="0">
           <template #default>
@@ -387,6 +402,27 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
         </Suspense>
       </router-view>
     </v-main>
+
+    <!-- Phones get a bottom bar: all primary destinations live in the thumb
+         zone instead of a hamburger drawer at the top of the screen. -->
+    <v-bottom-navigation
+      v-if="mobile"
+      :model-value="String(route.name)"
+      class="glass fluent-glass tk-bottomnav"
+      grow
+      flat
+    >
+      <v-btn
+        v-for="item in mobileNavItems"
+        :key="item.key"
+        :value="item.key"
+        class="tk-bottomnav-btn"
+        @click="navigateTo(item.key)"
+      >
+        <v-icon :icon="route.name === item.key ? item.activeIcon : item.icon" size="22" />
+        <span>{{ t(item.key) }}</span>
+      </v-btn>
+    </v-bottom-navigation>
   </v-app>
 </template>
 
@@ -481,6 +517,33 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 /* ===== Mobile (iOS/iPadOS/Android) ===== */
 .tk-appbar {
   border-bottom: 1px solid rgba(var(--main-color-rgb), 0.12) !important;
+}
+
+/* Bottom navigation: thumb-reachable primary destinations on phones. */
+.tk-bottomnav {
+  border-top: 1px solid rgba(var(--main-color-rgb), 0.14) !important;
+  background: rgba(var(--bg-color-rgb), 0.55) !important;
+  backdrop-filter: blur(24px);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 10;
+}
+.tk-bottomnav .v-btn {
+  min-height: 58px;
+  opacity: 0.66;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+.tk-bottomnav .v-btn.v-btn--active {
+  opacity: 1;
+}
+/* The active pill is filled with the primary colour, so the icon and label must
+   invert — otherwise they are primary-on-primary and invisible. */
+.tk-bottomnav .v-btn--active .v-icon,
+.tk-bottomnav .v-btn--active span {
+  color: #0d0d0f !important;
+}
+.tk-bottomnav .v-btn span {
+  font-size: 11px;
+  font-weight: 600;
 }
 
 @media (pointer: coarse) {
