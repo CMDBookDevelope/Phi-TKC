@@ -556,7 +556,7 @@ onUnmounted(stopWatching);
 <template>
   <div class="settings-container">
     <div class="settings-scroll">
-      <!-- Language (available on mobile too; MOBILE.md lists it as supported) -->
+      <!-- Language is also available on mobile. -->
       <div class="md3-card glass fluent-glass" v-glass>
         <div class="card-label">{{ t('settings.language.label') }}</div>
         <v-select

@@ -4,7 +4,7 @@
 // desktop render pipeline cannot run at all — it spawns a copy of the app binary
 // and an external FFmpeg executable, which iOS forbids — so the UI hides those
 // features behind an explanation instead of letting them fail at runtime.
-// See MOBILE.md for the full support matrix.
+// Mobile rendering uses the native platform pipelines.
 import { platform } from '@tauri-apps/plugin-os';
 
 let cached: string | null = null;

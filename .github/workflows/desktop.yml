@@ -1,8 +1,8 @@
 name: Desktop
 
 # Packages the desktop app:
-#   Windows -> NSIS setup wizard (.exe)
-#   Linux   -> deb + AppImage
+#   Windows -> NSIS setup wizard (.exe) + portable .zip / .7z
+#   Linux   -> deb + AppImage + portable .tar.gz
 #   macOS   -> dmg (Apple Silicon only; no x86_64-apple-darwin FFmpeg static libs exist)
 #
 # Why one job per OS instead of "cross-compile everything on a macOS runner":
@@ -46,7 +46,10 @@ jobs:
             # installer then ships an app that cannot start.
             args: --target x86_64-pc-windows-gnu --bundles nsis
             artifact: desktop-windows-nsis
-            files: src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/*.exe
+            files: |
+              src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/*.exe
+              dist-portable/*.zip
+              dist-portable/*.7z
           - label: linux-x86_64-deb
             # 22.04 keeps the deb's glibc requirement low enough for older distros.
             platform: ubuntu-22.04
@@ -54,7 +57,9 @@ jobs:
             rust-target: x86_64-unknown-linux-gnu
             args: --bundles deb
             artifact: desktop-linux-deb
-            files: src-tauri/target/release/bundle/deb/*.deb
+            files: |
+              src-tauri/target/release/bundle/deb/*.deb
+              dist-portable/*.tar.gz
           - label: linux-x86_64-appimage
             platform: ubuntu-22.04
             toolchain: stable
@@ -180,6 +185,54 @@ jobs:
           }
           echo "OK: $setup ships WebView2Loader.dll"
 
+      - name: Package Linux portable archive
+        if: matrix.label == 'linux-x86_64-deb'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          python3 scripts/package-portable.py --app Phi-TKC --version "$version" \
+            --target linux_x86_64 --binary src-tauri/target/release/Phi-TKC \
+            --assets src-tauri/assets --output dist-portable
+          tar -tzf dist-portable/*.tar.gz > portable-files.txt
+          grep -q '/assets/ending.mp3$' portable-files.txt
+
+      - name: Package Windows portable archives
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          # Extract the already verified installer payload so portable builds ship
+          # the same DLLs as NSIS, including the GNU WebView2 loader.
+          setup=$(ls src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/*.exe | head -n 1)
+          7z x "$setup" -oportable-installer -y
+          loader=$(find portable-installer -type f -iname WebView2Loader.dll -print -quit)
+          test -n "$loader"
+          dll_args=()
+          while IFS= read -r dll; do
+            dll_args+=(--runtime-dll "$dll")
+          done < <(find portable-installer -type f -iname '*.dll' ! -iname WebView2Loader.dll ! -path '*/$PLUGINSDIR/*')
+          python3 scripts/package-portable.py --app Phi-TKC --version "$version" \
+            --target windows_x86_64 \
+            --binary src-tauri/target/x86_64-pc-windows-gnu/release/Phi-TKC.exe \
+            --assets src-tauri/assets --output dist-portable \
+            --webview-loader "$loader" "${dll_args[@]}"
+          7z t dist-portable/*.zip
+          python3 - <<'PYTHON'
+          import json, subprocess, tempfile, zipfile
+          from pathlib import Path
+          version = json.loads(Path('src-tauri/tauri.conf.json').read_text())['version']
+          with tempfile.TemporaryDirectory() as temp:
+              with zipfile.ZipFile(next(Path('dist-portable').glob('*.zip'))) as archive:
+                  archive.extractall(temp)
+              executable = next(Path(temp).glob('*/Phi-TKC.exe'))
+              result = subprocess.run([str(executable), '--version'], capture_output=True, text=True, encoding='utf-8', check=True)
+              assert version in result.stdout and 'INFO♪' in result.stdout, result.stdout
+              assert not result.stderr, result.stderr
+          print('Portable Windows binary runs with formatted logs')
+          PYTHON
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -238,8 +291,8 @@ jobs:
 
             ## Downloads
 
-            - **Linux (x86_64)** — `.deb` or `.AppImage`; the AppImage needs FUSE 2, or run it with `--appimage-extract-and-run`.
-            - **Windows (x86_64)** — NSIS installer built with the MinGW toolchain; there is no code-signing certificate, so SmartScreen will warn.
+            - **Linux (x86_64)** — `.deb`, `.AppImage`, or a portable `.tar.gz` with renderer assets. The AppImage needs FUSE 2, or run it with `--appimage-extract-and-run`.
+            - **Windows (x86_64)** — NSIS installer or portable `.zip` / `.7z`, including renderer assets and WebView2Loader.dll. The GUI requires the WebView2 Runtime.
             - **macOS (Apple Silicon)** — `.dmg`, macOS 11 or newer; unsigned, so right-click → Open the first time.
             - **Android (arm64-v8a)** — `.apk`, unsigned; sign it with `apksigner` before installing.
             - **iOS / iPadOS** — unsigned `.ipa`; re-sign it with your own Apple team before sideloading.
@@ -249,6 +302,9 @@ jobs:
             Rendering is headless: the CLI (`Phi-TKC -i chart.pez -o out.mp4`) and the
             bundled HTTP/WebSocket server never open a window, while the GUI drives the
             same Vulkan pipeline for previews.
+
+            CLI, server and preview terminal output shares the colored logger, including
+            startup errors and per-job render diagnostics.
           # Recursive: artifact archives keep the directory layout below the
           # glob root (the APK lands in apk/universal/release/), so `dist/*`
           # would silently skip it.

@@ -85,7 +85,7 @@ impl VideoFns {
                     instance.get_device_proc_addr(dev, concat!($name, "\0").as_ptr().cast())
                 };
                 if ptr.is_none() {
-                    eprintln!(concat!("[vulkan-encode] failed to load ", $name));
+                    log::warn!(concat!("[vulkan-encode] failed to load ", $name));
                     return None;
                 }
                 unsafe { std::mem::transmute(ptr.unwrap()) }
@@ -98,7 +98,7 @@ impl VideoFns {
                     entry.get_instance_proc_addr(inst, concat!($name, "\0").as_ptr().cast())
                 };
                 if ptr.is_none() {
-                    eprintln!(concat!("[vulkan-encode] failed to load ", $name));
+                    log::warn!(concat!("[vulkan-encode] failed to load ", $name));
                     return None;
                 }
                 unsafe { std::mem::transmute(ptr.unwrap()) }
@@ -164,7 +164,7 @@ unsafe fn get_encoded_session_parameters<T: vk::ExtendsVideoEncodeSessionParamet
         // VK_INCOMPLETE, which the fetch below treats as a failure rather
         // than shipping a truncated parameter set.
         const FALLBACK_CAPACITY: usize = 4096;
-        eprintln!(
+        log::warn!(
             "[vulkan-encode] parameter-set size query failed: {res:?} size={size}; \
              retrying with a fixed-size buffer",
         );
@@ -183,7 +183,7 @@ unsafe fn get_encoded_session_parameters<T: vk::ExtendsVideoEncodeSessionParamet
         )
     };
     if res != vk::Result::SUCCESS {
-        eprintln!("[vulkan-encode] parameter-set fetch failed: {res:?}");
+        log::warn!("[vulkan-encode] parameter-set fetch failed: {res:?}");
         return None;
     }
     buf.truncate(size);
@@ -197,7 +197,7 @@ unsafe fn get_encoded_session_parameters<T: vk::ExtendsVideoEncodeSessionParamet
         buf.truncate(payload);
     }
     if buf.is_empty() {
-        eprintln!("[vulkan-encode] parameter-set fetch wrote no bytes");
+        log::warn!("[vulkan-encode] parameter-set fetch wrote no bytes");
         return None;
     }
     Some(buf)
@@ -524,7 +524,7 @@ impl VulkanVideoEncoder {
             (video_fns.get_physical_device_video_capabilities)(physical_device, &profile, &mut caps)
         };
         if res != vk::Result::SUCCESS {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] vkGetPhysicalDeviceVideoCapabilitiesKHR failed for {} : {res:?}",
                 if is_444 {
                     "H.264 4:4:4 High444Predictive"
@@ -552,7 +552,7 @@ impl VulkanVideoEncoder {
             level_idc
         };
 
-        eprintln!(
+        log::info!(
             "[vulkan-encode] H.264 caps: max_coded={max_coded_w}x{max_coded_h}, max_dpb={max_dpb}, max_level={max_level_idc}, level={level_idc}, flags={:#x}, std_syntax={:#x}",
             h264_caps.flags.as_raw(),
             h264_caps.std_syntax_flags.as_raw(),
@@ -563,7 +563,7 @@ impl VulkanVideoEncoder {
         // and then encode garbage from.  Returning None latches a refusal
         // server-side and a working fallback encoder takes over.
         if width > max_coded_w || height > max_coded_h {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] H.264 coded extent {width}x{height} exceeds max {max_coded_w}x{max_coded_h}",
             );
             return None;
@@ -599,7 +599,7 @@ impl VulkanVideoEncoder {
             )
         };
         if res != vk::Result::SUCCESS {
-            eprintln!("[vulkan-encode] vkCreateVideoSessionKHR failed: {res:?}");
+            log::warn!("[vulkan-encode] vkCreateVideoSessionKHR failed: {res:?}");
             return None;
         }
 
@@ -734,7 +734,7 @@ impl VulkanVideoEncoder {
             )
         };
         if res != vk::Result::SUCCESS {
-            eprintln!("[vulkan-encode] vkCreateVideoSessionParametersKHR failed: {res:?}");
+            log::warn!("[vulkan-encode] vkCreateVideoSessionParametersKHR failed: {res:?}");
             return None;
         }
         guard.session_params = session_params;
@@ -760,14 +760,14 @@ impl VulkanVideoEncoder {
             // works, so serialize the parameter sets ourselves from the very
             // structs the driver just accepted, the same way the AV1 path
             // writes its sequence header (where no get API exists at all).
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] driver could not serialize H.264 {} parameter sets; \
                  serializing them app-side",
                 if is_444 { "4:4:4" } else { "4:2:0" },
             );
             h264_parameter_sets(&sps, &pps, is_444)
         });
-        eprintln!(
+        log::info!(
             "[vulkan-encode] H.264 parameter sets: {} bytes",
             params_bytes.len(),
         );
@@ -864,7 +864,7 @@ impl VulkanVideoEncoder {
             } {
                 Ok(fence) => fence,
                 Err(e) => {
-                    eprintln!("[vulkan-encode] async fence create failed: {e:?}");
+                    log::warn!("[vulkan-encode] async fence create failed: {e:?}");
                     unsafe {
                         device.destroy_buffer(bitstream_buffer, None);
                         device.free_memory(bitstream_memory, None);
@@ -889,7 +889,7 @@ impl VulkanVideoEncoder {
             });
         }
 
-        eprintln!(
+        log::info!(
             "[vulkan-encode] initialized H.264 encoder {width}x{height} qp={qp} level={level_idc}",
         );
 
@@ -1075,7 +1075,7 @@ impl VulkanVideoEncoder {
         unsafe { (video_fns.cmd_end_video_coding)(cb, &end_coding) };
 
         if let Err(e) = unsafe { device.end_command_buffer(cb) } {
-            eprintln!("[vulkan-encode] vkEndCommandBuffer failed: {e:?}");
+            log::warn!("[vulkan-encode] vkEndCommandBuffer failed: {e:?}");
             unsafe { device.free_command_buffers(encode_cmd_pool, &[cb]) };
             return None;
         }
@@ -1085,13 +1085,13 @@ impl VulkanVideoEncoder {
         let fence = match unsafe { device.create_fence(&vk::FenceCreateInfo::default(), None) } {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("[vulkan-encode] vkCreateFence failed: {e:?}");
+                log::warn!("[vulkan-encode] vkCreateFence failed: {e:?}");
                 unsafe { device.free_command_buffers(encode_cmd_pool, &[cb]) };
                 return None;
             }
         };
         if let Err(e) = unsafe { device.queue_submit(encode_queue, &[submit], fence) } {
-            eprintln!("[vulkan-encode] vkQueueSubmit failed: {e:?}");
+            log::warn!("[vulkan-encode] vkQueueSubmit failed: {e:?}");
             unsafe {
                 device.destroy_fence(fence, None);
                 device.free_command_buffers(encode_cmd_pool, &[cb]);
@@ -1106,7 +1106,7 @@ impl VulkanVideoEncoder {
         // save us from. Leak them and poison the encoder instead — one fence
         // and one command buffer, once, against wedging the compositor.
         if unsafe { device.wait_for_fences(&[fence], true, encode_fence_timeout_ns()) }.is_err() {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] fence wait timed out after {} ms; abandoning encoder",
                 encode_fence_timeout_ns() / 1_000_000
             );
@@ -1128,13 +1128,13 @@ impl VulkanVideoEncoder {
         unsafe { device.free_command_buffers(encode_cmd_pool, &[cb]) };
 
         if qr.is_err() {
-            eprintln!("[vulkan-encode] query pool result failed: {qr:?}");
+            log::warn!("[vulkan-encode] query pool result failed: {qr:?}");
             return None;
         }
 
         let encoded_size = feedback[0] as usize;
         if encoded_size == 0 || encoded_size > self.bitstream_capacity as usize {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] bad encoded size: {encoded_size} (capacity={})",
                 self.bitstream_capacity,
             );
@@ -1207,7 +1207,7 @@ impl VulkanVideoEncoder {
         let end_coding = vk::VideoEndCodingInfoKHR::default();
         unsafe { (video_fns.cmd_end_video_coding)(cb, &end_coding) };
         if let Err(e) = unsafe { device.end_command_buffer(cb) } {
-            eprintln!("[vulkan-encode] async vkEndCommandBuffer failed: {e:?}");
+            log::warn!("[vulkan-encode] async vkEndCommandBuffer failed: {e:?}");
             return None;
         }
 
@@ -1217,7 +1217,7 @@ impl VulkanVideoEncoder {
             let command_buffers = [cb];
             let submit = vk::SubmitInfo::default().command_buffers(&command_buffers);
             if let Err(e) = device.queue_submit(encode_queue, &[submit], fence) {
-                eprintln!("[vulkan-encode] async vkQueueSubmit failed: {e:?}");
+                log::warn!("[vulkan-encode] async vkQueueSubmit failed: {e:?}");
                 return None;
             }
         }
@@ -1283,7 +1283,7 @@ impl VulkanVideoEncoder {
         let slot_idx = *self.async_pending.front()?;
         let fence = self.async_slots[slot_idx].fence;
         if unsafe { device.wait_for_fences(&[fence], true, encode_fence_timeout_ns()) }.is_err() {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] async fence wait timed out after {} ms; abandoning encoder",
                 encode_fence_timeout_ns() / 1_000_000
             );
@@ -1302,14 +1302,14 @@ impl VulkanVideoEncoder {
             )
         };
         if qr.is_err() {
-            eprintln!("[vulkan-encode] async query pool result failed: {qr:?}");
+            log::warn!("[vulkan-encode] async query pool result failed: {qr:?}");
             self.poisoned = true;
             return None;
         }
         let encoded_size = feedback[0] as usize;
         let capacity = self.async_slots[slot_idx].bitstream_capacity as usize;
         if encoded_size == 0 || encoded_size > capacity {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] bad async encoded size: {encoded_size} (capacity={capacity})"
             );
             self.poisoned = true;
@@ -1688,7 +1688,7 @@ impl VulkanVideoEncoder {
             // The usual answer for a device whose AV1 engine has no 4:4:4
             // (High profile) support at all — NVENC's does not — and the
             // reason nothing below has to second-guess the request.
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] AV1 {} vkGetPhysicalDeviceVideoCapabilitiesKHR failed: {res:?}",
                 if is_444 { "4:4:4" } else { "4:2:0" },
             );
@@ -1705,18 +1705,18 @@ impl VulkanVideoEncoder {
 
         let max_level = av1_caps.max_level;
 
-        eprintln!(
+        log::info!(
             "[vulkan-encode] AV1 caps: coded={min_coded_w}x{min_coded_h}–{max_coded_w}x{max_coded_h}, max_dpb={max_dpb}, max_level={max_level}",
         );
 
         if coded_w < min_coded_w || coded_h < min_coded_h {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] AV1 coded extent {coded_w}x{coded_h} is below minimum {min_coded_w}x{min_coded_h}",
             );
             return None;
         }
         if coded_w > max_coded_w || coded_h > max_coded_h {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] AV1 coded extent {coded_w}x{coded_h} exceeds max {max_coded_w}x{max_coded_h}",
             );
             return None;
@@ -1730,7 +1730,7 @@ impl VulkanVideoEncoder {
         // session exists) could not know about the clamp.
         let level = crate::av1_level::av1_level_idx(coded_w, coded_h);
         if level > max_level {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] AV1 level {level} for {coded_w}x{coded_h} exceeds driver max {max_level}",
             );
             return None;
@@ -1774,7 +1774,7 @@ impl VulkanVideoEncoder {
             )
         };
         if res != vk::Result::SUCCESS {
-            eprintln!("[vulkan-encode] AV1 vkCreateVideoSessionKHR failed: {res:?}");
+            log::warn!("[vulkan-encode] AV1 vkCreateVideoSessionKHR failed: {res:?}");
             return None;
         }
 
@@ -1871,7 +1871,7 @@ impl VulkanVideoEncoder {
             )
         };
         if res != vk::Result::SUCCESS {
-            eprintln!("[vulkan-encode] AV1 vkCreateVideoSessionParametersKHR failed: {res:?}");
+            log::warn!("[vulkan-encode] AV1 vkCreateVideoSessionParametersKHR failed: {res:?}");
             return None;
         }
         guard.session_params = session_params;
@@ -1933,7 +1933,7 @@ impl VulkanVideoEncoder {
         guard.query_pool =
             unsafe { create_encode_query_pool(device, &mut video_profile_for_query) }?;
 
-        eprintln!(
+        log::info!(
             "[vulkan-encode] initialized AV1 {} encoder {coded_w}x{coded_h} (source {width}x{height}) qp={qp} level={level}",
             if is_444 { "4:4:4" } else { "4:2:0" },
         );
@@ -2303,7 +2303,7 @@ impl VulkanVideoEncoder {
         // remove — or reports a lost device, after which the frees are moot.
         // So leak, once, per encoder that hit a hang the driver never resolved.
         if self.poisoned {
-            eprintln!(
+            log::warn!(
                 "[vulkan-encode] leaking the resources of a poisoned encoder: \
                  an abandoned submission still owns them",
             );
@@ -2697,7 +2697,7 @@ unsafe fn bind_session_memory(
         )
     };
     if res != vk::Result::SUCCESS {
-        eprintln!("[vulkan-encode] vkGetVideoSessionMemoryRequirementsKHR(count) failed: {res:?}",);
+        log::warn!("[vulkan-encode] vkGetVideoSessionMemoryRequirementsKHR(count) failed: {res:?}",);
         return None;
     }
 
@@ -2712,7 +2712,7 @@ unsafe fn bind_session_memory(
         )
     };
     if res != vk::Result::SUCCESS {
-        eprintln!("[vulkan-encode] vkGetVideoSessionMemoryRequirementsKHR(data) failed: {res:?}",);
+        log::warn!("[vulkan-encode] vkGetVideoSessionMemoryRequirementsKHR(data) failed: {res:?}",);
         return None;
     }
 
@@ -2735,7 +2735,7 @@ unsafe fn bind_session_memory(
             )
         });
         let Some(mem_type_idx) = mem_type_idx else {
-            eprintln!("[vulkan-encode] no suitable memory type for session memory");
+            log::warn!("[vulkan-encode] no suitable memory type for session memory");
             for &m in &session_memory {
                 unsafe { device.free_memory(m, None) };
             }
@@ -2747,7 +2747,7 @@ unsafe fn bind_session_memory(
         let memory = match unsafe { device.allocate_memory(&alloc, None) } {
             Ok(m) => m,
             Err(e) => {
-                eprintln!("[vulkan-encode] session memory alloc failed: {e:?}");
+                log::warn!("[vulkan-encode] session memory alloc failed: {e:?}");
                 for &m in &session_memory {
                     unsafe { device.free_memory(m, None) };
                 }
@@ -2774,7 +2774,7 @@ unsafe fn bind_session_memory(
             )
         };
         if res != vk::Result::SUCCESS {
-            eprintln!("[vulkan-encode] vkBindVideoSessionMemoryKHR failed: {res:?}");
+            log::warn!("[vulkan-encode] vkBindVideoSessionMemoryKHR failed: {res:?}");
             for &m in &session_memory {
                 unsafe { device.free_memory(m, None) };
             }
@@ -2815,7 +2815,7 @@ unsafe fn allocate_dpb_slots(
             )
         };
         let Some(dpb) = dpb else {
-            eprintln!("[vulkan-encode] DPB image {i} creation failed");
+            log::warn!("[vulkan-encode] DPB image {i} creation failed");
             for slot in &dpb_slots {
                 unsafe { destroy_dpb_slot(device, slot) };
             }
@@ -2868,7 +2868,7 @@ unsafe fn allocate_bitstream_buffer(
     let bitstream_buffer = match unsafe { device.create_buffer(&buf_info, None) } {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("[vulkan-encode] bitstream buffer create failed: {e:?}");
+            log::warn!("[vulkan-encode] bitstream buffer create failed: {e:?}");
             return None;
         }
     };
@@ -2880,7 +2880,7 @@ unsafe fn allocate_bitstream_buffer(
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
     );
     let Some(buf_mem_type) = buf_mem_type else {
-        eprintln!("[vulkan-encode] no host-visible memory for bitstream buffer");
+        log::warn!("[vulkan-encode] no host-visible memory for bitstream buffer");
         unsafe { device.destroy_buffer(bitstream_buffer, None) };
         return None;
     };
@@ -2890,13 +2890,13 @@ unsafe fn allocate_bitstream_buffer(
     let bitstream_memory = match unsafe { device.allocate_memory(&buf_alloc, None) } {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("[vulkan-encode] bitstream memory alloc failed: {e:?}");
+            log::warn!("[vulkan-encode] bitstream memory alloc failed: {e:?}");
             unsafe { device.destroy_buffer(bitstream_buffer, None) };
             return None;
         }
     };
     if unsafe { device.bind_buffer_memory(bitstream_buffer, bitstream_memory, 0) }.is_err() {
-        eprintln!("[vulkan-encode] bind bitstream buffer memory failed");
+        log::warn!("[vulkan-encode] bind bitstream buffer memory failed");
         unsafe {
             device.free_memory(bitstream_memory, None);
             device.destroy_buffer(bitstream_buffer, None);
@@ -2913,7 +2913,7 @@ unsafe fn allocate_bitstream_buffer(
     } {
         Ok(p) => p as *mut u8,
         Err(e) => {
-            eprintln!("[vulkan-encode] map bitstream memory failed: {e:?}");
+            log::warn!("[vulkan-encode] map bitstream memory failed: {e:?}");
             unsafe {
                 device.free_memory(bitstream_memory, None);
                 device.destroy_buffer(bitstream_buffer, None);
@@ -2943,7 +2943,7 @@ unsafe fn create_encode_query_pool(
     match unsafe { device.create_query_pool(&qp_info, None) } {
         Ok(q) => Some(q),
         Err(e) => {
-            eprintln!("[vulkan-encode] query pool create failed: {e:?}");
+            log::warn!("[vulkan-encode] query pool create failed: {e:?}");
             None
         }
     }

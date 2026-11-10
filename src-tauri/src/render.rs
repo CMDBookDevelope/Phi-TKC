@@ -3,14 +3,12 @@ prpr::tl_file!("render");
 use crate::Path;
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
-use env_logger::{Builder, Env};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 // `macroquad::prelude::*` also glob-imports miniquad's `info!`/`warn!`
 // macros, which print raw lines on stderr and ignore RUST_LOG. Importing
 // the `log` macros explicitly shadows them, so every log line goes through
 // `init_colored_logger` (stdout + the coloured format).
-use log::{info, warn, Level, LevelFilter};
-use std::sync::Once;
+use log::{info, warn};
 use term_size::dimensions;
 use macroquad::{miniquad::{MipmapFilter, RenderPass as MQRenderPass, Texture, TextureFormat, TextureParams, TextureWrap}, prelude::*, window::miniquad_context};
 use prpr::{
@@ -631,7 +629,7 @@ pub fn find_ffmpeg() -> Result<Option<String>> {
         }
     }
 
-    eprintln!("Failed to find global ffmpeg. Using bundled ffmpeg");
+    warn!("Failed to find global ffmpeg. Using bundled ffmpeg");
     Ok(if test(&bundled_ffmpeg) {
         Some(bundled_ffmpeg.to_string_lossy().into_owned())
     } else {
@@ -869,9 +867,6 @@ fn encoder_qp(config: &RenderConfig, width: u32, height: u32) -> u8 {
 
 const KEYFRAME_INTERVAL_SECS: u32 = 2;
 
-/// Guards `init_colored_logger`; the CLI may initialise logging once only.
-static INIT: Once = Once::new();
-
 pub async fn main() -> Result<()> {
     use crate::ipc::client::*;
 
@@ -924,7 +919,7 @@ async fn render_impl(
     // `log_mode` means "a human is watching this terminal": print the pretty
     // logs and the progress bar, and keep stdout free of IPC events. The GUI and
     // server child pass `false` and parse the events instead.
-    set_enabled(!log_mode);
+    set_enabled(!log_mode && std::env::var_os("PHI_TKC_IPC").is_some());
     let _ = exit_after;
     let process_start = Instant::now();
     let (vw, vh) = params.config.output_resolution()?;
@@ -2555,7 +2550,7 @@ async fn render_impl(
         );
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner} [{elapsed_precise}] [{bar:32}] {pos}/{len} ({percent}%) ETA {eta_precise}")
+                .template(&format!("{}{{spinner}} [{{elapsed_precise}}] [{{bar:32}}] {{pos}}/{{len}} ({{percent}}%) ETA {{eta_precise}}", crate::logger::prefix(log::Level::Info)))
                 .unwrap()
                 .progress_chars("#>-"),
         );
@@ -3099,7 +3094,7 @@ pub(crate) fn apply_ui(config: &mut RenderConfig, ui: Option<&str>, hide: Option
                     "line" => config.ui_line = true,
                     "pb" => config.ui_pb = true,
                     "pause" => config.ui_pause = true,
-                    other => eprintln!("warning: unknown --ui element {other:?}"),
+                    other => warn!("unknown --ui element {other:?}"),
                 }
             }
         }
@@ -3114,7 +3109,7 @@ pub(crate) fn apply_ui(config: &mut RenderConfig, ui: Option<&str>, hide: Option
                 "line" => config.ui_line = false,
                 "pb" => config.ui_pb = false,
                 "pause" => config.ui_pause = false,
-                other => eprintln!("warning: unknown --hide-ui element {other:?}"),
+                other => warn!("unknown --hide-ui element {other:?}"),
             }
         }
     }
@@ -3131,15 +3126,14 @@ fn resolve_cli_assets(arg: &str) -> PathBuf {
 
     // An explicit --assets wins as long as it is a real directory.
     let explicit = PathBuf::from(arg);
-    if !arg.trim().is_empty() && explicit.is_dir() {
+    if arg != "/usr/lib/ptkc-assets" && !arg.trim().is_empty() && explicit.is_dir() {
         return explicit;
     }
 
-    // Prefer the documented install location over whatever `assets` folder happens
-    // to sit next to the binary (a partial one there fails on `ending.mp3`).
+    // A complete adjacent assets directory belongs to a portable bundle.
     let mut candidates = vec![
-        PathBuf::from("/usr/lib/ptkc-assets"),
         exe_assets.unwrap_or_default(),
+        PathBuf::from("/usr/lib/ptkc-assets"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"),
     ];
     candidates.retain(|path| !path.as_os_str().is_empty());
@@ -3241,47 +3235,17 @@ pub async fn render_cli(args: CliArgs) -> Result<()> {
 }
 
 pub fn init_colored_logger() {
-    INIT.call_once(|| {
-        let mut builder = env_logger::Builder::from_env(Env::default().default_filter_or("info"));
-        builder.filter(Some("symphonia"), log::LevelFilter::Warn);
-        builder.target(env_logger::Target::Stdout);
-        builder.format(|buf, record| {
-            let level = record.level();
-            let custom_name = match level {
-                Level::Error => "(｀皿´＃).",
-                Level::Warn  => "(╬ Ò﹏Ó).",
-                Level::Info  => "(*・ω・)っ.",
-                Level::Debug => "≽^•⩊•^≼.",
-                Level::Trace => "(◎_◎).",
-            };
-            let level_abbr = match level {
-                Level::Error => "ERROR!".red(),
-                Level::Warn  => "WARN!".yellow(),
-                Level::Info  => "INFO♪".cyan(),
-                Level::Debug => "DEBUG:".green(),
-                Level::Trace => "TRACE~".magenta(),
-            };
-            writeln!(
-                buf,
-                "{}{}{}{}",
-                custom_name.bright_black(),
-                level_abbr.bold(),
-                " ♡ ".bright_magenta(),
-                record.args()
-            )
-        });
-        builder.init();
-    });
+    crate::logger::init();
 }
 
 pub fn welcome_logger() {
-    println!("\n\n\n");
+    log::info!("");
     log::info!("{}", split_line(' ', Some("_|_|_|    _|        _|          _|_|_|_|_|  _|    _|  ")));
     log::info!("{}", split_line(' ', Some("_|    _|  _|_|_|                    _|      _|  _|    ")));
     log::info!("{}", split_line(' ', Some("_|_|_|    _|    _|  _|  _|_|_|_|    _|      _|_|      ")));
     log::info!("{}", split_line(' ', Some("_|        _|    _|  _|              _|      _|  _|    ")));
     log::info!("{}", split_line(' ', Some("_|        _|    _|  _|              _|      _|    _|  ")));
-    println!("\n\n\n");
+    log::info!("");
     log::info!("{}", split_line(' ', Some("  _|_|_|  _|        _|_|_|  ")));
     log::info!("{}", split_line(' ', Some("_|        _|          _|    ")));
     log::info!("{}", split_line(' ', Some("_|        _|          _|    ")));

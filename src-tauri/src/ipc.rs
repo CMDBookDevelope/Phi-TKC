@@ -17,7 +17,7 @@ pub mod client {
         }
         match serde_json::to_string(&value) {
             Ok(json) => println!("{}", json),
-            Err(e) => eprintln!("Serialization error: {}", e),
+            Err(e) => log::error!("Serialization error: {}", e),
         }
     }
 }

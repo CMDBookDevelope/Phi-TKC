@@ -7,6 +7,7 @@ mod av1_level;
 mod common;
 mod gpu_info;
 pub mod ipc;
+pub mod logger;
 mod preview;
 pub mod render;
 pub mod server;
@@ -62,14 +63,14 @@ static LOCK_FILE: OnceLock<tokio::fs::File> = OnceLock::new();
 #[inline]
 async fn wrap_async<R>(f: impl Future<Output = Result<R>>) -> Result<R, InvokeError> {
     f.await.map_err(|e| {
-        eprintln!("{e:?}");
+        log::error!("{e:?}");
         InvokeError::from_anyhow(e)
     })
 }
 
 pub async fn run_wrapped(f: impl Future<Output = Result<()>>) -> ! {
     if let Err(err) = f.await {
-        eprintln!("{err:?}");
+        log::error!("{err:?}");
         std::process::exit(1);
     }
     std::process::exit(0);
@@ -118,6 +119,8 @@ pub extern "C" fn quad_main() {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub async fn run() -> Result<()> {
+    #[cfg(not(mobile))]
+    logger::init();
     #[cfg(target_os = "android")]
     install_panic_logger();
 
@@ -229,7 +232,7 @@ pub async fn run() -> Result<()> {
     if lock_file.try_lock_exclusive().is_ok() {
         LOCK_FILE.set(lock_file).unwrap();
     } else {
-        eprintln!("Lock failed");
+        log::warn!("Lock failed");
     }
 
     CONFIG_DIR
@@ -255,6 +258,10 @@ pub async fn run() -> Result<()> {
     //   5. Android -> the assets live inside the APK, exposed as `asset://localhost/`,
     //      which is not a filesystem path (rendering is disabled there anyway).
     let mut candidates: Vec<PathBuf> = Vec::new();
+    #[cfg(not(mobile))]
+    if exe_dir.join("assets/ending.mp3").is_file() {
+        candidates.push(exe_dir.join("assets"));
+    }
     if let Ok(dir) = resolver.resource_dir() {
         #[cfg(target_os = "ios")]
         candidates.push(dir.clone());
@@ -272,7 +279,7 @@ pub async fn run() -> Result<()> {
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         set_pc_assets_folder(&asset_dir.display().to_string());
     } else {
-        eprintln!("错误：资源目录不存在");
+        log::error!("错误：资源目录不存在");
         // Mobile builds must still start so the settings/tasks/about pages work even if
         // the resource layout is unexpected; never make that a fatal error there.
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -719,7 +726,7 @@ fn get_rpe_charts() -> Result<Option<Vec<RPEChartInfo>>, InvokeError> {
                 }
             }
             for folder in folders {
-                println!("Found numeric folder: {:?}", folder);
+                log::info!("Found numeric folder: {:?}", folder);
                 for line in BufReader::new(File::open(folder.join("info.txt"))?).lines() {
                     let line = line?;
                     let line = line.trim();

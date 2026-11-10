@@ -265,6 +265,7 @@ impl Task {
 
         let mut child = tokio::process::Command::new(std::env::current_exe()?)
             .arg("render")
+            .env("PHI_TKC_IPC", "1")
             .arg(ASSET_PATH.get().unwrap())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

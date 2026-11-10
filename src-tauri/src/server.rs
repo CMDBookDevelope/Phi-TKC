@@ -201,16 +201,17 @@ pub fn managed_status() -> ServerStatus {
 
 /// CLI entry: serve until the process is terminated.
 pub async fn run(args: ServerArgs) -> Result<()> {
+    crate::logger::init();
     let addr = format!("{}:{}", args.host, args.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .with_context(|| format!("cannot bind {addr}"))?;
 
-    println!("Phi-TKC render server listening on http://{addr}");
-    println!("  WebUI: http://{addr}/");
-    println!("  WebSocket: ws://{addr}/render");
+    log::info!("Phi-TKC render server listening on http://{addr}");
+    log::info!("  WebUI: http://{addr}/");
+    log::info!("  WebSocket: ws://{addr}/render");
     if args.host == "127.0.0.1" || args.host == "localhost" {
-        println!("  Only local connections are accepted; use `--host 0.0.0.0` for phones.");
+        log::info!("  Only local connections are accepted; use `--host 0.0.0.0` for phones.");
     }
 
     let app = build_app(resolve_assets(&args.assets));
@@ -280,13 +281,13 @@ fn resolve_assets(arg: &str) -> PathBuf {
 
     // An explicit --assets wins as long as it is a real directory.
     let explicit = PathBuf::from(arg);
-    if !arg.trim().is_empty() && explicit.is_dir() {
+    if arg != "/usr/lib/ptkc-assets" && !arg.trim().is_empty() && explicit.is_dir() {
         return explicit;
     }
 
     let mut candidates = vec![
-        PathBuf::from("/usr/lib/ptkc-assets"),
         exe_assets.unwrap_or_default(),
+        PathBuf::from("/usr/lib/ptkc-assets"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"),
     ];
     candidates.retain(|path| !path.as_os_str().is_empty());
@@ -745,9 +746,11 @@ async fn run_job(state: AppState, id: &str) {
     })
     .await;
 
+    log::info!("[server] job {id} ({name}) started");
     let result = render_one(&state, id, &input, &output, &config, info.as_ref(), &cancel).await;
     match result {
         Ok(()) => {
+            log::info!("[server] job {id} ({name}) completed: {}", output.display());
             set_status(&state, id, |view| {
                 view.status = "done";
                 view.progress = 1.0;
@@ -759,6 +762,11 @@ async fn run_job(state: AppState, id: &str) {
         Err(e) => {
             let canceled = cancel.load(Ordering::Relaxed);
             let message = format!("{e:#}");
+            if canceled {
+                log::info!("[server] job {id} ({name}) canceled");
+            } else {
+                log::error!("[server] job {id} ({name}) failed: {message}");
+            }
             set_status(&state, id, |view| {
                 view.status = if canceled { "canceled" } else { "failed" };
                 view.error = Some(message.clone());
@@ -769,7 +777,7 @@ async fn run_job(state: AppState, id: &str) {
     // The chart archive, resource pack and avatar are only inputs: drop them as
     // soon as the renderer exits, keeping only the produced video for /download.
     cleanup_inputs(&input, &output).await;
-    eprintln!("[server] job {id} ({name}) finished");
+    log::info!("[server] job {id} ({name}) finished");
 }
 
 /// Remove every file in the job directory except the rendered output.
@@ -815,6 +823,7 @@ async fn render_one(
 
     let mut child = tokio::process::Command::new(std::env::current_exe()?)
         .arg("render")
+        .env("PHI_TKC_IPC", "1")
         .arg(&state.assets)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -837,9 +846,11 @@ async fn render_one(
     let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     if let Some(stderr) = child.stderr.take() {
         let tail = stderr_tail.clone();
+        let job_id = id.to_owned();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                crate::logger::relay(&format!("[server] job {job_id}"), &line, log::Level::Warn);
                 let mut guard = tail.lock().await;
                 if guard.len() >= 80 {
                     guard.remove(0);
@@ -867,6 +878,12 @@ async fn render_one(
         let Ok(line) = next else { continue };
         let Some(line) = line? else { break };
         let Ok(event) = serde_json::from_str::<IPCEvent>(line.trim()) else {
+            crate::logger::relay(&format!("[server] job {id}"), &line, log::Level::Info);
+            let mut tail = stderr_tail.lock().await;
+            if tail.len() >= 80 {
+                tail.remove(0);
+            }
+            tail.push(line);
             continue;
         };
         let mut jobs = state.jobs.lock().await;

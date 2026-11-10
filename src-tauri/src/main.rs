@@ -40,6 +40,33 @@ fn has_cli_intent() -> bool {
 }
 
 fn main() {
+    #[cfg(windows)]
+    unsafe {
+        // Keep the GUI console hidden, but let CLI/server calls use their parent
+        // terminal even though the release executable uses the Windows subsystem.
+        if has_cli_intent()
+            || matches!(std::env::args().nth(1).as_deref(), Some("server") | Some("render") | Some("preview"))
+        {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn AttachConsole(process_id: u32) -> i32;
+                fn GetStdHandle(id: u32) -> *mut std::ffi::c_void;
+                fn SetStdHandle(id: u32, handle: *mut std::ffi::c_void) -> i32;
+                fn GetFileType(handle: *mut std::ffi::c_void) -> u32;
+            }
+            let handles = [(-10_i32) as u32, (-11_i32) as u32, (-12_i32) as u32]
+                .map(|id| (id, GetStdHandle(id)));
+            AttachConsole(u32::MAX);
+            // Attaching can replace standard handles. Keep redirected files and
+            // pipes intact, especially the render child's JSON IPC streams.
+            for (id, handle) in handles {
+                if matches!(GetFileType(handle), 1 | 3) {
+                    SetStdHandle(id, handle);
+                }
+            }
+        }
+    }
+    app_lib::logger::init();
     // Handle help/version before macroquad/miniquad initializes: its startup prints
     // GL_VERSION and the renderer name to stdout, which would corrupt CLI output.
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -52,28 +79,28 @@ fn main() {
         if argv.len() > 1 {
             argv.remove(1);
         }
-        let server_args = app_lib::server::ServerArgs::parse_from(argv);
+        let server_args = app_lib::server::ServerArgs::try_parse_from(argv)
+            .unwrap_or_else(|error| app_lib::logger::clap_error(error));
         let rt = match tokio::runtime::Runtime::new() {
             Ok(rt) => rt,
             Err(err) => {
-                eprintln!("cannot start the runtime: {err:?}");
+                log::error!("cannot start the runtime: {err:?}");
                 std::process::exit(1);
             }
         };
         if let Err(err) = rt.block_on(app_lib::server::run(server_args)) {
-            eprintln!("server error: {err:?}");
+            log::error!("server error: {err:?}");
             std::process::exit(1);
         }
         return;
     }
 
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
-        let _ = CliArgs::command().print_help();
-        println!();
+        log::info!("{}", CliArgs::command().render_help());
         return;
     }
     if args.iter().any(|arg| arg == "-V" || arg == "--version") {
-        print!("{}", CliArgs::command().render_version());
+        log::info!("{}", CliArgs::command().render_version().trim_end());
         return;
     }
 
@@ -83,7 +110,7 @@ fn main() {
     let cli_args = if has_cli_intent() {
         match CliArgs::try_parse() {
             Ok(args) => Some(args),
-            Err(e) => e.exit(),
+            Err(e) => app_lib::logger::clap_error(e),
         }
     } else {
         None
@@ -97,7 +124,7 @@ fn main() {
                 let rt = match tokio::runtime::Runtime::new() {
                     Ok(rt) => rt,
                     Err(err) => {
-                        eprintln!("cannot start the runtime: {err:?}");
+                        log::error!("cannot start the runtime: {err:?}");
                         std::process::exit(1);
                     }
                 };
@@ -109,7 +136,7 @@ fn main() {
         if let Err(err) = result {
             // A failed CLI render must exit non-zero for scripts; macroquad's attribute
             // macro used to ignore the returned Result and exit with status 0.
-            eprintln!("Error: {err:?}");
+            log::error!("Error: {err:?}");
             std::process::exit(1);
         }
     });
