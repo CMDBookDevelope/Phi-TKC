@@ -135,6 +135,17 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify Apple native rendering and MP4 encoding
+        if: matrix.rust-target == 'aarch64-apple-darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib \
+            --features apple-render-check apple_media::tests::videotoolbox_mp4_smoke
+          MINIQUAD_MANIFEST="$(cargo metadata --locked --manifest-path src-tauri/Cargo.toml \
+            --format-version 1 | python3 -c 'import json,sys; print(next(p["manifest_path"] for p in json.load(sys.stdin)["packages"] if p["name"] == "miniquad"))')"
+          cargo run --manifest-path "$MINIQUAD_MANIFEST" --example metal_offscreen --features metal
+
       - name: Build bundles
         shell: bash
         run: |

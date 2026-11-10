@@ -82,8 +82,8 @@ impl Task {
             .filter(|&it| it == '-' || it == '_' || it == ' ' || it.is_alphanumeric())
             .collect();
         let file_name = format!(
-            "{} {safe_name}_{level}.{video}",
-            Local::now().format("%Y-%m-%d %H-%M-%S")
+            "{} {safe_name}_{level}-{id}.{video}",
+            Local::now().format("%Y-%m-%d %H-%M-%S%.3f")
         );
 
         let output = if let Some(path) = output_path {
@@ -115,9 +115,13 @@ impl Task {
     /// Android has no `fork`/`exec`, so the renderer runs in-process with the
     /// NDK MediaCodec/MediaMuxer pipeline (no ffmpeg). Progress is polled from
     /// atomic counters that the render thread updates.
-    #[cfg(target_os = "android")]
-    async fn run_android(&self) -> Result<()> {
+    #[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
+    async fn run_mobile(&self) -> Result<()> {
         use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+        #[cfg(target_os = "android")]
+        use crate::android_render as native_render;
+        #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+        use crate::apple_render as native_render;
 
         if self.request_cancel.load(Ordering::Relaxed) {
             *self.status.lock().await = TaskStatus::Canceled;
@@ -131,7 +135,7 @@ impl Task {
         let fps_out = Arc::clone(&current_fps);
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_out = Arc::clone(&cancel);
-        let request = crate::android_render::RenderRequest {
+        let request = native_render::RenderRequest {
             params: self.params.clone(),
             output_path: self.output.clone(),
             asset_dir: ASSET_PATH
@@ -144,15 +148,21 @@ impl Task {
         *self.status.lock().await = TaskStatus::Mixing;
         let finished = Arc::new(std::sync::Mutex::new(None::<Result<()>>));
         let finished_out = Arc::clone(&finished);
-        tokio::task::spawn_blocking(move || {
-            let result = crate::android_render::run(request, move |value, fps| {
+        let runtime = tokio::runtime::Handle::current();
+        std::thread::Builder::new().name("native-render".into()).spawn(move || {
+            let _runtime = runtime.enter();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| native_render::run(request, move |value, fps| {
                 progress_out.store((value.max(0.) * 10000.) as u64, AtomicOrdering::Relaxed);
                 fps_out.store(fps.max(0.) as u64, AtomicOrdering::Relaxed);
+            }))).unwrap_or_else(|panic| {
+                let message = panic.downcast_ref::<String>().map(String::as_str)
+                    .or_else(|| panic.downcast_ref::<&str>().copied()).unwrap_or("unknown panic");
+                Err(anyhow::anyhow!("Native renderer panicked: {message}"))
             });
             if let Ok(mut guard) = finished_out.lock() {
                 *guard = Some(result);
             }
-        });
+        })?;
 
         let start = Instant::now();
         loop {
@@ -186,7 +196,10 @@ impl Task {
                         .unwrap_or_else(|| "output.mp4".to_string());
                     let source = self.output.clone();
                     let published = tokio::task::spawn_blocking(move || {
-                        crate::android_uri::publish_video(&source, &name)
+                        #[cfg(target_os = "android")]
+                        { crate::android_uri::publish_video(&source, &name) }
+                        #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+                        { let _ = name; Ok(source.to_string_lossy().into_owned()) }
                     })
                     .await
                     .unwrap_or_else(|error| Err(anyhow::anyhow!("publish task failed: {error}")));
@@ -199,8 +212,11 @@ impl Task {
                             return Ok(());
                         }
                     };
-                    let _ = tokio::fs::remove_file(&self.output).await;
-                    let _ = tokio::fs::remove_file(self.output.with_extension("log")).await;
+                    // Scoped storage may retain the private output. Never delete
+                    // the only copy after the publisher returns the source path.
+                    if PathBuf::from(&target) != self.output {
+                        let _ = tokio::fs::remove_file(&self.output).await;
+                    }
                     *self.status.lock().await = TaskStatus::Done {
                         duration: elapsed,
                         output: format!("{log}\n\nSaved to: {target}"),
@@ -208,6 +224,11 @@ impl Task {
                     return Ok(());
                 }
                 Some(Err(error)) => {
+                    if self.request_cancel.load(Ordering::Relaxed) {
+                        let _ = tokio::fs::remove_file(&self.output).await;
+                        *self.status.lock().await = TaskStatus::Canceled;
+                        return Ok(());
+                    }
                     let log = tokio::fs::read_to_string(self.output.with_extension("log"))
                         .await
                         .unwrap_or_default();
@@ -217,11 +238,11 @@ impl Task {
                     return Ok(());
                 }
                 None => {
-                    *self.status.lock().await = TaskStatus::Rendering {
+                    *self.status.lock().await = if value == 0. { TaskStatus::Mixing } else { TaskStatus::Rendering {
                         progress: value,
                         fps,
                         estimate,
-                    };
+                    } };
                 }
             }
         }
@@ -231,8 +252,8 @@ impl Task {
         info!("Task #{} started ({})", self.id, self.params.path.display());
 
         // Android cannot spawn itself plus ffmpeg, so it renders in-process.
-        #[cfg(target_os = "android")]
-        return self.run_android().await;
+        #[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
+        return self.run_mobile().await;
 
         // A task canceled while it was still queued must not spawn a renderer at all.
         if self.request_cancel.load(Ordering::Relaxed) {

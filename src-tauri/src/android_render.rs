@@ -92,7 +92,6 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> 
     }
     crate::android_uri::debug_log(&format!("render: using {vw}x{vh}"));
     let conf = build_conf(vw, vh);
-    set_pc_assets_folder(&request.asset_dir.display().to_string());
 
     let shared: std::sync::Arc<std::sync::Mutex<Option<Result<()>>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -101,6 +100,8 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> 
     // `request_quit` at the end gives the same "build a context, render, tear it
     // down" behaviour without exiting the process on Android.
     macroquad::Window::from_config(conf, async move {
+        let _resources = crate::common::NativeRenderResources;
+        set_pc_assets_folder(&request.asset_dir.display().to_string());
         let result = render_async(request, vw, vh, on_progress).await;
         if let Err(error) = &result {
             log::error!("Render failed: {error:?}");

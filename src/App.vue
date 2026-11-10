@@ -32,7 +32,6 @@ import { VSonner } from 'vuetify-sonner';
 import { mainColor, bgColor, subColor, loadCustomColors } from './colorStore';
 import { routeComponent } from './appState';
 import { isAndroid, isMobile } from './platform';
-import MobileUnsupported from './components/MobileUnsupported.vue';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -47,10 +46,6 @@ const android = isAndroid();
 // The desktop rail is permanent, but Vuetify still honours `v-model`; starting closed
 // left the desktop app with no navigation at all (the app bar is mobile-only).
 const navOpen = ref(!mobile);
-
-// Routes whose features cannot work on mobile (see MOBILE.md) — the page is
-// replaced with an explanation instead of failing at runtime.
-const mobileUnsupportedRoutes = ['render', 'rpe', 'batch-render'];
 
 const navItems = [
   { key: 'render', icon: 'mdi-play-circle-outline', activeIcon: 'mdi-play-circle' },
@@ -386,13 +381,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
       <router-view v-slot="{ Component }">
         <Suspense timeout="0">
           <template #default>
-            <MobileUnsupported
-              v-if="mobile && !android && mobileUnsupportedRoutes.includes(String(route.name))"
-              ref="routeComponent"
-              class="page-view"
-              :feature="t(String(route.name))"
-            />
-            <component v-else :is="Component" ref="routeComponent" class="page-view" />
+            <component :is="Component" ref="routeComponent" class="page-view" />
           </template>
           <template #fallback>
             <div class="loading-container">

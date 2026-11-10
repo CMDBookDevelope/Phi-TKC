@@ -16,6 +16,16 @@ pub fn get_msaa_sample_counts() -> Result<MsaaSupport, InvokeError> {
     query().map_err(InvokeError::from_anyhow)
 }
 
+#[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+fn query() -> anyhow::Result<MsaaSupport> {
+    objc::rc::autoreleasepool(|| {
+        let (device, counts) = macroquad::miniquad::graphics::metal::MetalContext::gpu_info()
+            .ok_or_else(|| anyhow::anyhow!("Metal GPU is unavailable"))?;
+        Ok(MsaaSupport { device, counts })
+    })
+}
+
+#[cfg(not(any(target_os = "ios", feature = "apple-render-check")))]
 fn query() -> anyhow::Result<MsaaSupport> {
     unsafe {
         let entry = ash::Entry::load()?;

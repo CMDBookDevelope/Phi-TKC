@@ -1,85 +1,56 @@
-# 移动端（iOS / iPadOS / Android）支持说明
+# 移动端支持说明
 
-Phi-TKC 现在会通过 GitHub Actions 打包移动端产物（见 `.github/workflows/mobile.yml`）：
+Android 和 iOS 都已接入进程内渲染，不需要 ffmpeg 可执行文件或子进程。
 
-| 平台 | 产物 | 签名 | 说明 |
-| --- | --- | --- | --- |
-| iOS / iPadOS | `Phi-TKC.ipa` | **未签名** | 需要自行侧载 / 用 AltStore、Sideloadly 等重签；`gen/apple` 工程由 CI 现场 `tauri ios init` 生成 |
-| Android | `app-universal-release-unsigned.apk` | **未签名** | 安装前需自行签名（`apksigner`），或改用它重新打包 |
+| 平台 | 渲染与编码 | 发布产物 |
+| --- | --- | --- |
+| Android | 无窗口 Vulkan + MediaCodec H.264/HEVC、AAC + MediaMuxer MP4 | 使用 CI 临时密钥签名的 arm64 APK |
+| iOS / iPadOS | 离屏 Metal + VideoToolbox H.264 + AVAssetWriter AAC/MP4 | 未签名 IPA，安装前需要自行重签 |
+| 桌面 | Vulkan + 桌面编码器 / ffmpeg | Windows NSIS、Linux deb / AppImage、macOS arm64 dmg |
 
-`gen/android`、`gen/apple` 不入库：本机没有 macOS/Xcode 与 Android SDK，无法在本地生成；
-CI 每次运行都会 `tauri {android,ios} init --ci` 重新生成。
+Metal 后端沿用渲染库的 Texture、Buffer、Pipeline、RenderPass 接口；GLSL 450 经 shaderc 和
+SPIRV-Cross 转成 MSL。它创建离屏上下文，Tauri 继续管理 UIKit 窗口。支持 MSAA、深度／模板、
+纹理采样与更新、裁剪、缩放和 RGBA 回读。macOS 桌面渲染仍使用 Vulkan。
 
-## Android 现在可以真正渲染
+## 功能
 
-Android 走的是**进程内原生渲染管线**（移植自 `Winamin/Phi-TK` 的 `android` 分支）：
+| 功能 | Android / iOS |
+| --- | --- |
+| 选谱、渲染、RPE、批量渲染 | 已接入本地原生任务队列 |
+| 连接服务器后提交远程渲染 | 支持；默认使用本地 GPU |
+| 任务列表 | 合并本地任务和已连接服务器的任务；远程任务可下载／取消 |
+| 预览窗口 | 隐藏；移动端没有独立预览窗口 |
+| 主题、背景、语言 | 支持 |
+| 导航与任务菜单 | 底部导航和任务「⋮」按钮 |
+| 自定义输出目录 | 隐藏；使用平台默认目录 |
 
-1. `src-tauri/src/android_render.rs` 直接用 Vulkan 渲染 + `Nv12Readback` 回读，**不 spawn 子进程**；
-2. 编码用 NDK 的 `libmediandk.so`（`AMediaCodec` H.264/HEVC + AAC，`AMediaMuxer` 封装 MP4），
-   **完全不需要 ffmpeg 可执行文件**；
-3. `task.rs` 的 `run_android()` 在进程内 `spawn_blocking` 跑渲染，用原子变量汇报进度；
-4. 渲染日志写 logcat（`adb logcat -s PhiTK`）和输出视频旁的 `.log` 文件。
+Android 选谱使用 `ACTION_OPEN_DOCUMENT` 和 `*/*`，以支持没有 MIME 映射的谱面压缩包。
+取消选择返回 `null`，不会进入解析。读取权限仍有效时，插件在后台把文件复制到独立的
+`cache/charts/<uuid>` 目录；重新选择同名谱不会覆盖队列正在读取的文件。
 
-因此 Android 的渲染 / RPE / 批量渲染入口**不再屏蔽**（`src/platform.ts` 的 `isAndroid()`）。
+APK 的渲染资源由插件首次渲染时复制到应用内部 `files/render-assets-<安装时间>`，再交给
+渲染库按普通路径读取。Android 无头渲染不初始化 miniquad 的 Activity／窗口资源加载器。
 
-iOS 仍然不行：iOS 禁止 spawn 子进程、也没有可用的 ffmpeg，而且这条 NDK 管线在 iOS 上没有对应实现
-（`AudioToolbox`/`VideoToolbox` 需要另一套代码），所以 iOS 继续显示说明页。
+Android 视频优先尝试保存到 Movies，系统不允许时保留应用内部输出，任务日志会给出实际路径。
+iOS 输出位于 `Documents/output`，通过 Files 访问；配置已开启文件共享。
 
-**注意**：Android 的视频编码参数会被规范化成 CBR（MediaCodec 不接受 CRF），
-码率取 `--bitrate`（缺省 8M），分辨率必须是偶数。
+移动编码参数会规范化为 CBR：缺省 8 Mbps、偶数分辨率。iOS 当前使用 H.264、AAC 和 48 kHz
+音频。任务取消和 panic 会反映在任务列表；输出旁的 `.log` 保留诊断信息。
 
-## 功能支持矩阵
+## 构建与验证
 
-| 功能 | 桌面端 | 移动端 | 说明 |
-| --- | --- | --- | --- |
-| 渲染谱面（RenderView） | ✅ | Android ✅ / iOS ❌ | Android 用进程内 Vulkan + MediaCodec；iOS 仍屏蔽 |
-| 批量渲染（BatchRenderView） | ✅ | Android ✅ / iOS ❌ | 同上 |
-| RPE 绑定（RPEView） | ✅ | Android ✅ / iOS ❌ | Android 可解析并渲染 RPE |
-| 预览（Play/预览窗口） | ✅ | ❌ 屏蔽 | 独立 macroquad 窗口，移动端没有等价物 |
-| 任务列表（TasksView） | ✅ | ✅ 可用 | 移动端基本为空；「在文件夹中显示」已隐藏 |
-| 设置：主题色 / 自定义背景 / 语言 | ✅ | ✅ 可用 | 语言支持 English / 简体中文，切换后重载；背景写入应用沙箱（AppData） |
-| 设置：输出目录 | ✅ | ❌ 隐藏 | 移动端文件选择器不支持选目录；输出固定为应用数据目录 |
-| 关于（AboutView） | ✅ | ✅ 可用 | 彩蛋动画在移动端会消耗电量，已降低模糊开销 |
-| 拖拽谱面文件 | ✅ | ❌ 无 | 触屏没有拖拽来源；改用文件选择器 |
-| 右键菜单 | ✅ | ⚠️ 替代 | 任务卡新增「⋮」按钮，触屏可及 |
-| 「在文件夹中显示」/ 打开输出目录 | ✅ | ❌ 隐藏 | `explorer` / `gdbus` / `open` 是桌面 shell 集成 |
-| 多实例锁（`app.lock`） | ✅ | ⏭ 跳过 | 移动端恒被视为唯一实例 |
-| 硬件加速（NVENC/QSV/AMF/Vulkan） | ✅ | ❌ | 移动端探测一律返回 false |
+`gen/android`、`gen/apple` 由 Tauri CLI 生成，不入库；移动端图标由 `src-tauri/icons` 提供。
+Android CI 目前只发布 arm64。工作区有 Android SDK / NDK，可生成 x86_64 APK 验证模拟器；
+相应的 FFmpeg 解码静态库需要单独准备，不能使用 arm64 库代替。
 
-## 移动端做了哪些适配
+Apple 构建需要 Xcode。`.cargo/config.toml` 和 `src-tauri/ios-project.yml` 声明所需 framework。
+桌面 workflow 的 macOS job 运行两项原生冒烟检查，再打包：
 
-- `src/platform.ts`：用 `@tauri-apps/plugin-os` 的 `platform()` 判断移动端（已缓存 + 兜底）。
-- `src/App.vue`：导航在移动端改为**抽屉 + 顶栏汉堡按钮**（桌面仍是 rail + hover 展开）；加了
-  `env(safe-area-inset-*)` 适配刘海/Home 指示条。
-- `src/components/MobileUnsupported.vue`：桌面专属页面的替代说明页（App.vue 按路由切换）。
-- `src/TasksView.vue`：任务卡加「⋮」按钮（复用原右键菜单）。
-- `src/components/ConfigView.vue`：`window.prompt` 换成 Vuetify 对话框（iOS WKWebView 不支持 prompt）。
-- `src/Setting.vue`：新增语言选择（English / 简体中文）；`window.prompt`/`confirm` 均已替换为 Vuetify 对话框。
-- `src/BatchRenderView.vue`：`window.confirm` 换成对话框；全屏模糊在触屏设备降级。
-- `src/main.ts`：移动端跳过 F12/devtools 拦截（保留右键屏蔽以抑制长按弹出菜单）。
-- `src/assets/main.css`：`@media (pointer: coarse)` 降低大面积 `backdrop-filter` 模糊（移动 GPU 开销）。
-- `index.html`：`viewport-fit=cover`。
-- Rust：`lib.rs` 的 `asset_dir` 改为按平台/打包方式探测（Tauri 资源目录、旧版 `/usr/lib/ptkc-assets`、
-  dev 的 `src-tauri/assets`）；**移动端不再因资源目录缺失而退出**——Android 的资源位于 APK 内，
-  `resource_dir()` 返回 `asset://localhost/`，不是文件系统路径；iOS 的 `resource_dir()` 本身已指向
-  `.../assets`。`render.rs` 增加移动端 `hw_detect` 空实现；`is_the_only_instance` 在移动端恒为 true。
+- `videotoolbox_mp4_smoke`：编码一秒 H.264 + AAC 并封装 MP4。
+- miniquad `metal_offscreen`：检查 MSAA、流式缓冲快照、缩放、GL 深度／上下方向、裁剪和空采样器。
 
-## 构建注意（Apple 平台的链接）
+Linux 可用 `python3 scripts/check-native.py --offline` 检查本地 fork 的 Apple 代码类型，并恢复
+原来的 Cargo.lock；这不能替代 Apple API 的链接和实机运行。Metal 着色器转换测试可在 Linux
+用 `cargo test --features metal-shaders metal_shader` 运行。
 
-`prpr-avc` 为 Apple 目标（`aarch64-apple-darwin`、`aarch64-apple-ios`）提供的 ffmpeg 静态库
-**开了 VideoToolbox**，目标文件里引用了 `CoreVideo` / `VideoToolbox` / `CoreMedia` / `CoreFoundation`
-的符号，而 `prpr-avc/build.rs` 只 `-lz`。因此仓库根目录加了 `.cargo/config.toml`，为这两个 target
-补上 `-framework` 链接参数；否则 macOS dmg 与 iOS ipa 会在链接期报 undefined symbols。
-未用到的 framework 会被链接器丢弃，不会影响体积。
-
-## 已知限制 / 后续工作
-
-- **未签名产物**：iOS 需要自签；Android release APK 未签名，装不上，需要自行签名。
-- **应用图标**：移动端目前使用 Tauri 模板的默认图标。仓库里的 `src-tauri/icons/icon.png` 只有
-  128×128，而 `icon.icns` 内含 1024×1024 的 PNG（`ic10` 条目）；后续可用它跑
-  `pnpm tauri icon`，再把生成的 `icons/android/mipmap-*` 与 `icons/ios/AppIcon.appiconset`
-  拷进 `gen/android/app/src/main/res` 与 `gen/apple/Assets.xcassets`。
-- **真正的移动端渲染**：需要在应用内（in-process）用 prpr + 平台编码器重写管线，属独立项目；
-  目前 prpr-avc 已带 `aarch64-apple-ios` / `aarch64-linux-android` 的 ffmpeg 静态库，是可行的起点。
-- **x86_64 macOS（Universal dmg）**：上游 `TeamFlos/prpr-avc-ffmpeg` 的 target 矩阵没有
-  `x86_64-apple-darwin`，全网也没有该静态库，故 macOS 只出 arm64。
+目前工作区没有 Apple 主机或 iOS 真机；Apple 运行结果以 macOS CI／设备验证为准。

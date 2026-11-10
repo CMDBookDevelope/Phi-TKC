@@ -150,6 +150,7 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
+import { isMobile } from './platform';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
@@ -436,7 +437,7 @@ function removeChart(id: string) {
 }
 
 async function buildRenderParams(requireFfmpeg = true) {
-  if (requireFfmpeg && !(await invoke('test_ffmpeg'))) throw new Error(t('ffmpeg-not-found'));
+  if (requireFfmpeg && !isMobile() && !(await invoke('test_ffmpeg'))) throw new Error(t('ffmpeg-not-found'));
   let config = selectedPreset.value === 'default' ? defaultConfig.value : ((await invoke('get_presets')) as Record<string, RenderConfig>)[selectedPreset.value];
   if (!config) config = defaultConfig.value;
   if (!config.resolution) throw new Error('Resolution missing');

@@ -135,9 +135,10 @@ import moment from 'moment';
 import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
 import gsap from 'gsap';
-import { isAndroid } from './platform';
+import { isAndroid, isMobile } from './platform';
 
 const android = isAndroid();
+const mobile = isMobile();
 
 const { t } = useI18n();
 
@@ -178,15 +179,13 @@ async function chooseChart(folder?: boolean) {
   if (choosingChart.value) return;
   choosingChart.value = true;
   try {
-    // Android's document picker cannot translate an extension whitelist into a
-    // MIME filter for chart archives, and the dialog never resolves — so the
-    // picker is opened unfiltered there and the chart parser rejects non-charts.
+    // Android charts use ACTION_OPEN_DOCUMENT and are imported before the
+    // temporary URI permission expires; GET_CONTENT may open a photo picker.
     let file = folder
       ? await dialog.open({ directory: true })
-      : await dialog.open(
-          isAndroid()
-            ? {}
-            : {
+      : android
+        ? await invoke<string | null>('pick_chart')
+        : await dialog.open({
                 filters: [
                   {
                     name: t('choose.filter-name'),
@@ -194,8 +193,7 @@ async function chooseChart(folder?: boolean) {
                   },
                   anyFilter(),
                 ],
-              },
-        );
+              });
     if (!file) return;
     await loadChart(file as string);
   } catch (e) {
@@ -328,7 +326,7 @@ async function postRender(): Promise<boolean | 'remote'> {
     }
 
     // Android encodes in-process with MediaCodec, so there is no ffmpeg to find.
-    if (!isAndroid() && !(await invoke('test_ffmpeg'))) {
+    if (!mobile && !(await invoke('test_ffmpeg'))) {
       await dialog.message(t('ffmpeg-not-found'));
       await invoke('open_app_folder');
       await shell.open('https://github.com/BtbN/FFmpeg-Builds/releases');
@@ -579,15 +577,15 @@ function resetAndGoChoose() {
       </div>
 
       <div class="bar-right">
-        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="playChart">
+        <button class="bar-btn bar-btn-tonal" v-if="step === 'options' && !mobile" @click="playChart">
           <v-icon icon="mdi-gamepad-variant" size="18" />
           <span>{{ t('play') }}</span>
         </button>
-        <button class="bar-btn bar-btn-tonal" v-if="step === 'options' && !android" @click="previewChart">
+        <button class="bar-btn bar-btn-tonal" v-if="step === 'options' && !mobile" @click="previewChart">
           <v-icon icon="mdi-eye" size="18" />
           <span>{{ t('preview') }}</span>
         </button>
-        <button class="bar-btn bar-btn-filled" v-if="step === 'config' || step === 'options'" @click="moveNext">
+        <button class="bar-btn bar-btn-filled" v-if="!mobile && (step === 'config' || step === 'options')" @click="moveNext">
           <span>{{ step === 'options' ? t('render') : t('next-step') }}</span>
           <v-icon icon="mdi-arrow-right" size="18" />
         </button>
@@ -597,7 +595,7 @@ function resetAndGoChoose() {
     <!-- Content area -->
     <main class="render-content">
       <!-- Step 1: Choose (Bookshelf) -->
-      <div class="step-panel" :class="{ 'is-active': step === 'choose' }">
+      <div class="step-panel" :class="{ 'is-active': step === 'choose' }" :inert="step === 'choose' ? undefined : true">
         <div class="clear-glass bookshelf glass" v-glass>
           <div class="glass fluent-glass shelf-label" v-glass>{{ t('steps.choose') }}</div>
           <div class="shelf-row">
@@ -620,7 +618,7 @@ function resetAndGoChoose() {
       </div>
 
       <!-- Step 2: Config -->
-      <div class="step-panel" :class="{ 'is-active': step === 'config' }">
+      <div class="step-panel" :class="{ 'is-active': step === 'config' }" :inert="step === 'config' ? undefined : true">
         <div class="config-card-wrapper" ref="flipCardRef">
           <div class="glass fluent-glass config-card" v-glass v-if="chartInfo">
             <v-form ref="form" class="config-form" @submit.prevent>
@@ -718,14 +716,14 @@ function resetAndGoChoose() {
       </div>
 
       <!-- Step 3: Options -->
-      <div class="clear-glass glass step-panel" v-glass :class="{ 'is-active': step === 'options' }">
+      <div class="clear-glass glass step-panel" v-glass :class="{ 'is-active': step === 'options' }" :inert="step === 'options' ? undefined : true">
         <div class="options-wrapper">
           <ConfigView ref="configView" />
         </div>
       </div>
 
       <!-- Step 4: Render -->
-      <div class="step-panel" :class="{ 'is-active': step === 'render' }">
+      <div class="step-panel" :class="{ 'is-active': step === 'render' }" :inert="step === 'render' ? undefined : true">
         <div class="render-card fluent-glass glass" v-if="chartInfo" v-glass>
           <!-- Left: Illustration -->
           <div class="render-cover">
@@ -788,6 +786,14 @@ function resetAndGoChoose() {
         </div>
       </div>
     </main>
+
+    <Teleport to="body">
+      <button v-if="mobile && (step === 'config' || step === 'options')"
+        class="bar-btn bar-btn-filled mobile-render-action" @click="moveNext">
+        <span>{{ step === 'options' ? t('render') : t('next-step') }}</span>
+        <v-icon icon="mdi-arrow-right" size="18" />
+      </button>
+    </Teleport>
 
     <!-- File drag overlay -->
     <v-overlay v-model="fileHovering" contained class="align-center justify-center drop-overlay" persistent :close-on-content-click="false">
@@ -1241,6 +1247,20 @@ function resetAndGoChoose() {
   font-size: 14px;
 }
 
+  .mobile-render-action {
+    position: fixed;
+    left: 14px;
+    right: 14px;
+    bottom: calc(84px + env(safe-area-inset-bottom));
+    height: 52px;
+    justify-content: center;
+    border-radius: 16px;
+    font-size: 16px;
+    font-weight: 700;
+    z-index: 1005;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+  .mobile-render-action span { display: inline; }
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
   .config-grid {
@@ -1255,25 +1275,6 @@ function resetAndGoChoose() {
   }
   .bar-btn span {
     display: none;
-  }
-  /* The primary action (next / render) becomes a full-width bottom CTA so it
-     sits in the thumb zone instead of the top-right corner, and keeps its label
-     while the secondary icon buttons stay compact. */
-  .bar-btn-filled {
-    position: fixed;
-    left: 14px;
-    right: 14px;
-    bottom: calc(74px + env(safe-area-inset-bottom));
-    height: 52px;
-    justify-content: center;
-    border-radius: 16px;
-    font-size: 16px;
-    font-weight: 700;
-    z-index: 30;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  }
-  .bar-btn-filled span {
-    display: inline;
   }
   .render-container {
     padding-bottom: 84px;

@@ -1,6 +1,6 @@
 [package]
 name = "Phi-TKC"
-version = "1.1.2"
+version = "1.1.3"
 description = "Phi-TKC"
 authors = ["Mivik", "Link", "CNMDBook"]
 license = "GPL-v3"
@@ -53,6 +53,7 @@ tauri-plugin-fs = "2"
 tauri-plugin-os = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-chart-picker = { path = "plugins/chart-picker" }
 tauri-plugin-http = "2"
 
 #TKC
@@ -63,9 +64,15 @@ atty = "0.2"
 term_size = "0.3.2"
 clap = { version = "4.5", features = ["derive"] }
 libc = "0.2.186"
+objc = { version = "0.2", optional = true }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+# Compile the Apple pipeline on a non-Apple host for Rust type checks only.
+apple-render-check = ["dep:objc"]
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+objc = "0.2"
 
 [profile.release]
 opt-level = 3

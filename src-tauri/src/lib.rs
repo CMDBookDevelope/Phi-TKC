@@ -11,6 +11,12 @@ mod preview;
 pub mod render;
 pub mod server;
 mod task;
+#[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+mod apple_media;
+#[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+mod apple_platform;
+#[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+mod apple_render;
 mod vulkan_encode;
 mod vulkan_readback;
 mod vulkan_video;
@@ -149,6 +155,7 @@ pub async fn run() -> Result<()> {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_chart_picker::init())
         .manage(TaskQueue::new())
         .invoke_handler(tauri::generate_handler![
             is_the_only_instance,
@@ -157,6 +164,7 @@ pub async fn run() -> Result<()> {
             show_in_folder,
             preview_chart,
             parse_chart,
+            pick_chart,
             batch_add_tasks,
             post_render,
             get_tasks,
@@ -358,6 +366,22 @@ fn localize_chart_path(path: &Path) -> Result<PathBuf> {
 }
 
 #[tauri::command]
+async fn pick_chart(app: tauri::AppHandle) -> Result<Option<String>, InvokeError> {
+    #[cfg(target_os = "android")]
+    {
+        return tokio::task::spawn_blocking(move || {
+            app.state::<tauri_plugin_chart_picker::ChartPicker<tauri::Wry>>()
+                .pick().map_err(|error| InvokeError::from(error.to_string()))
+        }).await.map_err(|error| InvokeError::from(error.to_string()))?;
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Err(InvokeError::from("The document picker is only used on Android"))
+    }
+}
+
+#[tauri::command]
 async fn parse_chart(path: &Path) -> Result<ChartInfo, InvokeError> {
     wrap_async(async move {
         let path = localize_chart_path(path)?;
@@ -393,7 +417,8 @@ async fn preview_chart(mut params: RenderParams) -> Result<(), InvokeError> {
     .await
 }
 #[tauri::command]
-async fn post_render(queue: State<'_, TaskQueue>, mut params: RenderParams, output_path: Option<String>) -> Result<(), InvokeError> {
+async fn post_render(app: tauri::AppHandle, queue: State<'_, TaskQueue>, mut params: RenderParams, output_path: Option<String>) -> Result<(), InvokeError> {
+    prepare_platform_assets(app).await?;
     wrap_async(async move {
         params.path = localize_chart_path(&params.path)?;
         let output_path = output_path.map(PathBuf::from);
@@ -444,9 +469,11 @@ fn get_respacks() -> Result<Vec<RespackInfo>, InvokeError> {
 
 #[tauri::command]
 async fn batch_add_tasks(
+    app: tauri::AppHandle,
     queue: State<'_, TaskQueue>,
     tasks: Vec<(String, String, Option<String>)> // (path, preset_name, output_path)
 ) -> Result<(), InvokeError> {
+    prepare_platform_assets(app).await?;
     wrap_async(async move {
         for (path, preset_name, output_path) in tasks {
             let mut presets = get_presets().await.map_err(|e| anyhow::anyhow!("Failed to get presets: {:?}", e))?;
@@ -490,6 +517,20 @@ async fn list_chart_files(path: PathBuf) -> Result<Vec<String>, InvokeError> {
 
 pub fn create_default_render_config() -> RenderConfig {
     RenderConfig::default()
+}
+
+async fn prepare_platform_assets(app: tauri::AppHandle) -> Result<(), InvokeError> {
+    #[cfg(target_os = "android")]
+    {
+        let path = tokio::task::spawn_blocking(move || {
+            app.state::<tauri_plugin_chart_picker::ChartPicker<tauri::Wry>>().assets()
+                .map_err(|error| InvokeError::from(error.to_string()))
+        }).await.map_err(|error| InvokeError::from(error.to_string()))??;
+        ASSET_PATH.set(PathBuf::from(path)).ok();
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = app;
+    Ok(())
 }
 
 #[tauri::command]
