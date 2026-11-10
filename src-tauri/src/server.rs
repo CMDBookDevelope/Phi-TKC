@@ -94,7 +94,7 @@ struct Job {
     config: RenderConfig,
     /// Metadata supplied by the app (it already parsed the chart). The server
     /// normally loads it from the uploaded file, but the phone also sends the
-    /// user's aspect-ratio / dim edits, which only exist on the client side.
+    /// user's dim and other metadata edits, which only exist on the client side.
     info: Option<ChartInfo>,
     cancel: Arc<AtomicBool>,
 }
@@ -585,7 +585,6 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
         info.charter = posted.charter;
         info.composer = posted.composer;
         info.illustrator = posted.illustrator;
-        info.aspect_ratio = posted.aspect_ratio;
         info.background_dim = posted.background_dim;
         info.tip = posted.tip;
         info.hold_partial_cover = posted.hold_partial_cover;

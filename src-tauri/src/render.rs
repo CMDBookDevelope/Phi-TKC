@@ -177,6 +177,18 @@ impl Default for RenderConfig {
 }
 
 impl RenderConfig {
+    /// Keep the requested canvas intact; encoders require even dimensions.
+    pub fn output_resolution(&self) -> Result<(u32, u32)> {
+        let (width, height) = self.resolution;
+        if width < 16 || height < 16 || width > i32::MAX as u32 || height > i32::MAX as u32 {
+            bail!("resolution must be at least 16x16 and fit the renderer viewport (got {width}x{height})");
+        }
+        if width % 2 != 0 || height % 2 != 0 {
+            bail!("resolution must use even dimensions for video encoding (got {width}x{height})");
+        }
+        Ok((width, height))
+    }
+
     pub fn to_config(&self) -> Config {
         Config {
             aggressive: self.aggressive,
@@ -915,6 +927,7 @@ async fn render_impl(
     set_enabled(!log_mode);
     let _ = exit_after;
     let process_start = Instant::now();
+    let (vw, vh) = params.config.output_resolution()?;
     let path = params.path;
 
     let mut fs = fs::fs_from_file(&path)?;
@@ -1194,20 +1207,6 @@ async fn render_impl(
     let audio_s = mark!("audio encode + resample");
 
 
-
-    let target_aspect = info.aspect_ratio as f64;
-    let (mut vw, mut vh) = params.config.resolution;
-    let (ow, oh) = (vw, vh);
-    let aspect = vw as f64 / vh as f64;
-
-    if (aspect - target_aspect).abs() > 1e-9 {
-        if aspect > target_aspect {
-            vw = (vh as f64 * target_aspect).round() as u32;
-        } else {
-            vh = (vw as f64 / target_aspect).round() as u32;
-        }
-        info!("{}x{} -> {}x{} (target {:.9})", ow, oh, vw, vh, target_aspect);
-    }
 
     let qp = encoder_qp(&params.config, vw, vh);
     // The Rust Vulkan encoder implements H.264 only, so the existing
@@ -3158,17 +3157,13 @@ pub async fn render_cli(args: CliArgs) -> Result<()> {
     macroquad::file::set_pc_assets_folder(&assets.display().to_string());
 
     let mut config = RenderConfig::default();
-    config.resolution = {
-        let parts: Vec<&str> = args.resolution.split(|c| c == 'x' || c == 'X').collect();
-        if parts.len() == 2 {
-            (
-                parts[0].parse().unwrap_or(1920),
-                parts[1].parse().unwrap_or(1440),
-            )
-        } else {
-            (1920, 1440)
-        }
-    };
+    let (width, height) = args.resolution.split_once(['x', 'X'])
+        .context("resolution must be WIDTHxHEIGHT, e.g. 1920x1080")?;
+    config.resolution = (
+        width.parse().context("invalid resolution width")?,
+        height.parse().context("invalid resolution height")?,
+    );
+    config.output_resolution()?;
     config.fps = args.fps;
     config.bitrate_control = args.bitrate_control.to_uppercase();
     config.bitrate = args.bitrate.clone().unwrap_or_else(|| args.crf.to_string());

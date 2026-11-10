@@ -8,7 +8,6 @@ export interface ChartInfo {
 
   tip: string | null;
 
-  aspectRatio: number;
   backgroundDim: number;
   HoldPartialCover: boolean;
 }

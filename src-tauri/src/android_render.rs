@@ -62,35 +62,8 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> 
     let _log = crate::android_uri::start_render_log(request.output_path.with_extension("log"))?;
     let mut request = request;
     normalize_config(&mut request.params.config)?;
-    let (mut vw, mut vh) = request.params.config.resolution;
-    let aspect = request.params.info.aspect_ratio as f64;
-    crate::android_uri::debug_log(&format!(
-        "render: requested {}x{} aspect={aspect:.6}",
-        vw, vh
-    ));
-    if vw == 0 || vh == 0 {
-        bail!("resolution must not be zero")
-    }
-    if aspect.is_finite() && (0.2..=5.0).contains(&aspect) {
-        if (vw as f64 / vh as f64 - aspect).abs() > 1e-9 {
-            if vw as f64 / vh as f64 > aspect {
-                vw = (vh as f64 * aspect).round() as u32;
-            } else {
-                vh = (vw as f64 / aspect).round() as u32;
-            }
-        }
-    } else {
-        crate::android_uri::debug_log(&format!(
-            "render: ignoring implausible aspect {aspect:.6}, keeping {}x{}",
-            vw, vh
-        ));
-    }
-    vw &= !1;
-    vh &= !1;
-    if vw < 16 || vh < 16 {
-        bail!("refusing to render at {vw}x{vh}");
-    }
-    crate::android_uri::debug_log(&format!("render: using {vw}x{vh}"));
+    let (vw, vh) = request.params.config.output_resolution()?;
+    crate::android_uri::debug_log(&format!("render: using requested {vw}x{vh}"));
     let conf = build_conf(vw, vh);
 
     let shared: std::sync::Arc<std::sync::Mutex<Option<Result<()>>>> =

@@ -54,3 +54,10 @@ Linux 可用 `python3 scripts/check-native.py --offline` 检查本地 fork 的 A
 用 `cargo test --features metal-shaders metal_shader` 运行。
 
 目前工作区没有 Apple 主机或 iOS 真机；Apple 运行结果以 macOS CI／设备验证为准。
+
+
+### 1.2.0 画幅
+
+Android Vulkan／MediaCodec 和 iOS Metal／VideoToolbox 均使用设置中的完整分辨率，
+不再按照谱面比例缩小宽高。旧谱面的比例字段会被忽略；宽高必须为至少 16 的偶数，
+不满足时返回错误，不会自动裁掉像素。

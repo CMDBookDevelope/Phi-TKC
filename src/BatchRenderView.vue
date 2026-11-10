@@ -64,7 +64,6 @@ en:
   background-dim: Background Dim
   hold_cover: Hold Partial Cover
   tip: Tip
-  aspect: Aspect Ratio
   width: Width
   height: Height
   dim: Background Dim
@@ -137,7 +136,6 @@ zh-CN:
   illustrator: 插画师
   background-dim: 背景暗度
   hold_cover: Hold 头部遮罩
-  aspect: 宽高比
   tip: 提示信息 (Tip)
   width: 宽
   height: 高
@@ -180,8 +178,6 @@ interface BatchChart {
   selected: boolean;
   error?: string;
   chartInfo?: ChartInfo;
-  aspectWidth?: string;
-  aspectHeight?: string;
 }
 
 const charts = ref<BatchChart[]>([]);
@@ -204,8 +200,6 @@ let disposed = false;
 let statusSyncTimer: ReturnType<typeof setInterval> | null = null;
 
 const bulkEditData = ref({
-  aspectWidth: '',
-  aspectHeight: '',
   backgroundDim: null as number | null,
   holdCover: null as boolean | null,
 });
@@ -379,21 +373,7 @@ async function addChart(path: string) {
   const placeholderIndex = charts.value.push(newChart) - 1;
   try {
     const chartInfo = (await invoke('parse_chart', { path })) as ChartInfo;
-    let aW = String(chartInfo.aspectRatio);
-    let aH = '1.0';
-    for (const asp of [
-      [16, 9],
-      [4, 3],
-      [8, 5],
-      [3, 2],
-    ]) {
-      if (Math.abs(asp[0] / asp[1] - chartInfo.aspectRatio) < 1e-4) {
-        aW = String(asp[0]);
-        aH = String(asp[1]);
-        break;
-      }
-    }
-    charts.value[placeholderIndex] = { ...newChart, name: chartInfo.name, level: chartInfo.level, charter: chartInfo.charter, chartInfo, aspectWidth: aW, aspectHeight: aH };
+    charts.value[placeholderIndex] = { ...newChart, name: chartInfo.name, level: chartInfo.level, charter: chartInfo.charter, chartInfo };
   } catch (error: any) {
     let errorMessage = t('invalid-chart-file');
     if (error.message?.includes('as zip archive')) errorMessage = t('file-type-error', { message: 'Not a ZIP archive' });
@@ -654,8 +634,6 @@ async function saveChartInfo() {
   if (!valid) return;
   const chart = charts.value.find((c) => c.id === editingChartId.value);
   if (!chart) return;
-  const aspect = tryParseAspect(chart.aspectWidth, chart.aspectHeight);
-  if (aspect && chart.chartInfo) chart.chartInfo.aspectRatio = aspect;
   if (chart.chartInfo) {
     chart.name = chart.chartInfo.name;
     chart.level = chart.chartInfo.level;
@@ -665,33 +643,20 @@ async function saveChartInfo() {
 }
 
 function openBulkEditDialog() {
-  bulkEditData.value = { aspectWidth: '', aspectHeight: '', backgroundDim: null, holdCover: null };
+  bulkEditData.value = { backgroundDim: null, holdCover: null };
   bulkEditDialog.value = true;
 }
 
 function saveBulkEdit() {
-  const aspect = tryParseAspect(bulkEditData.value.aspectWidth, bulkEditData.value.aspectHeight);
   const selectedCharts = charts.value.filter((c) => c.selected && c.chartInfo);
   selectedCharts.forEach((chart) => {
     if (!chart.chartInfo) return;
-    if (aspect) {
-      chart.aspectWidth = bulkEditData.value.aspectWidth;
-      chart.aspectHeight = bulkEditData.value.aspectHeight;
-      chart.chartInfo.aspectRatio = aspect;
-    }
     if (bulkEditData.value.backgroundDim !== null) chart.chartInfo.backgroundDim = bulkEditData.value.backgroundDim;
     // v-btn-toggle yields `undefined` when the active button is toggled off, so `!== null` isn't enough.
     if (typeof bulkEditData.value.holdCover === 'boolean') chart.chartInfo.HoldPartialCover = bulkEditData.value.holdCover;
   });
   bulkEditDialog.value = false;
   toast(t('config-saved'), 'success');
-}
-
-function tryParseAspect(w?: string, h?: string) {
-  if (!w || !h) return undefined;
-  const numW = parseFloat(w),
-    numH = parseFloat(h);
-  return isNaN(numW) || isNaN(numH) ? undefined : numW / numH;
 }
 
 const STORAGE_KEY = 'batch_render_charts_v2';
@@ -704,7 +669,10 @@ onMounted(async () => {
       if (Array.isArray(parsed)) {
         // A previous session may have been closed mid-render; reconciliation below
         // restores the real state from the backend task list.
-        charts.value = parsed.map((c: any) => ({ ...c, status: c.status === 'rendering' ? 'pending' : c.status }));
+        charts.value = parsed.map(({ aspectWidth, aspectHeight, chartInfo, ...chart }: any) => {
+          const { aspectRatio, ...info } = chartInfo ?? {};
+          return { ...chart, chartInfo: chartInfo ? info : undefined, status: chart.status === 'rendering' ? 'pending' : chart.status };
+        });
       }
     } catch (e) {
       console.error('Failed to restore the batch list', e);
@@ -903,15 +871,7 @@ watch(
             </v-row>
             <v-divider class="my-4" />
             <v-row dense align="center">
-              <v-col cols="12" sm="5">
-                <div class="field-label-sm">{{ t('aspect') }}</div>
-                <div class="d-flex align-center gap-2">
-                  <v-text-field type="number" :rules="[RULES.positive]" v-model="editingChart.aspectWidth" hide-details variant="outlined" density="compact" />
-                  <span>:</span>
-                  <v-text-field type="number" :rules="[RULES.positive]" v-model="editingChart.aspectHeight" hide-details variant="outlined" density="compact" />
-                </div>
-              </v-col>
-              <v-col cols="12" sm="7">
+              <v-col cols="12">
                 <v-slider :label="t('dim')" thumb-label="always" :min="0" :max="1" :step="0.01" v-model="editingChart.chartInfo!.backgroundDim" hide-details class="mt-4" color="primary" />
               </v-col>
               <v-col cols="12">
@@ -944,12 +904,6 @@ watch(
             {{ t('bulk-edit-hint') }}
           </v-alert>
           <v-form @submit.prevent>
-            <div class="field-label-sm mb-1">{{ t('aspect') }}</div>
-            <div class="d-flex align-center gap-2 mb-4">
-              <v-text-field type="number" :placeholder="t('original')" v-model="bulkEditData.aspectWidth" hide-details variant="outlined" density="comfortable" />
-              <span>:</span>
-              <v-text-field type="number" :placeholder="t('original')" v-model="bulkEditData.aspectHeight" hide-details variant="outlined" density="comfortable" />
-            </div>
             <div class="field-label-sm mb-1">{{ t('dim') }}</div>
             <v-slider
               thumb-label

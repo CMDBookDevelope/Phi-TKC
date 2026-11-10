@@ -120,7 +120,7 @@ phi-tk-cli # or wrapper.sh \
 |------|--------|------|-----------|
 | `-i, --input` | 谱面文件路径 | FilePath | 必填 |
 | `-o, --output` | 输出视频路径 | FilePath | output.mp4 |
-| `-r, --resolution` | 分辨率 | 宽x高 | 1920x1440 |
+| `-r, --resolution` | 输出分辨率（决定完整画幅） | 宽x高 | 1920x1440 |
 | `-c, --crf` | 渲染质量（CRF/QP） | 1-51 | 20 |
 | `-f, --fps` | 帧率 | 整数 | 30 |
 | `-d, --dim` | 背景压暗百分比 | 0-100 | 30 |
@@ -139,7 +139,7 @@ phi-tk-cli # or wrapper.sh \
 | `--ui-above-ba` | UI 显示在噪域（blockAreaList）之上 | 布尔 | false |
 | `--chart-debug` | 显示谱面调试信息 | 布尔 | false |
 | `--flid-x` | 水平镜像谱面 | 布尔 | false |
-| `--chart-ratio` | 谱面拉伸比例 | 浮点 | 1.0 |
+| `--chart-ratio` | 谱面缩放 | 浮点 | 1.0 |
 | `--background` | 显示谱面插画背景 | 布尔 | false |
 | `--respack` | 资源包路径 | DirectoryPath | 无 |
 | `-s, --speed` | 谱面流速倍率 | 浮点 | 1.0 |
@@ -262,3 +262,13 @@ Phi-TKC/
 - [Macroquad CNMDBookVer.](https://github.com/CMDBookDevelope/prpr-macroquad "FULL HEADLESS SUPPORT.")
 - [Miniquad CNMDBookVer.](https://github.com/CMDBookDevelope "HEADLESS nb")
 - [Tauri](https://tauri.app/ "😱")
+
+
+### 1.2.0：输出画幅
+
+输出视频的宽高完全由 `-r/--resolution`（GUI／WebUI 中的分辨率）决定，
+例如 `1920x1440` 输出完整 4:3 画幅，`2560x1080` 输出完整超宽画幅。
+单谱和批量编辑不再提供独立的宽高比。旧谱面、配置中的 `AspectRatio`、
+`aspectRatio` 和 `fixAspectRatio` 会被忽略，不再缩小输出尺寸或限制渲染视口。
+视频编码要求宽高均为至少 16 的偶数；无效分辨率会返回明确错误。
+`--chart-ratio` 控制谱面在画布中的缩放，输出尺寸仍由分辨率决定。

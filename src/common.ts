@@ -27,7 +27,9 @@ export const RULES = {
   number: (value: string | number | null | undefined) => isNumeric(value) || i18n.global.t('rules.number'),
   resolution: (value: string | null | undefined) => {
     const match = (value ?? '').trim().match(/^(\d+)\s*[xX]\s*(\d+)$/);
-    return (!!match && Number(match[1]) > 0 && Number(match[2]) > 0) || i18n.global.t('rules.resolution');
+    const width = Number(match?.[1]);
+    const height = Number(match?.[2]);
+    return (!!match && width >= 16 && height >= 16 && width % 2 === 0 && height % 2 === 0) || i18n.global.t('rules.resolution');
   },
   sampleCount: (value: string | number | null | undefined) => {
     const n = Number(value);

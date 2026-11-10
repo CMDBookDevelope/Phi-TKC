@@ -215,7 +215,7 @@ import type { RenderConfig } from '@/model';
 import TipSwitch from './TipSwitch.vue';
 
 // Phi-TKC's preset list, plus the 1920x1080 default (which was missing from it).
-const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2133', '2388x1668', '1600x1080', '7680x5760'];
+const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2132', '2388x1668', '1600x1080', '7680x5760'];
 const FFMPEG_PRESETS = [
   { value: 'veryfast', title: 'VeryFast' },
   { value: 'faster', title: 'Faster' },
@@ -511,7 +511,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
     return null;
   }
   const [w, h] = resolution.value.split(/x/i).map(Number);
-  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 16 || h < 16 || w % 2 !== 0 || h % 2 !== 0) {
     toast(t('rules.resolution'), 'error');
     return null;
   }

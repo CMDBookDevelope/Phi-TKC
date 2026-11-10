@@ -24,7 +24,6 @@
     composer: Composer
     illustrator: Illustrator
     level: Level
-    aspect: Aspect ratio
     dim: Background dim
     hold_cover: Hold Head Partial Cover
 
@@ -84,7 +83,6 @@
     composer: 曲师
     illustrator: 画师
     level: 难度
-    aspect: 宽高比
     dim: 背景昏暗程度
     hold_cover: Hold 头部遮罩
 
@@ -224,20 +222,6 @@ async function loadChart(file: string) {
     } catch {
       /* charts without an illustration keep the placeholder */
     }
-    aspectWidth.value = String(chartInfo.value.aspectRatio);
-    aspectHeight.value = '1.0';
-    for (let asp of [
-      [16, 9],
-      [4, 3],
-      [8, 5],
-      [3, 2],
-    ]) {
-      if (Math.abs(asp[0] / asp[1] - chartInfo.value.aspectRatio) < 1e-4) {
-        aspectWidth.value = String(asp[0]);
-        aspectHeight.value = String(asp[1]);
-        break;
-      }
-    }
     // Keep the Phi-TKC dim slider in sync with the freshly parsed chart.
     pstBackgroundDim.value = Math.round(chartInfo.value.backgroundDim * 100);
 
@@ -269,37 +253,18 @@ function unflipCard() {
   stepIndex.value = 1;
 }
 
-const aspectWidth = ref('0'),
-  aspectHeight = ref('0');
-
 const form = ref<VForm>();
 
 const configView = ref<typeof ConfigView>();
 async function buildParams() {
   let config = await configView.value!.buildConfig();
   if (!config) return null;
-  const aspect = tryParseAspect();
-  if (aspect !== undefined) {
-    chartInfo.value!.aspectRatio = aspect;
-  }
   return {
     path: chartPath,
     info: chartInfo.value,
     config,
   };
 }
-
-watch([aspectWidth, aspectHeight], ([newWidth, newHeight]) => {
-  try {
-    const width = parseFloat(newWidth);
-    const height = parseFloat(newHeight);
-    if (!isNaN(width) && !isNaN(height) && chartInfo.value) {
-      chartInfo.value.aspectRatio = width / height;
-    }
-  } catch (e) {
-    console.error('Failed to update aspect ratio:', e);
-  }
-});
 
 // Set by the Settings page: when a render server is connected, renders are
 // submitted there instead of running on this device.
@@ -509,17 +474,6 @@ if (isString(chartInQuery)) {
   onMounted(() => loadChart(chartInQuery as string));
 }
 
-function tryParseAspect(): number | undefined {
-  try {
-    let width = parseFloat(aspectWidth.value);
-    let height = parseFloat(aspectHeight.value);
-    if (isNaN(width) || isNaN(height)) return undefined;
-    return width / height;
-  } catch {
-    return undefined;
-  }
-}
-
 const fileHovering = ref(false);
 
 getCurrentWebview()
@@ -661,28 +615,6 @@ function resetAndGoChoose() {
                 </div>
                 <div class="config-section">
                   <div class="field-group">
-                    <label class="field-label">{{ t('aspect') }}</label>
-                    <div class="aspect-row">
-                      <v-text-field
-                        v-model="aspectWidth"
-                        type="number"
-                        :rules="[RULES.positive]"
-                        variant="outlined"
-                        density="compact"
-                        hide-details
-                        class="aspect-field" />
-                      <span class="aspect-sep">:</span>
-                      <v-text-field
-                        v-model="aspectHeight"
-                        type="number"
-                        :rules="[RULES.positive]"
-                        variant="outlined"
-                        density="compact"
-                        hide-details
-                        class="aspect-field" />
-                    </div>
-                  </div>
-                  <div class="field-group">
                     <label class="field-label">{{ t('dim') }} — {{ Math.round(pstBackgroundDim) }}%</label>
                     <v-slider
                       class="slider"
@@ -758,10 +690,6 @@ function resetAndGoChoose() {
               <div class="info-row" v-if="chartInfo.illustrator">
                 <span class="info-label">{{ t('illustrator') }}</span
                 ><span class="info-value">{{ chartInfo.illustrator }}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">{{ t('aspect') }}</span
-                ><span class="info-value">{{ aspectWidth }}:{{ aspectHeight }}</span>
               </div>
               <div class="info-row" v-if="renderDuration !== undefined">
                 <span class="info-label">{{ t('duration') }}</span
@@ -1077,21 +1005,6 @@ function resetAndGoChoose() {
   color: rgba(var(--main-color-rgb), 0.55);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-}
-
-.aspect-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.aspect-field {
-  flex: 1;
-  text-align: center;
-}
-.aspect-sep {
-  font-size: 18px;
-  font-weight: 700;
-  color: rgba(var(--main-color-rgb), 0.4);
 }
 
 .slider {
