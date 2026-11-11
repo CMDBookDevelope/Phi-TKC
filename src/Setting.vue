@@ -158,7 +158,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { open } from '@tauri-apps/plugin-dialog';
 import { appConfigDir } from '@tauri-apps/api/path';
-import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
@@ -167,6 +167,7 @@ import { RULES as rules, toast, toastError, changeLocale } from './common';
 import { mainColor, bgColor, subColor } from './colorStore';
 import { isMobile } from './platform';
 import ColorDot from './components/ColorDot.vue';
+import { backgroundPath, customBackgroundUrl as backgroundPreviewUrl, backgroundBusy, selectCustomBackground, clearCustomBackground, fixCurrentBackground, refreshApiBackground } from './background';
 
 const { t } = useI18n();
 const mobile = isMobile();
@@ -189,14 +190,8 @@ function applyLocale(value: string) {
 const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
 const selectedInfo = ref<string | null>(null);
 
-const backgroundPath = ref<string>(localStorage.getItem('customBackground') || '');
-
-const backgroundPreviewUrl = computed(() => {
-  if (backgroundPath.value) {
-    try { return convertFileSrc(backgroundPath.value); } catch { return backgroundPath.value; }
-  }
-  return '';
-});
+const selectingBackground = ref(false);
+const backgroundControlsBusy = computed(() => selectingBackground.value || backgroundBusy.value);
 
 async function selectFolder() {
   selectedInfo.value = null;
@@ -239,45 +234,41 @@ function clearPath() {
 }
 
 async function selectBackground() {
+  selectingBackground.value = true;
   try {
     const selected = await open({
       multiple: false,
       filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }],
-      defaultPath: await appConfigDir(),
+      ...(mobile ? {} : { defaultPath: await appConfigDir() }),
     });
     if (selected === null) return;
     const path = Array.isArray(selected) ? selected[0] : selected;
-    backgroundPath.value = path as string;
-    localStorage.setItem('customBackground', backgroundPath.value);
-    window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: backgroundPath.value }));
-    toast(t('settings.background.saved'), 'success');
+    const ok = await selectCustomBackground(path);
+    toast(t(ok ? 'settings.background.saved' : 'settings.background.fixFailed'), ok ? 'success' : 'error');
   } catch (err: any) {
     console.error('Failed to select background:', err);
     toast(String(err), 'error');
+  } finally {
+    selectingBackground.value = false;
   }
 }
 
-function clearBackground() {
+async function clearBackground() {
   if (!backgroundPath.value) {
     toast(t('settings.background.noCustom'), 'warning');
     return;
   }
-  backgroundPath.value = '';
-  localStorage.removeItem('customBackground');
-  window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: null }));
-  toast(t('settings.background.saved'), 'success');
+  const ok = await clearCustomBackground();
+  toast(t(ok ? 'settings.background.saved' : 'settings.background.fixFailed'), ok ? 'success' : 'error');
 }
 
 async function fixBackground() {
-  const ok = await window.fixCurrentBackground?.();
-  const stored = localStorage.getItem('customBackground');
-  if (stored) backgroundPath.value = stored;
+  const ok = await fixCurrentBackground();
   toast(t(ok ? 'settings.background.fixed' : 'settings.background.fixFailed'), ok ? 'success' : 'error');
 }
 
 async function refreshBackground() {
-  const ok = await window.refreshApiBackground?.();
-  backgroundPath.value = '';
+  const ok = await refreshApiBackground();
   toast(t(ok ? 'settings.background.saved' : 'settings.background.refreshFailed'), ok ? 'success' : 'error');
 }
 
@@ -714,19 +705,19 @@ onUnmounted(stopWatching);
         <div v-else class="blur-glass bg-preview empty">{{ t('settings.background.noCustom') }}</div>
 
         <div class="card-actions">
-          <v-btn variant="tonal" color="primary" @click="selectBackground">
+          <v-btn variant="tonal" color="primary" :disabled="backgroundControlsBusy" :loading="selectingBackground" @click="selectBackground">
             <v-icon icon="mdi-image-outline" size="18" class="mr-1" />
             <span>{{ t('settings.background.selectFile') }}</span>
           </v-btn>
-          <v-btn variant="tonal" color="primary" @click="fixBackground">
+          <v-btn variant="tonal" color="primary" :disabled="backgroundControlsBusy" @click="fixBackground">
             <v-icon icon="mdi-pin-outline" size="18" class="mr-1" />
             <span>{{ t('settings.background.fix') }}</span>
           </v-btn>
-          <v-btn variant="tonal" color="primary" @click="refreshBackground">
+          <v-btn variant="tonal" color="primary" :disabled="backgroundControlsBusy" @click="refreshBackground">
             <v-icon icon="mdi-refresh" size="18" class="mr-1" />
             <span>{{ t('settings.background.refresh') }}</span>
           </v-btn>
-          <v-btn variant="text" :disabled="!backgroundPath" :title="t('settings.background.clear')" @click="clearBackground">
+          <v-btn variant="text" :disabled="!backgroundPath || backgroundControlsBusy" :title="t('settings.background.clear')" @click="clearBackground">
             <v-icon icon="mdi-close" size="18" />
           </v-btn>
         </div>

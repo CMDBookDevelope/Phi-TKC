@@ -44,6 +44,14 @@
       ]
     },
     {
+      "identifier": "fs:allow-mkdir",
+      "allow": ["$APPDATA"]
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": ["$APPDATA/fixed_background.*", "$APPDATA/custom_background.*"]
+    },
+    {
       "identifier": "fs:allow-exists",
       "allow": [
         "$APPDATA/**",

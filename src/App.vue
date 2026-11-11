@@ -19,19 +19,16 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { convertFileSrc } from '@tauri-apps/api/core';
-import { appDataDir, join } from '@tauri-apps/api/path';
-import { readFile, writeFile, BaseDirectory } from '@tauri-apps/plugin-fs';
-import { fetch } from '@tauri-apps/plugin-http';
 import { useTheme } from 'vuetify';
 import { VSonner } from 'vuetify-sonner';
 
 import { mainColor, bgColor, subColor, loadCustomColors } from './colorStore';
 import { routeComponent } from './appState';
 import { isAndroid, isMobile } from './platform';
+import { API_BACKGROUND_URL, backgroundUrl, initializeBackground, refreshApiBackground, fixCurrentBackground } from './background';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -72,157 +69,16 @@ const navigateTo = (name: string) => {
 };
 
 // ===== Custom background =====
-// Three layers, in priority order: a user-picked image (`customBackground`), a
-// snapshot written to AppData by "fix background", and the remote random API image.
-const customBackground = ref<string | null>(null);
-const currentBgBase64 = ref<string | null>(null);
+const backgroundStyle = computed(() => ({
+  backgroundImage: `url("${backgroundUrl.value ?? API_BACKGROUND_URL}")`,
+  backgroundSize: 'cover',
+  backgroundPosition: 'center',
+  backgroundRepeat: 'no-repeat',
+  backgroundAttachment: 'fixed',
+}));
 
-const API_BACKGROUND_URL = 'https://api.yppp.net/api.php';
-
-function defaultBgStyle() {
-  return {
-    backgroundImage: `url("${API_BACKGROUND_URL}?t=${Date.now()}")`,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
-    backgroundAttachment: 'fixed',
-  };
-}
-
-const backgroundStyle = computed(() => {
-  if (customBackground.value) {
-    try {
-      const imgUrl = convertFileSrc(customBackground.value);
-      return {
-        backgroundImage: `url(${imgUrl})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundAttachment: 'fixed',
-      };
-    } catch {
-      return defaultBgStyle();
-    }
-  } else if (currentBgBase64.value) {
-    return {
-      backgroundImage: `url(${currentBgBase64.value})`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundRepeat: 'no-repeat',
-      backgroundAttachment: 'fixed',
-    };
-  } else {
-    return defaultBgStyle();
-  }
-});
-
-async function loadApiBackground(): Promise<boolean> {
-  try {
-    const res = await fetch(API_BACKGROUND_URL);
-    const blob = await res.blob();
-    const reader = new FileReader();
-    const base64 = await new Promise<string>((resolve, reject) => {
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error ?? new Error('Failed to read background image'));
-      reader.readAsDataURL(blob);
-    });
-    currentBgBase64.value = base64;
-    try {
-      localStorage.setItem('BgBase64', base64);
-    } catch (err) {
-      // A random API image can be several MB; localStorage has a ~5 MB quota.
-      console.warn('背景缓存写入失败（图片过大）', err);
-    }
-    customBackground.value = null;
-    return true;
-  } catch (err) {
-    console.error('加载 API 背景失败', err);
-    return false;
-  }
-}
-
-function loadCustomBackground(path: string) {
-  // The image is displayed through convertFileSrc(); no need to read it into memory.
-  customBackground.value = path;
-}
-
-function decodeBase64(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-function detectImageExtension(bytes: Uint8Array): string {
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg';
-  if (bytes.length >= 3 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'gif';
-  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50)
-    return 'webp';
-  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) return 'bmp';
-  // Tauri's asset protocol derives the MIME type from the extension; PNG is the
-  // safest fallback for unknown data.
-  return 'png';
-}
-
-async function refreshApiBackground(): Promise<boolean> {
-  customBackground.value = null;
-  currentBgBase64.value = null;
-  localStorage.removeItem('customBackground');
-  localStorage.removeItem('BgBase64');
-
-  const ok = await loadApiBackground();
-
-  window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: null }));
-  return ok;
-}
-
-async function fixCurrentBackground(): Promise<boolean> {
-  try {
-    let bytes: Uint8Array | null = null;
-    if (customBackground.value) {
-      bytes = new Uint8Array(await readFile(customBackground.value));
-    } else if (currentBgBase64.value) {
-      const [, pureBase64] = currentBgBase64.value.split(',');
-      if (pureBase64) bytes = decodeBase64(pureBase64);
-    }
-    if (!bytes?.length) {
-      console.warn('暂无可固定的背景图片');
-      return false;
-    }
-
-    // Keep the real format: the asset protocol serves the file by extension, and the
-    // random API image is often a JPEG even though the old code always wrote `.png`.
-    const fileName = `fixed_background.${detectImageExtension(bytes)}`;
-    await writeFile(fileName, bytes, { baseDir: BaseDirectory.AppData });
-
-    const savePath = await join(await appDataDir(), fileName);
-    customBackground.value = savePath;
-    localStorage.setItem('customBackground', savePath);
-    window.dispatchEvent(new CustomEvent('customBackgroundChanged', { detail: savePath }));
-
-    console.log('背景固定成功：', savePath);
-    return true;
-  } catch (err) {
-    console.error('固定背景失败：', err);
-    return false;
-  }
-}
-
-// Exposed for Setting.vue's background controls.
 window.refreshApiBackground = refreshApiBackground;
 window.fixCurrentBackground = fixCurrentBackground;
-
-function onBackgroundChanged(e: Event) {
-  const detail = (e as CustomEvent).detail;
-  if (detail === null || detail === '') {
-    customBackground.value = null;
-    localStorage.removeItem('customBackground');
-  } else {
-    customBackground.value = detail;
-    localStorage.setItem('customBackground', detail);
-  }
-}
 
 // ===== Theme colours =====
 function hexToRgb(hex: string): string {
@@ -293,28 +149,7 @@ function applyThemeColors() {
 onMounted(() => {
   loadCustomColors();
 
-  const stored = localStorage.getItem('customBackground');
-  if (stored && stored !== 'null') {
-    loadCustomBackground(stored);
-  }
-
-  const cachedBase64 = localStorage.getItem('BgBase64');
-  if (cachedBase64) {
-    currentBgBase64.value = cachedBase64;
-  }
-
-  // First run (or after clearing the cache): fetch the random API background through
-  // the HTTP plugin and cache it, instead of relying on a remote CSS URL that the CSP
-  // has to allow. `defaultBgStyle()` remains the fallback when the request fails.
-  if (!customBackground.value && !currentBgBase64.value) {
-    void loadApiBackground();
-  }
-
-  window.addEventListener('customBackgroundChanged', onBackgroundChanged as EventListener);
-});
-
-onUnmounted(() => {
-  window.removeEventListener('customBackgroundChanged', onBackgroundChanged as EventListener);
+  void initializeBackground();
 });
 
 // `immediate` so the stored colours are applied on first paint.

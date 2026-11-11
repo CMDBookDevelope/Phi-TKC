@@ -425,13 +425,12 @@ async fn preview_chart(mut params: RenderParams) -> Result<(), InvokeError> {
     .await
 }
 #[tauri::command]
-async fn post_render(app: tauri::AppHandle, queue: State<'_, TaskQueue>, mut params: RenderParams, output_path: Option<String>) -> Result<(), InvokeError> {
+async fn post_render(app: tauri::AppHandle, queue: State<'_, TaskQueue>, mut params: RenderParams, output_path: Option<String>) -> Result<u32, InvokeError> {
     prepare_platform_assets(app).await?;
     wrap_async(async move {
         params.path = localize_chart_path(&params.path)?;
         let output_path = output_path.map(PathBuf::from);
-        queue.post(params, output_path).await?;
-        Ok(())
+        Ok(queue.post(params, output_path).await?)
     })
     .await
 }

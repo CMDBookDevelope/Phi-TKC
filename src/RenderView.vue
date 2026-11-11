@@ -160,6 +160,7 @@ const stepIndex = ref(1),
 const chartInfo = ref<ChartInfo>();
 const pstBackgroundDim = ref(0);
 let chartPath = '';
+let renderTaskId: number | null = null;
 
 const choosingChart = ref(false),
   parsingChart = ref(false);
@@ -207,6 +208,7 @@ async function loadChart(file: string) {
   try {
     parsingChart.value = true;
     chartPath = file;
+    renderTaskId = null;
     renderCover.value = null;
     renderProgress.value = undefined;
     renderDuration.value = undefined;
@@ -298,7 +300,7 @@ async function postRender(): Promise<boolean | 'remote'> {
       return false;
     }
     const outputPath = localStorage.getItem('outputPath');
-    await invoke('post_render', { params, outputPath: outputPath || null });
+    renderTaskId = await invoke<number>('post_render', { params, outputPath: outputPath || null });
     return true;
   } catch (e) {
     toastError(e);
@@ -336,7 +338,9 @@ const renderMsg = ref(''),
   renderProgress = ref<number>(),
   renderDuration = ref<number>();
 const renderCover = ref<string | null>(null);
-let taskPollInterval: ReturnType<typeof setInterval> | null = null;
+let taskPollTimer: ReturnType<typeof setTimeout> | null = null;
+let taskPolling = false;
+let taskPollGeneration = 0;
 
 function formatDuration(seconds: number) {
   const duration = moment.duration(Math.round(seconds), 'seconds');
@@ -349,10 +353,15 @@ function formatDuration(seconds: number) {
 }
 
 async function pollRenderTask() {
-  if (disposed || !chartPath) return;
+  if (disposed || !taskPolling || renderTaskId === null) return;
+  const generation = taskPollGeneration;
+  const taskId = renderTaskId;
   try {
     const tasks = await invoke<Task[]>('get_tasks');
-    const task = tasks.find((item) => item.path === chartPath);
+    if (disposed || !taskPolling || generation !== taskPollGeneration || taskId !== renderTaskId) return;
+    // Android may import a document URI into a different path. The returned ID
+    // also keeps another render of the same chart from replacing this progress.
+    const task = tasks.find((item) => item.id === taskId);
     if (!task) return;
 
     if (!renderCover.value && task.cover) renderCover.value = task.cover;
@@ -402,21 +411,28 @@ async function pollRenderTask() {
     }
   } catch (e) {
     console.error('Failed to poll task status:', e);
+  } finally {
+    if (!disposed && taskPolling && generation === taskPollGeneration) {
+      taskPollTimer = setTimeout(pollRenderTask, 300);
+    }
   }
 }
 
 function startTaskPolling() {
   stopTaskPolling();
+  taskPolling = true;
   renderProgress.value = 0;
+  renderDuration.value = undefined;
   renderMsg.value = t('render-waiting');
   void pollRenderTask();
-  taskPollInterval = setInterval(pollRenderTask, 700);
 }
 
 function stopTaskPolling() {
-  if (taskPollInterval) {
-    clearInterval(taskPollInterval);
-    taskPollInterval = null;
+  taskPolling = false;
+  taskPollGeneration++;
+  if (taskPollTimer !== null) {
+    clearTimeout(taskPollTimer);
+    taskPollTimer = null;
   }
 }
 
@@ -503,6 +519,7 @@ function resetAndGoChoose() {
   stepIndex.value = 1;
   chartInfo.value = undefined;
   chartPath = '';
+  renderTaskId = null;
   renderCover.value = null;
   renderProgress.value = undefined;
   renderDuration.value = undefined;

@@ -435,7 +435,7 @@ async function saveConfig() {
 
 // `post_render` only enqueues the task (the queue worker renders serially), so the
 // old code marked every chart done immediately. Poll the real task status instead.
-async function waitForRender(chart: BatchChart): Promise<{ status: 'done' | 'failed' | 'canceled' | 'stopped'; error?: string }> {
+async function waitForRender(taskId: number): Promise<{ status: 'done' | 'failed' | 'canceled' | 'stopped'; error?: string }> {
   while (!disposed && isRenderingQueue.value) {
     let tasks: Task[];
     try {
@@ -445,7 +445,7 @@ async function waitForRender(chart: BatchChart): Promise<{ status: 'done' | 'fai
       await sleep(POLL_MS);
       continue;
     }
-    const task = tasks.find((item) => item.path === chart.path);
+    const task = tasks.find((item) => item.id === taskId);
     if (task) {
       currentTaskId.value = task.id;
       const status = task.status;
@@ -488,8 +488,9 @@ async function startRender() {
       renderMsg.value = t('rendering');
       try {
         if (!chart.chartInfo) throw new Error(t('chart-info-missing'));
-        await invoke('post_render', { params: { path: chart.path, info: chart.chartInfo, config }, outputPath });
-        const result = await waitForRender(chart);
+        const taskId = await invoke<number>('post_render', { params: { path: chart.path, info: chart.chartInfo, config }, outputPath });
+        currentTaskId.value = taskId;
+        const result = await waitForRender(taskId);
         if (result.status === 'done') {
           chart.status = 'done';
           completed++;
