@@ -160,7 +160,14 @@ pub async fn run() -> Result<()> {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_chart_picker::init())
-        .manage(TaskQueue::new())
+        .setup(|app| {
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            let cover_dir = Some(app.path().app_cache_dir()?.join("task-covers"));
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            let cover_dir = None;
+            app.manage(TaskQueue::new(cover_dir));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             is_the_only_instance,
             exit_program,

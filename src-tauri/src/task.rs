@@ -3,14 +3,14 @@ use crate::{
     render::{IPCEvent, RenderParams},
     ASSET_PATH,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Local;
 use prpr::fs;
 use serde::Serialize;
 use std::{
     io::Write,
     ops::DerefMut,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -25,6 +25,19 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{error, info};
+
+fn create_task_cover(cover_dir: Option<&Path>) -> Result<NamedTempFile> {
+    if let Some(dir) = cover_dir {
+        // Android's default /data/local/tmp is not writable by app UIDs. Use
+        // the app's cache on mobile, recreating it if the OS evicted it.
+        std::fs::create_dir_all(dir)
+            .with_context(|| format!("Failed to create task cover directory {}", dir.display()))?;
+        NamedTempFile::new_in(dir)
+            .with_context(|| format!("Failed to create task cover in {}", dir.display()))
+    } else {
+        Ok(NamedTempFile::new()?)
+    }
+}
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "snake_case", tag = "type")]
@@ -60,10 +73,15 @@ pub struct Task {
 }
 
 impl Task {
-    async fn new(id: u32, params: RenderParams, output_path: Option<PathBuf>) -> Result<Self> {
+    async fn new(
+        id: u32,
+        params: RenderParams,
+        output_path: Option<PathBuf>,
+        cover_dir: Option<&Path>,
+    ) -> Result<Self> {
         let mut fs = fs::fs_from_file(&params.path)?;
         let info = fs::load_info(fs.deref_mut()).await?;
-        let mut cover = NamedTempFile::new()?;
+        let mut cover = create_task_cover(cover_dir)?;
         let video = match params.config.video {
             true => "mov",
             false => "mp4",
@@ -457,9 +475,10 @@ pub struct TaskQueue {
     worker: JoinHandle<()>,
 
     tasks: Mutex<Vec<Arc<Task>>>,
+    cover_dir: Option<PathBuf>,
 }
 impl TaskQueue {
-    pub fn new() -> Self {
+    pub fn new(cover_dir: Option<PathBuf>) -> Self {
         let (sender, mut receiver) = mpsc::unbounded_channel::<Arc<Task>>();
         let task = tokio::spawn(async move {
             while let Some(task) = receiver.recv().await {
@@ -477,13 +496,14 @@ impl TaskQueue {
             worker: task,
 
             tasks: Mutex::default(),
+            cover_dir,
         }
     }
 
     pub async fn post(&self, params: RenderParams, output_path: Option<PathBuf>) -> Result<u32> {
         let mut guard = self.tasks.lock().await;
         let id = guard.len() as u32;
-        let task = Arc::new(Task::new(id, params, output_path).await?);
+        let task = Arc::new(Task::new(id, params, output_path, self.cover_dir.as_deref()).await?);
         guard.push(Arc::clone(&task));
         self.sender.send(task)?;
 
@@ -510,5 +530,39 @@ impl TaskQueue {
 impl Drop for TaskQueue {
     fn drop(&mut self) {
         self.worker.abort();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_task_cover;
+    use std::io::Write;
+
+    #[test]
+    fn private_cover_cache_is_created_and_files_are_cleaned_up() {
+        let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let cache = root.path().join("cache/task-covers");
+        let mut cover = create_task_cover(Some(&cache)).unwrap();
+        let other = create_task_cover(Some(&cache)).unwrap();
+        let path = cover.path().to_owned();
+        assert_eq!(path.parent(), Some(cache.as_path()));
+        assert_ne!(path, other.path());
+        cover.write_all(b"chart cover").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"chart cover");
+        drop(cover);
+        assert!(!path.exists());
+        drop(other);
+        std::fs::remove_dir(&cache).unwrap();
+        let restored = create_task_cover(Some(&cache)).unwrap();
+        assert_eq!(restored.path().parent(), Some(cache.as_path()));
+    }
+
+    #[test]
+    fn invalid_private_cache_does_not_fall_back_to_system_temp() {
+        let root = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let cache = root.path().join("task-covers");
+        std::fs::write(&cache, b"not a directory").unwrap();
+        let error = create_task_cover(Some(&cache)).unwrap_err();
+        assert!(error.to_string().contains("task cover directory"));
     }
 }
