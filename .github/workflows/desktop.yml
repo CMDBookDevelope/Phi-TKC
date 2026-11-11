@@ -99,7 +99,9 @@ jobs:
               -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 "$@"
           }
           use_ubuntu_archive() {
-            for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            # Hosted runners also use mirror+file sources whose URLs live in
+            # separate apt-mirrors lists rather than in the source definitions.
+            for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources /etc/apt/apt-mirrors*.txt; do
               if [ -f "$source" ]; then
                 sudo sed -i -E 's#https?://azure\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$source"
               fi
