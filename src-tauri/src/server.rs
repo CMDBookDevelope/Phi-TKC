@@ -209,7 +209,7 @@ pub async fn run(args: ServerArgs) -> Result<()> {
 
     log::info!("Phi-TKC render server listening on http://{addr}");
     log::info!("  WebUI: http://{addr}/");
-    log::info!("  WebSocket: ws://{addr}/render");
+    log::debug!("  WebSocket: ws://{addr}/render");
     if args.host == "127.0.0.1" || args.host == "localhost" {
         log::info!("  Only local connections are accepted; use `--host 0.0.0.0` for phones.");
     }
@@ -777,7 +777,7 @@ async fn run_job(state: AppState, id: &str) {
     // The chart archive, resource pack and avatar are only inputs: drop them as
     // soon as the renderer exits, keeping only the produced video for /download.
     cleanup_inputs(&input, &output).await;
-    log::info!("[server] job {id} ({name}) finished");
+    log::debug!("[server] job {id} ({name}) finished");
 }
 
 /// Remove every file in the job directory except the rendered output.

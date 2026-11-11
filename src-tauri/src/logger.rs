@@ -1,9 +1,55 @@
 //! Shared formatting for terminal diagnostics, including early startup failures.
 use colored::Colorize;
-use log::Level;
+use log::{Level, Log};
 use std::{io::Write, sync::Once};
 
 static INIT: Once = Once::new();
+
+/// Library INFO records describe rendering internals rather than task progress.
+/// Reclassify them before filtering, so `RUST_LOG=debug` restores diagnostics.
+fn terminal_level(level: Level, target: &str) -> Level {
+    if level == Level::Info
+        && ["prpr", "miniquad", "macroquad"].iter().any(|module| {
+            target.strip_prefix(*module).is_some_and(|suffix| {
+                suffix.is_empty() || suffix.starts_with("::")
+            })
+        })
+    {
+        Level::Debug
+    } else {
+        level
+    }
+}
+
+struct TerminalLogger(env_logger::Logger);
+
+impl log::Log for TerminalLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        self.0.enabled(
+            &log::Metadata::builder()
+                .level(terminal_level(metadata.level(), metadata.target()))
+                .target(metadata.target())
+                .build(),
+        )
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        self.0.log(
+            &log::Record::builder()
+                .args(*record.args())
+                .level(terminal_level(record.level(), record.target()))
+                .target(record.target())
+                .module_path(record.module_path())
+                .file(record.file())
+                .line(record.line())
+                .build(),
+        );
+    }
+
+    fn flush(&self) {
+        self.0.flush();
+    }
+}
 
 pub fn prefix(level: Level) -> String {
     let (face, label) = match level {
@@ -35,7 +81,11 @@ pub fn init() {
             }
             Ok(())
         });
-        let _ = builder.try_init();
+        let logger = builder.build();
+        let filter = logger.filter();
+        if log::set_boxed_logger(Box::new(TerminalLogger(logger))).is_ok() {
+            log::set_max_level(filter);
+        }
         std::panic::set_hook(Box::new(|panic| {
             log::error!("{panic}\n{}", std::backtrace::Backtrace::force_capture());
         }));

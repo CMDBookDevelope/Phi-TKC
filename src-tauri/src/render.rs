@@ -8,7 +8,7 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 // macros, which print raw lines on stderr and ignore RUST_LOG. Importing
 // the `log` macros explicitly shadows them, so every log line goes through
 // `init_colored_logger` (stdout + the coloured format).
-use log::{info, warn};
+use log::{debug, info, warn};
 use term_size::dimensions;
 use macroquad::{miniquad::{MipmapFilter, RenderPass as MQRenderPass, Texture, TextureFormat, TextureParams, TextureWrap}, prelude::*, window::miniquad_context};
 use prpr::{
@@ -734,12 +734,53 @@ struct VulkanPipe {
 }
 
 struct Nv12Pipe {
+    // Drop joins the reader before readback storage (and later the GPU context) is released.
+    direct: Option<crate::frame_handoff::FrameHandoff>,
     readback: crate::vulkan_readback::Nv12Readback,
     free: VecDeque<usize>,
     ptrs: Vec<usize>,
     frame_bytes: usize,
     pending: [Option<(u64, usize)>; 2],
     current_read: Option<usize>,
+}
+
+
+impl Nv12Pipe {
+    fn hand_off_completed(
+        &mut self,
+        index: u64,
+        read_slot: usize,
+        pipeline: Option<&FramePipeline>,
+    ) -> Result<(f64, f64)> {
+        if let Some(direct) = &mut self.direct {
+            direct.submit(index, read_slot).context("NV12 writer stopped")?;
+            return Ok((0., 0.));
+        }
+        let pipeline = pipeline.expect("copy handoff needs a frame pool");
+        let start = Instant::now();
+        let buf = pipeline.acquire_buf();
+        let wait = start.elapsed().as_secs_f64();
+        let start = Instant::now();
+        // The GPU fence for read_slot was consumed by the caller. Copy mode
+        // releases staging immediately and lends the CPU pool to the writer.
+        let src = unsafe { std::slice::from_raw_parts(self.ptrs[read_slot] as *const u8, self.frame_bytes) };
+        let dst = unsafe { std::slice::from_raw_parts_mut(pipeline.pool_addrs[buf] as *mut u8, self.frame_bytes) };
+        dst.copy_from_slice(src);
+        let copy = start.elapsed().as_secs_f64();
+        self.free.push_back(read_slot);
+        pipeline.push_job(buf);
+        Ok((wait, copy))
+    }
+
+    fn acquire_readback(&mut self) -> Result<(usize, f64)> {
+        if let Some(direct) = &mut self.direct {
+            let start = Instant::now();
+            let slot = direct.acquire_slot().context("NV12 writer stopped returning readback slots")?;
+            Ok((slot, start.elapsed().as_secs_f64()))
+        } else {
+            Ok((self.free.pop_front().expect("copy handoff exhausted readback slots"), 0.))
+        }
+    }
 }
 
 impl FramePipeline {
@@ -924,6 +965,7 @@ async fn render_impl(
     let process_start = Instant::now();
     let (vw, vh) = params.config.output_resolution()?;
     let path = params.path;
+    info!("Preparing chart: {}", path.display());
 
     let mut fs = fs::fs_from_file(&path)?;
 
@@ -932,7 +974,7 @@ async fn render_impl(
     let Some(ffmpeg) = find_ffmpeg()? else {
         bail!("FFmpeg not found")
     };
-    info!("Using ffmpeg: {}", ffmpeg);
+    debug!("Using ffmpeg: {}", ffmpeg);
 
     let mut painter = TextPainter::new(font);
 
@@ -968,7 +1010,7 @@ async fn render_impl(
     let offset = chart.offset.max(0.);
 
     let render_start_time = Instant::now();
-    info!(
+    debug!(
         "setup chart + audio load: {:.3}s",
         process_start.elapsed().as_secs_f64()
     );
@@ -976,12 +1018,13 @@ async fn render_impl(
     macro_rules! mark {
         ($name:literal) => {{
             let d = phase.elapsed().as_secs_f64();
-            info!("setup {}: {:.3}s", $name, d);
+            debug!("setup {}: {:.3}s", $name, d);
             phase = Instant::now();
             d
         }};
     }
 
+    info!("Mixing audio");
     send(IPCEvent::StartMixing);
     let target_sample_rate = params.config.target_audio;
     let sample_rate = 44100;
@@ -995,12 +1038,12 @@ async fn render_impl(
     let frame_duration = 1.0 / fps_f64;
     let audio_delay = params.config.audio_delay_frames as f64 * frame_duration;
 
-    //info!("=== Audio/Video Sync Configuration ===");
-    //info!("  Audio delay: {} frames", params.config.audio_delay_frames);
-    //info!("  Audio delay: {:.6} seconds", audio_delay);
-    //info!("  Frame duration: {:.6}s @ {}fps", frame_duration, params.config.fps);
-    //info!("  Sample delay: {} samples @ {}Hz", (audio_delay * sample_rate_f64).round() as i64, sample_rate);
-    //info!("======================================");
+    //debug!("=== Audio/Video Sync Configuration ===");
+    //debug!("  Audio delay: {} frames", params.config.audio_delay_frames);
+    //debug!("  Audio delay: {:.6} seconds", audio_delay);
+    //debug!("  Frame duration: {:.6}s @ {}fps", frame_duration, params.config.fps);
+    //debug!("  Sample delay: {} samples @ {}Hz", (audio_delay * sample_rate_f64).round() as i64, sample_rate);
+    //debug!("======================================");
 
     let audio_buffer_length = video_length + audio_delay.abs();
     let mut output = vec![0.0_f32; (audio_buffer_length * sample_rate_f64).ceil() as usize * 2];
@@ -1014,7 +1057,7 @@ async fn render_impl(
         let original_pos = O - chart.offset.min(0.) as f64;
         let pos = original_pos + audio_delay;
 
-        //info!("Music mixing: original_pos={:.6}s, delayed_pos={:.6}s", original_pos, pos);
+        //debug!("Music mixing: original_pos={:.6}s, delayed_pos={:.6}s", original_pos, pos);
 
         let start_index = (pos * sample_rate_f64).round() as usize * 2;
         let ratio = 1.0 / sample_rate_f64;
@@ -1039,7 +1082,7 @@ async fn render_impl(
                 time += ratio;
             }
         }
-        info!("music Time:{:?}", start_time.elapsed());
+        debug!("music Time:{:?}", start_time.elapsed());
     }
 
     let mut place = |pos: f64, clip: &AudioClip, volume: f32| {
@@ -1070,7 +1113,7 @@ async fn render_impl(
         let offset_f64 = offset as f64;
         let o_offset = O + offset_f64 + audio_delay;
 
-        //info!("SFX mixing: offset={:.6}s (includes {:.6}s delay)", o_offset, audio_delay);
+        //debug!("SFX mixing: offset={:.6}s (includes {:.6}s delay)", o_offset, audio_delay);
 
         let sfx_lut =
         [
@@ -1099,11 +1142,11 @@ async fn render_impl(
             }
         }
 
-        info!("sfx Time:{:?}", start_time.elapsed());
+        debug!("sfx Time:{:?}", start_time.elapsed());
     }
 
     let mut pos = O + length + A + audio_delay;
-    info!("Ending music start: {:.6}s", pos);
+    debug!("Ending music start: {:.6}s", pos);
 
     while place(pos, &ending, volume_music) != 0 && params.config.ending_length > 0.1 {
         pos += ending.frame_count() as f64 / sample_rate_f64;
@@ -1224,7 +1267,7 @@ async fn render_impl(
     if want_vulkan_video && !vulkan_video {
         warn!("Rust Vulkan encoder unavailable; falling back to the ffmpeg encoder");
     }
-    info!(
+    debug!(
         "Vulkan Video H.264: {} ({} source images, {}x{}, qp={})",
         if vulkan_video { "enabled" } else { "disabled" },
         video_context
@@ -1237,12 +1280,12 @@ async fn render_impl(
     );
     if want_vulkan_video {
         if params.config.bitrate_control.eq_ignore_ascii_case("CBR") {
-            info!(
+            debug!(
                 "Vulkan encoder is constant-QP: CBR target '{}' mapped to qp={}",
                 params.config.bitrate, qp
             );
         } else {
-            info!(
+            debug!(
                 "Vulkan encoder quality: CRF {} -> qp={}",
                 params.config.bitrate, qp
             );
@@ -1260,7 +1303,7 @@ async fn render_impl(
     let mut ffmpeg_nv12 = if !vulkan_video && yuvs.len() == 2 {
         match crate::vulkan_readback::Nv12Readback::new(vw, vh, 8) {
             Some(readback) => {
-                info!(
+                debug!(
                     "ffmpeg NV12: Vulkan async readback, {} slots, {:.2} MB/frame",
                     readback.slot_count(),
                     readback.frame_size() as f64 / 1048576.0
@@ -1693,7 +1736,7 @@ async fn render_impl(
         let mut tried = String::new();
         for enc in &dx_candidates {
             if probe_dx_encoder(ffmpeg.as_ref(), *enc) {
-                info!(
+                debug!(
                     "  DX upload path: probe OK -> {} ({} default device, -pix_fmt {}, -bf 0)",
                     enc.name, enc.hw, enc.pix
                 );
@@ -1712,7 +1755,7 @@ async fn render_impl(
                     continue;
                 }
                 if probe_dx_encoder(ffmpeg.as_ref(), enc) {
-                    info!("  DX upload path: {} unavailable ({}), switching codec to {} via {}",
+                    debug!("  DX upload path: {} unavailable ({}), switching codec to {} via {}",
                         params.config.video_codec, tried.trim_end(), codec.to_uppercase(), enc.name);
                     dx_selected = Some(enc);
                     dx_codec_switched = Some(codec);
@@ -1882,9 +1925,9 @@ async fn render_impl(
     }
 
     if vulkan_video {
-        info!("  (encoder probing skipped: the built-in Vulkan Video encoder produces the stream)");
+        debug!("  (encoder probing skipped: the built-in Vulkan Video encoder produces the stream)");
     }
-    info!(
+    debug!(
     "=== Encoder Selection ===\n\
      Video codec: {}\n\
      User preference: {}\n\
@@ -1925,12 +1968,12 @@ async fn render_impl(
     }
     );
     if !hw_errors.is_empty() {
-        info!("  --- Encoder Errors ---");
+        debug!("  --- Encoder Errors ---");
         for error in &hw_errors {
-            info!("    {}", error);
+            debug!("    {}", error);
         }
     }
-    info!("  Selected encoder: {}", if vulkan_video {
+    debug!("  Selected encoder: {}", if vulkan_video {
         "Vulkan Video H.264 (built-in; ffmpeg only remuxes with -c:v copy)"
     } else {
         ffmpeg_encoder
@@ -1943,12 +1986,12 @@ async fn render_impl(
             || encoder_availability.av1_amf
             || encoder_availability.av1_vulkan)
     {
-        info!(
+        debug!(
             "  Note: AV1 uses the CPU encoder (SVT-AV1) because hardware AV1 quality is clearly weaker."
         );
-        info!("  Note: it is much slower 閳?select the nvenc/amf encoder explicitly if you want speed.");
+        debug!("  Note: it is much slower 閳?select the nvenc/amf encoder explicitly if you want speed.");
     }
-    info!("=========================");
+    debug!("=========================");
 
     let ffmpeg_preset = match ffmpeg_encoder {
         "h264_amf" | "hevc_amf" | "av1_amf" => "-quality",
@@ -2036,11 +2079,11 @@ async fn render_impl(
     };
 
     if vulkan_video {
-        info!("  Speed preset: (built-in Vulkan Video encoder; the ffmpeg preset is not used)");
+        debug!("  Speed preset: (built-in Vulkan Video encoder; the ffmpeg preset is not used)");
     } else if ffmpeg_encoder.ends_with("_vulkan") {
-        info!("  Speed preset: (vulkan encoder takes no preset, ignoring the configured one)");
+        debug!("  Speed preset: (vulkan encoder takes no preset, ignoring the configured one)");
     } else {
-        info!("  Speed preset: {} {}", ffmpeg_preset, ffmpeg_preset_name);
+        debug!("  Speed preset: {} {}", ffmpeg_preset, ffmpeg_preset_name);
     }
 
     let bitrate_control = if params.config.bitrate_control == "CRF" {
@@ -2153,14 +2196,14 @@ async fn render_impl(
 
 
     if vulkan_video {
-        info!("Readback: none (Vulkan encoder reads GPU NV12 directly)");
+        debug!("Readback: none (Vulkan encoder reads GPU NV12 directly)");
     } else if nv12_mode {
-        info!(
+        debug!(
             "Readback: Vulkan NV12 {:.2} MB/frame, async ring (no per-frame fence wait)",
             (vw as f64 * vh as f64 * 1.5) / 1048576.
         );
     } else {
-        info!(
+        debug!(
             "Readback: RGBA {:.2} MB/frame, one transfer per frame",
             (vw as f64 * vh as f64 * 4.) / 1048576.
         );
@@ -2259,8 +2302,8 @@ async fn render_impl(
     };
     out_extra.push_str(av1_quality_extra);
     if !av1_quality_extra.is_empty() {
-        info!("  AV1 quality:{}", av1_quality_extra);
-        if speed_rank(preset_words.first().copied().unwrap_or("medium")) <= 3 { info!("  Note: for the best AV1 quality pick the VerySlow speed preset (SVT-AV1 preset 2)"); }
+        debug!("  AV1 quality:{}", av1_quality_extra);
+        if speed_rank(preset_words.first().copied().unwrap_or("medium")) <= 3 { debug!("  Note: for the best AV1 quality pick the VerySlow speed preset (SVT-AV1 preset 2)"); }
     out_extra.push_str(if vh > 576 {
         " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv" } else
     {
@@ -2313,7 +2356,7 @@ async fn render_impl(
     };
 
     let ffmpeg_frames = std::sync::Arc::new(AtomicU64::new(0));
-    info!("ffmpeg video args: {}", args2);
+    debug!("ffmpeg video args: {}", args2);
     let mut proc = {
         let mut cmd = cmd_hidden(&ffmpeg);
         cmd.args(global_args.split_whitespace());
@@ -2330,7 +2373,7 @@ async fn render_impl(
         cmd.args(input_args.split_whitespace())
             .arg(audio_output_file.path())
             .args(args2.split_whitespace())
-            .arg(output_path)
+            .arg(&output_path)
             .arg("-loglevel")
             .arg("error")
             .stdin(Stdio::piped())
@@ -2427,7 +2470,7 @@ async fn render_impl(
                     free_rx,
                 }),
                 None,
-                writer,
+                Some(writer),
                 Some(encoder_thread),
                 None,
                 None,
@@ -2436,47 +2479,54 @@ async fn render_impl(
             let ptrs = readback.writer_ptrs();
             let frame_bytes = readback.frame_size();
             let slot_count = readback.slot_count();
-            let mut nv12_pipeline = FramePipeline::new(frame_bytes);
-
-            nv12_pipeline.finish_init();
-
-            let nv12_pipeline = std::sync::Arc::new(nv12_pipeline);
-            let mut stdin = ffmpeg_stdin.take().unwrap();
-            let shared = std::sync::Arc::clone(&nv12_pipeline);
-
-            let writer = std::thread::Builder::new()
-                .name("ffmpeg-writer".to_owned())
-                .spawn(move || -> std::io::Result<u64> {
-                    let mut busy: u64 = 0;
-                    while let Some(buf) = shared.pop_job() {
-
+            // The previous memcpy handoff remains available for same-binary
+            // measurements and drivers where direct mapped reads are slower.
+            let direct_mode = std::env::var("PHITK_NV12_HANDOFF")
+                .map_or(true, |mode| !mode.eq_ignore_ascii_case("copy"));
+            let (writer, direct, nv12_pipeline) = if direct_mode {
+                let stdin = ffmpeg_stdin.take().unwrap();
+                // Nv12Pipe owns the allocations and drops this RAII handoff
+                // first. submit is only called after the frame fence is waited.
+                let handoff = unsafe {
+                    crate::frame_handoff::FrameHandoff::new_mapped(ptrs.clone(), frame_bytes, stdin)
+                }.context("failed to spawn direct NV12 writer")?;
+                debug!("NV12 handoff: direct mapped staging, {} slots", slot_count);
+                (None, Some(handoff), None)
+            } else {
+                let mut pipeline = FramePipeline::new(frame_bytes);
+                pipeline.finish_init();
+                let pipeline = std::sync::Arc::new(pipeline);
+                let mut stdin = ffmpeg_stdin.take().unwrap();
+                let shared = std::sync::Arc::clone(&pipeline);
+                let writer = std::thread::Builder::new()
+                    .name("ffmpeg-writer".to_owned())
+                    .spawn(move || -> std::io::Result<u64> {
+                        let mut busy: u64 = 0;
+                        while let Some(buf) = shared.pop_job() {
+                            let t = Instant::now();
+                            stdin.write_all(&shared.pool[buf])?;
+                            let d = t.elapsed().as_nanos() as u64;
+                            busy += d;
+                            shared.write_ns.fetch_add(d, Ordering::Relaxed);
+                            shared.write_count.fetch_add(1, Ordering::Relaxed);
+                            shared.write_max_ns.fetch_max(d, Ordering::Relaxed);
+                            shared.release_buf(buf);
+                        }
                         let t = Instant::now();
-                        stdin.write_all(&shared.pool[buf])?;
-                        let d = t.elapsed().as_nanos() as u64;
-
-                        busy += d;
-
-                        shared.write_ns.fetch_add(d, Ordering::Relaxed);
-                        shared.write_count.fetch_add(1, Ordering::Relaxed);
-                        shared.write_max_ns.fetch_max(d, Ordering::Relaxed);
-                        shared.release_buf(buf);
-
-                    }
-
-                    let t = Instant::now();
-
-                    stdin.flush()?;
-                    busy += t.elapsed().as_nanos() as u64;
-                    Ok(busy)
-
-                })
-                .context("failed to spawn ffmpeg writer thread")?;
+                        stdin.flush()?;
+                        busy += t.elapsed().as_nanos() as u64;
+                        Ok(busy)
+                    })
+                    .context("failed to spawn ffmpeg writer thread")?;
+                (Some(writer), None, Some(pipeline))
+            };
             (
                 None,
                 None,
                 writer,
                 None,
                 Some(Nv12Pipe {
+                    direct,
                     readback,
                     free: (0..slot_count).collect(),
                     ptrs,
@@ -2484,7 +2534,7 @@ async fn render_impl(
                     pending: std::array::from_fn(|_| None),
                     current_read: None,
                 }),
-                Some(nv12_pipeline),
+                nv12_pipeline,
             )
         } else {
             let mut pipeline = FramePipeline::new(frame_size);
@@ -2515,7 +2565,7 @@ async fn render_impl(
                     Ok(busy)
                 })
                 .context("failed to spawn ffmpeg writer thread")?;
-            (None, Some(pipeline), writer, None, None, None)
+            (None, Some(pipeline), Some(writer), None, None, None)
         };
 
     fn submit_frame(pipeline: &FramePipeline, target: &RenderTarget, frame_size: usize, ) -> Result<(f64, f64)> {
@@ -2539,11 +2589,11 @@ async fn render_impl(
 
     let total_frames = frames;
 
-    // Crate-based progress bar (indicatif). It draws on stderr, so the `info!`
+    // Crate-based progress bar (indicatif). It draws on stderr, so terminal
     // log lines on stdout stay readable. The GUI/server child passes
     // `log_mode == false` and reports progress through IPC instead, so it gets
     // a hidden bar.
-    let progress = if log_mode {
+    let progress = if log_mode && log::log_enabled!(log::Level::Info) {
         let pb = ProgressBar::with_draw_target(
             Some(out_frames),
             ProgressDrawTarget::stderr_with_hz(20),
@@ -2571,6 +2621,7 @@ async fn render_impl(
     let mut copy_time: f64 = 0.0;
     let gl = unsafe { get_internal_gl() };
     let spawn_s = mark!("ffmpeg spawn + threads");
+    info!("Rendering video ({} frames)", out_frames);
     let loop_start_time = Instant::now();
 
     for frame in 0..total_frames {
@@ -2586,30 +2637,13 @@ async fn render_impl(
                 let frame_slot = context.begin_offscreen_frame();
                 fence_wait_time += wait_start.elapsed().as_secs_f64();
 
-                if let Some((_index, read_slot)) = pipe.pending[frame_slot].take() {
-                    let pipeline = nv12_pipeline.as_ref().unwrap();
-                    let acquire_start = Instant::now();
-                    let buf = pipeline.acquire_buf();
-                    pool_wait_time += acquire_start.elapsed().as_secs_f64();
-                    let src = unsafe {
-                        std::slice::from_raw_parts(
-                            pipe.ptrs[read_slot] as *const u8,
-                            pipe.frame_bytes,
-                        )
-                    };
-                    let dst = unsafe {
-                        std::slice::from_raw_parts_mut(
-                            pipeline.pool_addrs[buf] as *mut u8,
-                            pipe.frame_bytes,
-                        )
-                    };
-                    let copy_start = Instant::now();
-                    dst.copy_from_slice(src);
-                    copy_time += copy_start.elapsed().as_secs_f64();
-                    pipe.free.push_back(read_slot);
-                    pipeline.push_job(buf);
+                if let Some((index, read_slot)) = pipe.pending[frame_slot].take() {
+                    let (wait, copy) = pipe.hand_off_completed(index, read_slot, nv12_pipeline.as_deref())?;
+                    pool_wait_time += wait;
+                    copy_time += copy;
                 }
-                let read_slot = pipe.free.pop_front().unwrap();
+                let (read_slot, wait) = pipe.acquire_readback()?;
+                pool_wait_time += wait;
                 pipe.current_read = Some(read_slot);
                 nv12_frame_slot = Some(frame_slot);
                 frame_slot
@@ -2695,6 +2729,7 @@ async fn render_impl(
 
     let loop_wall = loop_start_time.elapsed().as_secs_f64().max(1e-9);
     mark!("render loop");
+    info!("Finalizing video");
     let backlog_at_end = output_index.saturating_sub(ffmpeg_frames.load(Ordering::Relaxed) as u64);
     drop(vulkan_pipe);
     if let Some(thread) = encoder_thread {
@@ -2703,41 +2738,28 @@ async fn render_impl(
     if let Some(pipeline) = &pipeline {
         pipeline.push_stop();
     }
+    let mut direct_stats = None;
     if let Some(pipe) = &mut nv12_pipe {
         let context = miniquad_context().vulkan_context().unwrap();
         context.wait_offscreen_idle();
-
-        if let Some(pipeline) = &nv12_pipeline {
-            for slot in 0..pipe.pending.len() {
-                if let Some((_index, read_slot)) = pipe.pending[slot].take() {
-                    let buf = pipeline.acquire_buf();
-                    let src = unsafe {
-                        std::slice::from_raw_parts(
-                            pipe.ptrs[read_slot] as *const u8,
-                            pipe.frame_bytes,
-                        )
-                    };
-                    let dst = unsafe {
-                        std::slice::from_raw_parts_mut(
-                            pipeline.pool_addrs[buf] as *mut u8,
-                            pipe.frame_bytes,
-                        )
-                    };
-                    let copy_start = Instant::now();
-
-                    dst.copy_from_slice(src);
-                    copy_time += copy_start.elapsed().as_secs_f64();
-                    pipe.free.push_back(read_slot);
-                    pipeline.push_job(buf);
-                }
-            }
+        for (index, read_slot) in crate::frame_handoff::take_pending(&mut pipe.pending) {
+            let (_, copy) = pipe.hand_off_completed(index, read_slot, nv12_pipeline.as_deref())?;
+            copy_time += copy;
+        }
+        if let Some(direct) = &mut pipe.direct {
+            direct_stats = Some(direct.finish().context("failed to finish direct NV12 writer")?);
+        } else if let Some(pipeline) = &nv12_pipeline {
             pipeline.push_stop();
         }
     }
-    let writer_busy = match writer.join() {
-        Ok(Ok(busy)) => busy as f64 / 1e9,
-        Ok(Err(err)) => bail!("failed to write frames to ffmpeg: {err}"),
-        Err(_) => bail!("ffmpeg writer thread panicked"),
+    let writer_busy = if let Some(writer) = writer {
+        match writer.join() {
+            Ok(Ok(busy)) => busy as f64 / 1e9,
+            Ok(Err(err)) => bail!("failed to write frames to ffmpeg: {err}"),
+            Err(_) => bail!("ffmpeg writer thread panicked"),
+        }
+    } else {
+        direct_stats.as_ref().expect("missing NV12 writer").write_ns as f64 / 1e9
     };
     let video_status = proc.wait()?;
     mark!("drain + finalize");
@@ -2746,13 +2768,13 @@ async fn render_impl(
     if !video_status.success() { bail!("ffmpeg muxing failed ({video_status})"); }
     let elapsed = render_start_time.elapsed();
     let wall = elapsed.as_secs_f64().max(1e-9);
-    info!("Render Time: {:.2?}", elapsed);
-    info!(
+    debug!("Render Time: {:.2?}", elapsed);
+    debug!(
         "Writer thread blocked on video transport+ffmpeg: {:.2}s ({:.1}%)",
         writer_busy,
         writer_busy / wall * 100.
     );
-    info!(
+    debug!(
         "Render thread waits: readback DMA wait {:.2}s ({:.1}%) | frame pool exhausted {:.2}s ({:.1}%) | vulkan-encoder slot wait {:.2}s ({:.1}%) | offscreen fence wait {:.2}s ({:.1}%)",
         dma_wait_time, dma_wait_time / wall * 100.,
         pool_wait_time, pool_wait_time / wall * 100.,
@@ -2764,7 +2786,7 @@ async fn render_impl(
         .map(|c| c.frame_wait_ns as f64 / 1e9)
         .unwrap_or(0.0);
     if swap_wait_s > 0.0 {
-        info!(
+        debug!(
             "Swapchain frame fence wait: {:.2}s ({:.1}% of scene render) -> CPU-side scene recording {:.2}s",
             swap_wait_s,
             swap_wait_s / scene_render_time.max(1e-9) * 100.,
@@ -2780,7 +2802,7 @@ async fn render_impl(
         let writes = pipeline.write_count.load(Ordering::Relaxed).max(1);
         let write_ns = pipeline.write_ns.load(Ordering::Relaxed);
         let write_max_ns = pipeline.write_max_ns.load(Ordering::Relaxed);
-        info!(
+        debug!(
             "NV12 handoff: pool {} x {:.1} MiB | render thread blocked on a free buffer {}x, {:.2}s (max {:.1}ms) | writer queue max {} frames | staging->pool copy {:.2}s ({:.0} fps) | writer {} writes, {:.2}s inside write_all (max {:.1}ms, {:.0} MiB/s) | backlog when loop ended {} frames",
             pipeline.pool.len(),
             frame_bytes as f64 / (1 << 20) as f64,
@@ -2797,7 +2819,13 @@ async fn render_impl(
             backlog_at_end,
         );
     }
-    info!(
+    if let Some(stats) = direct_stats {
+        debug!(
+            "NV12 direct handoff: {} frames | staging->pool copy 0.00s | writer {:.2}s inside write_all/flush (max {:.1}ms/frame)",
+            stats.frames, stats.write_ns as f64 / 1e9, stats.max_write_ns as f64 / 1e6,
+        );
+    }
+    debug!(
         "prpr stage times: update {:.2}s ({:.0} fps) | scene render {:.2}s ({:.0} fps) | YUV convert {:.2}s ({:.0} fps) | NV12 copy/submit {:.2}s ({:.0} fps)",
         update_time,
         out_frames as f64 / update_time.max(1e-9),
@@ -2813,7 +2841,7 @@ async fn render_impl(
     progress.finish();
     let busy = (loop_wall - dma_wait_time - pool_wait_time - slot_wait_time - fence_wait_time)
         .max(1e-9);
-    info!(
+    debug!(
         "Render loop Time: {:.2}s | prpr avg fps: {:.0}  (busy {:.2}s of {:.2}s, i.e. render side is idle {:.1}%)",
         loop_wall,
         out_frames as f64 / busy,
@@ -2824,7 +2852,7 @@ async fn render_impl(
     let excluded_setup = mixing_s + audio_s + probe_s + spawn_s;
     let video_wall = (wall - excluded_setup).max(1e-9);
     if written > 0 {
-        info!(
+        debug!(
             "Video Pipeline Avg FPS: {:.0} ({} frames / {:.2}s of video pipeline; {:.2}s setup excluded: audio {:.2}s, encoder probe {:.2}s, ffmpeg spawn {:.2}s)",
             written as f64 / video_wall,
             written,
@@ -2835,14 +2863,15 @@ async fn render_impl(
             spawn_s,
         );
     } else {
-        info!("Video Pipeline Avg FPS: n/a (ffmpeg reported no progress)");
+        debug!("Video Pipeline Avg FPS: n/a (ffmpeg reported no progress)");
     }
     let total_wall = process_start.elapsed().as_secs_f64().max(1e-9);
-    info!(
+    debug!(
         "End-to-End Time: {:.2}s",
         total_wall,
     );
 
+    info!("Video saved to {} ({:.2}s)", output_path.display(), total_wall);
     send(IPCEvent::Done(render_start_time.elapsed().as_secs_f64()));
     Ok(())
 }
@@ -3239,18 +3268,19 @@ pub fn init_colored_logger() {
 }
 
 pub fn welcome_logger() {
-    log::info!("");
-    log::info!("{}", split_line(' ', Some("_|_|_|    _|        _|          _|_|_|_|_|  _|    _|  ")));
-    log::info!("{}", split_line(' ', Some("_|    _|  _|_|_|                    _|      _|  _|    ")));
-    log::info!("{}", split_line(' ', Some("_|_|_|    _|    _|  _|  _|_|_|_|    _|      _|_|      ")));
-    log::info!("{}", split_line(' ', Some("_|        _|    _|  _|              _|      _|  _|    ")));
-    log::info!("{}", split_line(' ', Some("_|        _|    _|  _|              _|      _|    _|  ")));
-    log::info!("");
-    log::info!("{}", split_line(' ', Some("  _|_|_|  _|        _|_|_|  ")));
-    log::info!("{}", split_line(' ', Some("_|        _|          _|    ")));
-    log::info!("{}", split_line(' ', Some("_|        _|          _|    ")));
-    log::info!("{}", split_line(' ', Some("_|        _|          _|    ")));
-    log::info!("{}", split_line(' ', Some("  _|_|_|  _|_|_|_|  _|_|_|  ")));
+    const WELCOME: &str = concat!(
+        " \x1b[0;1;35;95m_\x1b[0;1;31;91m__\x1b[0;1;33;93m__\x1b[0m  \x1b[0;1;36;96m_\x1b[0m     \x1b[0;1;31;91m_\x1b[0m     \x1b[0;1;36;96m__\x1b[0;1;34;94m__\x1b[0;1;35;95m__\x1b[0;1;31;91m_\x1b[0m \x1b[0;1;33;93m_\x1b[0m  \x1b[0;1;32;92m_\x1b[0;1;36;96m__\x1b[0;1;34;94m__\x1b[0;1;35;95m__\x1b[0m \n",
+        "\x1b[0;1;31;91m|\x1b[0m  \x1b[0;1;33;93m_\x1b[0;1;32;92m_\x1b[0m \x1b[0;1;36;96m\\|\x1b[0m \x1b[0;1;34;94m|\x1b[0m   \x1b[0;1;31;91m(\x1b[0;1;33;93m_)\x1b[0m   \x1b[0;1;36;96m|\x1b[0;1;34;94m__\x1b[0m   \x1b[0;1;31;91m_\x1b[0;1;33;93m_|\x1b[0m \x1b[0;1;32;92m|\x1b[0;1;36;96m/\x1b[0m \x1b[0;1;34;94m/\x1b[0m \x1b[0;1;35;95m__\x1b[0;1;31;91m__\x1b[0;1;33;93m|\x1b[0m\n",
+        "\x1b[0;1;33;93m|\x1b[0m \x1b[0;1;32;92m|_\x1b[0;1;36;96m_)\x1b[0m \x1b[0;1;34;94m|\x1b[0m \x1b[0;1;35;95m|\x1b[0;1;31;91m__\x1b[0m  \x1b[0;1;32;92m_\x1b[0m \x1b[0;1;36;96m__\x1b[0;1;34;94m__\x1b[0;1;35;95m__\x1b[0;1;31;91m|\x1b[0m \x1b[0;1;33;93m|\x1b[0m  \x1b[0;1;32;92m|\x1b[0m \x1b[0;1;36;96m'\x1b[0m \x1b[0;1;34;94m/\x1b[0m \x1b[0;1;35;95m|\x1b[0m     \n",
+        "\x1b[0;1;32;92m|\x1b[0m  \x1b[0;1;36;96m_\x1b[0;1;34;94m__\x1b[0;1;35;95m/|\x1b[0m \x1b[0;1;31;91m'\x1b[0;1;33;93m_\x1b[0m \x1b[0;1;32;92m\\|\x1b[0m \x1b[0;1;36;96m|\x1b[0;1;34;94m__\x1b[0;1;35;95m__\x1b[0;1;31;91m__\x1b[0;1;33;93m|\x1b[0m \x1b[0;1;32;92m|\x1b[0m  \x1b[0;1;36;96m|\x1b[0m  \x1b[0;1;35;95m<|\x1b[0m \x1b[0;1;31;91m|\x1b[0m     \n",
+        "\x1b[0;1;36;96m|\x1b[0m \x1b[0;1;34;94m|\x1b[0m    \x1b[0;1;31;91m|\x1b[0m \x1b[0;1;33;93m|\x1b[0m \x1b[0;1;32;92m|\x1b[0m \x1b[0;1;36;96m|\x1b[0m \x1b[0;1;34;94m|\x1b[0m      \x1b[0;1;32;92m|\x1b[0m \x1b[0;1;36;96m|\x1b[0m  \x1b[0;1;34;94m|\x1b[0m \x1b[0;1;35;95m.\x1b[0m \x1b[0;1;31;91m\\\x1b[0m \x1b[0;1;33;93m|\x1b[0;1;32;92m__\x1b[0;1;36;96m__\x1b[0m \n",
+        "\x1b[0;1;34;94m|_\x1b[0;1;35;95m|\x1b[0m    \x1b[0;1;33;93m|\x1b[0;1;32;92m_|\x1b[0m \x1b[0;1;36;96m|\x1b[0;1;34;94m_|\x1b[0;1;35;95m_|\x1b[0m      \x1b[0;1;36;96m|_\x1b[0;1;34;94m|\x1b[0m  \x1b[0;1;35;95m|\x1b[0;1;31;91m_|\x1b[0;1;33;93m\\_\x1b[0;1;32;92m\\_\x1b[0;1;36;96m__\x1b[0;1;34;94m__\x1b[0;1;35;95m|\x1b[0m\n",
+        "                                       \n",
+        "                                       \n",
+    );
+    for line in WELCOME.lines() {
+        log::info!("{line}");
+    }
 }
 
 fn split_line(fill: char, title: Option<&str>) -> String {

@@ -128,7 +128,7 @@ pub async fn main() -> Result<()> {
             let update = frame_times.iter().map(|it| it.0).sum::<f64>() / count;
             let render = frame_times.iter().map(|it| it.1).sum::<f64>() / count;
             let frame = frame_times.iter().map(|it| it.2).sum::<f64>() / count;
-            log::info!("preview t={elapsed:.1} cpu_fps={:.1} frame_fps={:.1} update_us={:.1} render_us={:.1}", count / frame_sum, 1.0 / frame, update * 1e6, render * 1e6);
+            log::debug!("preview t={elapsed:.1} cpu_fps={:.1} frame_fps={:.1} update_us={:.1} render_us={:.1}", count / frame_sum, 1.0 / frame, update * 1e6, render * 1e6);
             report_time = now;
         }
         if duration.map_or(false, |it| elapsed >= warmup + it) {
@@ -143,7 +143,7 @@ pub async fn main() -> Result<()> {
         let mut cpu: Vec<_> = measured.iter().map(|it| it.0 + it.1).collect();
         cpu.sort_by(f64::total_cmp);
         let p95 = cpu[((cpu.len() - 1) as f64 * 0.95) as usize];
-        log::info!("preview summary samples={} cpu_fps={:.1} frame_fps={:.1} update_us={:.1} render_us={:.1} cpu_p95_us={:.1}", measured.len(), 1.0 / (update + render), 1.0 / frame, update * 1e6, render * 1e6, p95 * 1e6);
+        log::debug!("preview summary samples={} cpu_fps={:.1} frame_fps={:.1} update_us={:.1} render_us={:.1} cpu_p95_us={:.1}", measured.len(), 1.0 / (update + render), 1.0 / frame, update * 1e6, render * 1e6, p95 * 1e6);
     }
 
     Ok(())

@@ -552,7 +552,7 @@ impl VulkanVideoEncoder {
             level_idc
         };
 
-        log::info!(
+        log::debug!(
             "[vulkan-encode] H.264 caps: max_coded={max_coded_w}x{max_coded_h}, max_dpb={max_dpb}, max_level={max_level_idc}, level={level_idc}, flags={:#x}, std_syntax={:#x}",
             h264_caps.flags.as_raw(),
             h264_caps.std_syntax_flags.as_raw(),
@@ -767,7 +767,7 @@ impl VulkanVideoEncoder {
             );
             h264_parameter_sets(&sps, &pps, is_444)
         });
-        log::info!(
+        log::debug!(
             "[vulkan-encode] H.264 parameter sets: {} bytes",
             params_bytes.len(),
         );
@@ -889,7 +889,7 @@ impl VulkanVideoEncoder {
             });
         }
 
-        log::info!(
+        log::debug!(
             "[vulkan-encode] initialized H.264 encoder {width}x{height} qp={qp} level={level_idc}",
         );
 
@@ -1705,7 +1705,7 @@ impl VulkanVideoEncoder {
 
         let max_level = av1_caps.max_level;
 
-        log::info!(
+        log::debug!(
             "[vulkan-encode] AV1 caps: coded={min_coded_w}x{min_coded_h}–{max_coded_w}x{max_coded_h}, max_dpb={max_dpb}, max_level={max_level}",
         );
 
@@ -1933,7 +1933,7 @@ impl VulkanVideoEncoder {
         guard.query_pool =
             unsafe { create_encode_query_pool(device, &mut video_profile_for_query) }?;
 
-        log::info!(
+        log::debug!(
             "[vulkan-encode] initialized AV1 {} encoder {coded_w}x{coded_h} (source {width}x{height}) qp={qp} level={level}",
             if is_444 { "4:4:4" } else { "4:2:0" },
         );

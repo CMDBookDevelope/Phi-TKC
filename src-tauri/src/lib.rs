@@ -4,6 +4,7 @@
 prpr::tl_file!("main" mtl);
 
 mod av1_level;
+mod frame_handoff;
 mod common;
 mod gpu_info;
 pub mod ipc;
@@ -726,7 +727,7 @@ fn get_rpe_charts() -> Result<Option<Vec<RPEChartInfo>>, InvokeError> {
                 }
             }
             for folder in folders {
-                log::info!("Found numeric folder: {:?}", folder);
+                log::debug!("Found numeric folder: {:?}", folder);
                 for line in BufReader::new(File::open(folder.join("info.txt"))?).lines() {
                     let line = line?;
                     let line = line.trim();
