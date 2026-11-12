@@ -245,13 +245,19 @@ jobs:
           version=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
           # All three formats use the resolved DLL closure, not the subset that
           # an installer happened to include before dependency collection.
+          # NSIS writes Tauri bundle metadata into its executable. Copy that
+          # final executable too so every package contains the same payload.
+          setup=$(ls src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/*.exe | head -n 1)
+          7z x "$setup" -oportable-installer -y
+          installed_binary=$(find portable-installer -type f -iname Phi-TKC.exe -print -quit)
+          test -n "$installed_binary"
           dll_args=()
           while IFS= read -r dll; do
             dll_args+=(--runtime-dll "$dll")
           done < <(find dist-windows-runtime -type f -iname '*.dll' ! -iname WebView2Loader.dll)
           python3 scripts/package-portable.py --app Phi-TKC --version "$version" \
             --target windows_x86_64 \
-            --binary src-tauri/target/x86_64-pc-windows-gnu/release/Phi-TKC.exe \
+            --binary "$installed_binary" \
             --assets src-tauri/assets --output dist-portable \
             --webview-loader dist-windows-runtime/WebView2Loader.dll "${dll_args[@]}"
           7z t dist-portable/*.zip

@@ -82,7 +82,13 @@ def main():
     for archive in args.archive:
         payload = check(archive, args.version)
         if reference is not None and payload != reference:
-            raise ValueError(f"{archive}: executable, DLLs or assets differ from the other packages")
+            missing = sorted(reference.keys() - payload.keys())
+            extra = sorted(payload.keys() - reference.keys())
+            changed = sorted(name for name in reference.keys() & payload.keys() if reference[name] != payload[name])
+            raise ValueError(
+                f"{archive}: package payload differs: "
+                f"missing={missing}, extra={extra}, changed={changed}"
+            )
         reference = payload
         reports[archive.name] = payload
     if args.report:
