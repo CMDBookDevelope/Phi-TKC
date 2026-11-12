@@ -183,8 +183,14 @@ jobs:
           # CDN answers with a 5xx often enough to have failed whole releases.
           # The build itself is idempotent, so retry it instead of going red on a
           # transient download error.
+          if [ "${{ runner.os }}" = Windows ]; then
+            # Resolve the final executable's DLL graph before NSIS is generated.
+            build_args=(--target x86_64-pc-windows-gnu --no-bundle)
+          else
+            build_args=(${{ matrix.args }})
+          fi
           for attempt in 1 2 3; do
-            if pnpm tauri build ${{ matrix.args }}; then
+            if pnpm tauri build "${build_args[@]}"; then
               exit 0
             fi
             echo "::warning::tauri build failed (attempt ${attempt}/3), retrying in 20s"
@@ -193,21 +199,31 @@ jobs:
           echo "::error::tauri build failed after 3 attempts"
           exit 1
 
-      # The GNU build links WebView2Loader.dll dynamically. If the bundler skips
-      # it the installer still builds fine and only fails on the user's machine,
-      # so verify the payload here instead of trusting the build.
-      - name: Check the Windows installer ships WebView2Loader.dll
+      - name: Collect Windows runtime dependencies
         if: runner.os == 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          setup=$(ls src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/*.exe | head -n 1)
-          listing="$(7z l "$setup")"
-          grep -q 'WebView2Loader\.dll' <<<"$listing" || {
-            echo "::error::$setup does not contain WebView2Loader.dll"
-            exit 1
-          }
-          echo "OK: $setup ships WebView2Loader.dll"
+          python3 scripts/check-windows-runtime.py
+          python3 scripts/windows-runtime.py collect \
+            --binary src-tauri/target/x86_64-pc-windows-gnu/release/Phi-TKC.exe \
+            --output dist-windows-runtime \
+            --tauri-config src-tauri/target/windows-runtime-tauri.json
+
+      - name: Bundle Windows installer with runtime dependencies
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if pnpm tauri bundle --target x86_64-pc-windows-gnu --bundles nsis \
+                --config src-tauri/target/windows-runtime-tauri.json; then
+              exit 0
+            fi
+            echo "::warning::Windows bundling failed (attempt ${attempt}/3), retrying in 20s"
+            sleep 20
+          done
+          exit 1
 
       - name: Package Linux portable archive
         if: matrix.label == 'linux-x86_64-deb'
@@ -227,35 +243,31 @@ jobs:
         run: |
           set -euo pipefail
           version=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
-          # Extract the already verified installer payload so portable builds ship
-          # the same DLLs as NSIS, including the GNU WebView2 loader.
-          setup=$(ls src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/*.exe | head -n 1)
-          7z x "$setup" -oportable-installer -y
-          loader=$(find portable-installer -type f -iname WebView2Loader.dll -print -quit)
-          test -n "$loader"
+          # All three formats use the resolved DLL closure, not the subset that
+          # an installer happened to include before dependency collection.
           dll_args=()
           while IFS= read -r dll; do
             dll_args+=(--runtime-dll "$dll")
-          done < <(find portable-installer -type f -iname '*.dll' ! -iname WebView2Loader.dll ! -path '*/$PLUGINSDIR/*')
+          done < <(find dist-windows-runtime -type f -iname '*.dll' ! -iname WebView2Loader.dll)
           python3 scripts/package-portable.py --app Phi-TKC --version "$version" \
             --target windows_x86_64 \
             --binary src-tauri/target/x86_64-pc-windows-gnu/release/Phi-TKC.exe \
             --assets src-tauri/assets --output dist-portable \
-            --webview-loader "$loader" "${dll_args[@]}"
+            --webview-loader dist-windows-runtime/WebView2Loader.dll "${dll_args[@]}"
           7z t dist-portable/*.zip
-          python3 - <<'PYTHON'
-          import json, subprocess, tempfile, zipfile
-          from pathlib import Path
-          version = json.loads(Path('src-tauri/tauri.conf.json').read_text())['version']
-          with tempfile.TemporaryDirectory() as temp:
-              with zipfile.ZipFile(next(Path('dist-portable').glob('*.zip'))) as archive:
-                  archive.extractall(temp)
-              executable = next(Path(temp).glob('*/Phi-TKC.exe'))
-              result = subprocess.run([str(executable), '--version'], capture_output=True, text=True, encoding='utf-8', check=True)
-              assert version in result.stdout and 'INFO♪' in result.stdout, result.stdout
-              assert not result.stderr, result.stderr
-          print('Portable Windows binary runs with formatted logs')
-          PYTHON
+
+      - name: Verify Windows installer and portable packages in isolation
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
+          archives=()
+          for archive in src-tauri/target/x86_64-pc-windows-gnu/release/bundle/nsis/*.exe dist-portable/*.zip dist-portable/*.7z; do
+            archives+=(--archive "$archive")
+          done
+          python3 scripts/check-windows-package.py --version "$version" \
+            "${archives[@]}" --report dist-portable/windows-runtime-check.json
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

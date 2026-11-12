@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Create archives with a runnable binary and adjacent renderer resources."""
 import argparse
+import importlib.util
 import shutil
 import subprocess
 import tarfile
@@ -29,6 +30,14 @@ def package(args):
             shutil.copy2(args.webview_loader, root / "WebView2Loader.dll")
             for dll in args.runtime_dll:
                 shutil.copy2(dll, root / dll.name)
+            # Check the staged package itself. The build's PATH and adjacent
+            # toolchain DLLs must not mask an incomplete portable payload.
+            spec = importlib.util.spec_from_file_location(
+                "windows_runtime", Path(__file__).with_name("windows-runtime.py")
+            )
+            runtime = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(runtime)
+            runtime.audit(root / binary.name, root, [root / "WebView2Loader.dll"])
         else:
             # The CLI has an explicit assets flag; let the caller override it.
             cli_assets = ""
