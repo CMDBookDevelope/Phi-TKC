@@ -37,10 +37,8 @@ body.is-android {
   padding-top: 0;
 }
 
-/* Android gesture bar sits on top of the WebView as well. */
-body.is-android .tk-bottomnav {
-  padding-bottom: 24px;
-}
+/* App.vue reserves status/gesture insets in the actual navigation heights so
+   Vuetify also keeps the scrolling content clear of those areas. */
 
 /* 选中白名单 */
 input,

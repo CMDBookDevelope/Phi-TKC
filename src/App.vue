@@ -19,7 +19,7 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useTheme } from 'vuetify';
@@ -40,6 +40,25 @@ const vuetifyTheme = useTheme();
 const mobile = isMobile();
 // Android ships the NDK MediaCodec renderer, so its render routes stay enabled.
 const android = isAndroid();
+const mobileTopInset = ref(android ? 26 : 0);
+const mobileBottomInset = ref(android ? 32 : 0);
+
+function updateMobileInsets() {
+  if (!mobile) return;
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)';
+  document.body.appendChild(probe);
+  const style = getComputedStyle(probe);
+  mobileTopInset.value = Math.max(android ? 26 : 0, parseFloat(style.paddingTop) || 0);
+  // Android WebViews often report zero for the gesture area. Reserve its usual
+  // 24px plus 8px of breathing room; iOS uses its reported home-indicator inset.
+  mobileBottomInset.value = android
+    ? Math.max(24, parseFloat(style.paddingBottom) || 0) + 8
+    : parseFloat(style.paddingBottom) || 0;
+  probe.remove();
+}
+
+updateMobileInsets();
 // The desktop rail is permanent, but Vuetify still honours `v-model`; starting closed
 // left the desktop app with no navigation at all (the app bar is mobile-only).
 const navOpen = ref(!mobile);
@@ -148,7 +167,10 @@ onMounted(() => {
   loadCustomColors();
 
   void initializeBackground();
+  if (mobile) window.addEventListener('resize', updateMobileInsets, { passive: true });
 });
+
+onUnmounted(() => window.removeEventListener('resize', updateMobileInsets));
 
 // `immediate` so the stored colours are applied on first paint.
 watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
@@ -164,7 +186,8 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
     <v-app-bar
       v-if="mobile"
       class="glass fluent-glass tk-appbar"
-      :style="android ? { top: '26px' } : undefined"
+      :height="64 + mobileTopInset"
+      :style="{ '--mobile-top-inset': `${mobileTopInset}px` }"
       density="compact"
       flat
     >
@@ -210,7 +233,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
       </template>
     </v-navigation-drawer>
 
-    <v-main class="tk-main" :style="android ? { paddingTop: '74px', '--tk-content-top': '74px' } : undefined">
+    <v-main class="tk-main">
       <router-view v-slot="{ Component }">
         <Suspense timeout="0">
           <template #default>
@@ -231,6 +254,8 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
       v-if="mobile"
       :model-value="String(route.name)"
       class="glass fluent-glass tk-bottomnav"
+      :height="58 + mobileBottomInset"
+      :style="{ paddingBottom: `${mobileBottomInset}px` }"
       grow
       flat
     >
@@ -338,15 +363,21 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 
 /* ===== Mobile (iOS/iPadOS/Android) ===== */
 .tk-appbar {
-  border-bottom: 1px solid rgba(var(--main-color-rgb), 0.12) !important;
+  top: 0 !important;
+  border-radius: 0 0 16px 16px !important;
+  border: 0 !important;
+  box-shadow: inset 0 -1px 0 rgba(var(--main-color-rgb), 0.12) !important;
+}
+.tk-appbar :deep(.v-toolbar__content) {
+  padding-top: var(--mobile-top-inset);
 }
 
 /* Bottom navigation: thumb-reachable primary destinations on phones. */
 .tk-bottomnav {
-  border-top: 1px solid rgba(var(--main-color-rgb), 0.14) !important;
+  border: 0 !important;
+  box-shadow: inset 0 1px 0 rgba(var(--main-color-rgb), 0.14) !important;
   background: rgba(var(--bg-color-rgb), 0.55) !important;
   backdrop-filter: blur(24px);
-  padding-bottom: env(safe-area-inset-bottom);
   z-index: 10;
 }
 .tk-bottomnav .v-btn {
@@ -370,9 +401,6 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 
 @media (pointer: coarse) {
   /* Keep content clear of the notch / home indicator. */
-  .tk-main {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
   .nav-logo {
     padding-top: max(12px, env(safe-area-inset-top));
   }
