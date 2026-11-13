@@ -52,11 +52,9 @@ const navItems = [
   { key: 'about', icon: 'mdi-information-outline', activeIcon: 'mdi-information' },
 ];
 
-// Bottom bar destinations. Batch rendering is desktop-only, so it does not earn
-// one of the five thumb slots; settings takes the last one.
+// RPE folder binding and batch rendering are desktop-only.
 const mobileNavItems = [
   { key: 'render', icon: 'mdi-play-circle-outline', activeIcon: 'mdi-play-circle' },
-  { key: 'rpe', icon: 'mdi-book-open-page-variant-outline', activeIcon: 'mdi-book-open-page-variant' },
   { key: 'tasks', icon: 'mdi-server-network-outline', activeIcon: 'mdi-server-network' },
   { key: 'about', icon: 'mdi-information-outline', activeIcon: 'mdi-information' },
   { key: 'setting', icon: 'mdi-cog-outline', activeIcon: 'mdi-cog' },
@@ -212,7 +210,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
       </template>
     </v-navigation-drawer>
 
-    <v-main class="tk-main" :style="android ? { paddingTop: '74px' } : undefined">
+    <v-main class="tk-main" :style="android ? { paddingTop: '74px', '--tk-content-top': '74px' } : undefined">
       <router-view v-slot="{ Component }">
         <Suspense timeout="0">
           <template #default>

@@ -75,6 +75,8 @@ en:
       sub: "Sub Color"
       submit: "Apply"
       saved: "Color saved!"
+      fromWallpaper: "Use wallpaper main color"
+      extractFailed: "Could not read the current wallpaper. Try another background."
 zh-CN:
   settings:
     outputPath:
@@ -151,6 +153,8 @@ zh-CN:
       sub: "辅色"
       submit: "应用"
       saved: "颜色已保存！"
+      fromWallpaper: "从壁纸取主色"
+      extractFailed: "无法读取当前壁纸，请尝试更换背景。"
 </i18n>
 
 <script setup lang="ts">
@@ -167,7 +171,8 @@ import { RULES as rules, toast, toastError, changeLocale } from './common';
 import { mainColor, bgColor, subColor } from './colorStore';
 import { isMobile } from './platform';
 import ColorDot from './components/ColorDot.vue';
-import { backgroundPath, customBackgroundUrl as backgroundPreviewUrl, backgroundBusy, selectCustomBackground, clearCustomBackground, fixCurrentBackground, refreshApiBackground } from './background';
+import { extractMainColor } from './themeColor.js';
+import { backgroundPath, backgroundUrl, customBackgroundUrl as backgroundPreviewUrl, backgroundBusy, selectCustomBackground, clearCustomBackground, fixCurrentBackground, refreshApiBackground } from './background';
 
 const { t } = useI18n();
 const mobile = isMobile();
@@ -191,7 +196,8 @@ const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
 const selectedInfo = ref<string | null>(null);
 
 const selectingBackground = ref(false);
-const backgroundControlsBusy = computed(() => selectingBackground.value || backgroundBusy.value);
+const extractingMainColor = ref(false);
+const backgroundControlsBusy = computed(() => selectingBackground.value || backgroundBusy.value || extractingMainColor.value);
 
 async function selectFolder() {
   selectedInfo.value = null;
@@ -291,6 +297,22 @@ function confirmColor(type: 'main' | 'bg' | 'sub') {
   if (type === 'main') saveColor('mainColor', tempMainColor.value);
   else if (type === 'bg') saveColor('bgColor', tempBgColor.value);
   else saveColor('subColor', tempSubColor.value);
+}
+
+async function useWallpaperColor() {
+  const source = backgroundUrl.value;
+  if (!source || backgroundControlsBusy.value) return;
+  extractingMainColor.value = true;
+  try {
+    const color = await extractMainColor(source, bgColor.value);
+    tempMainColor.value = color;
+    saveColor('mainColor', color);
+  } catch (error) {
+    console.error('Wallpaper color extraction failed', error);
+    toast(t('settings.colors.extractFailed'), 'error');
+  } finally {
+    extractingMainColor.value = false;
+  }
 }
 
 // ===== Render server (desktop) =====
@@ -726,6 +748,11 @@ onUnmounted(stopWatching);
       <!-- Theme colours -->
       <div class="md3-card glass fluent-glass" v-glass>
         <div class="card-label">{{ t('settings.colors.label') }}</div>
+        <div class="card-actions">
+          <v-btn variant="tonal" color="primary" prepend-icon="mdi-palette"
+            :loading="extractingMainColor" :disabled="!backgroundUrl || backgroundControlsBusy"
+            @click="useWallpaperColor">{{ t('settings.colors.fromWallpaper') }}</v-btn>
+        </div>
         <div class="color-row">
           <div class="color-item">
             <span class="color-label">{{ t('settings.colors.main') }}</span>
@@ -786,9 +813,17 @@ onUnmounted(stopWatching);
   max-width: 720px;
   margin: 0 auto;
   padding: 24px;
-  height: 100vh;
+  height: calc(100vh - var(--tk-content-top, var(--v-layout-top, 0px)) - var(--v-layout-bottom, 0px));
+  height: calc(100dvh - var(--tk-content-top, var(--v-layout-top, 0px)) - var(--v-layout-bottom, 0px));
+  min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* Override App.vue's generic full-viewport page minimum. On phones the inner
+   scroller must end above the bottom bar so the last (secondary) colour fits. */
+.settings-container.page-view {
+  min-height: 0;
 }
 
 .settings-scroll {
@@ -862,7 +897,7 @@ onUnmounted(stopWatching);
   display: flex;
   align-items: center;
   gap: 16px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .color-label {
   min-width: 100px;
@@ -883,9 +918,11 @@ onUnmounted(stopWatching);
     padding: 16px;
   }
   .color-item {
-    flex-direction: column;
-    align-items: flex-start;
     gap: 8px;
+  }
+  .color-label {
+    min-width: 0;
+    flex: 1;
   }
 }
 .server-hint {

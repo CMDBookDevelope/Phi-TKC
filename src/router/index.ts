@@ -12,6 +12,7 @@ import BatchRenderView from '../BatchRenderView.vue';
 import Setting from '../Setting.vue';
 
 import { useOnLoaded } from '../appState';
+import { isMobile } from '../platform';
 
 const onLoaded = useOnLoaded();
 
@@ -19,7 +20,8 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', name: 'render', component: RenderView },
-    { path: '/rpe', name: 'rpe', component: RPEView },
+    { path: '/rpe', name: 'rpe', component: RPEView,
+      beforeEnter: () => isMobile() ? { name: 'render', replace: true } : true },
     {
       path: '/tasks',
       name: 'tasks',

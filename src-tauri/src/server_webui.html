@@ -405,10 +405,12 @@
           </label>
         </div>
         <div class="actions">
+          <button class="btn ghost" id="wallpaperColor" disabled>从壁纸取主色</button>
           <button class="btn ghost" id="resetColors">恢复默认</button>
           <button class="btn ghost" id="refreshBg">换个背景</button>
           <span class="hint">与桌面端共用一套配色变量，背景与桌面端同源（api.yppp.net）</span>
         </div>
+        <p class="hint" id="colorHint" role="status"></p>
       </div>
 
       <div class="card glass fluent-glass">
@@ -470,7 +472,8 @@
   </div>
 </div>
 
-<script>
+<script type="module">
+import { extractMainColor } from '/theme-color.js';
 (() => {
   'use strict';
 
@@ -526,36 +529,75 @@
   // localStorage as `BgBase64`; the WebUI mirrors that so both look the same.
   const API_BACKGROUND_URL = 'https://api.yppp.net/api.php';
   const bgLayer = $('apiBg');
+  let currentBackground = null;
+  let backgroundBusy = false;
+  let extractingColor = false;
+  function updateBackgroundControls() {
+    $('wallpaperColor').disabled = !currentBackground || backgroundBusy || extractingColor;
+    $('refreshBg').disabled = backgroundBusy || extractingColor;
+  }
   const showBackground = (url) => {
+    currentBackground = url;
     bgLayer.style.backgroundImage = `url("${url}")`;
     bgLayer.classList.add('on');
+    updateBackgroundControls();
   };
   async function loadApiBackground() {
-    const cached = localStorage.getItem('BgBase64');
-    if (cached) { showBackground(cached); return; }
+    if (backgroundBusy) return;
+    backgroundBusy = true;
+    updateBackgroundControls();
     try {
-      const res = await fetch(API_BACKGROUND_URL, { cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const blob = await res.blob();
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error || new Error('read failed'));
-        reader.readAsDataURL(blob);
-      });
-      showBackground(base64);
+      const cached = localStorage.getItem('BgBase64');
+      if (cached) { showBackground(cached); return; }
       try {
-        localStorage.setItem('BgBase64', base64);
+        const res = await fetch(API_BACKGROUND_URL, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const blob = await res.blob();
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error || new Error('read failed'));
+          reader.readAsDataURL(blob);
+        });
+        showBackground(base64);
+        try {
+          localStorage.setItem('BgBase64', base64);
+        } catch (err) {
+          // A random API image can be several MB; localStorage has a ~5 MB quota.
+          console.warn('背景缓存写入失败（图片过大）', err);
+        }
       } catch (err) {
-        // A random API image can be several MB; localStorage has a ~5 MB quota.
-        console.warn('背景缓存写入失败（图片过大）', err);
+        // Direct URL still works as a plain CSS background, even without CORS.
+        console.warn('API 背景加载失败，改用直连地址', err);
+        showBackground(API_BACKGROUND_URL + '?t=' + Date.now());
       }
-    } catch (err) {
-      // Direct URL still works as a plain CSS background.
-      console.warn('API 背景加载失败，改用直连地址', err);
-      showBackground(API_BACKGROUND_URL + '?t=' + Date.now());
+    } finally {
+      backgroundBusy = false;
+      updateBackgroundControls();
     }
   }
+  $('wallpaperColor').addEventListener('click', async () => {
+    if (!currentBackground || backgroundBusy || extractingColor) return;
+    extractingColor = true;
+    updateBackgroundControls();
+    const hint = $('colorHint');
+    hint.textContent = '正在读取壁纸…';
+    try {
+      // When CORS denied the fetch, CSS can still display the direct random URL.
+      // Fetching it again for readback could produce an entirely different image.
+      if (!/^(data:|blob:)/i.test(currentBackground)) throw new Error('Wallpaper pixels are unavailable');
+      const color = await extractMainColor(currentBackground, localStorage.getItem('bgColor') || DEFAULTS.bgColor);
+      localStorage.setItem('mainColor', color);
+      applyColors();
+      hint.textContent = '主色已应用并保存';
+    } catch (error) {
+      console.error('Wallpaper color extraction failed', error);
+      hint.textContent = '无法读取当前壁纸，请尝试更换背景。';
+    } finally {
+      extractingColor = false;
+      updateBackgroundControls();
+    }
+  });
   $('refreshBg').addEventListener('click', () => {
     localStorage.removeItem('BgBase64');
     bgLayer.classList.remove('on');

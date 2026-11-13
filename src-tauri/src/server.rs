@@ -47,6 +47,7 @@ const WEBUI: &str = include_str!("server_webui.html");
 /// classes, colour variables, scrollbars and transitions instead of re-implementing
 /// them. `include_str!` keeps the single-file server binary self-contained.
 const WEBUI_CSS: &str = include_str!("../../src/assets/main.css");
+const THEME_COLOR_JS: &str = include_str!("../../src/themeColor.js");
 const LOGO_PNG: &[u8] = include_bytes!("../../public/phi-tklogo.png");
 const MAX_UPLOAD: usize = 256 * 1024 * 1024;
 
@@ -252,6 +253,7 @@ fn build_app(assets: PathBuf) -> Router {
         // mobile app connects to. Keep them distinct — do not alias one to the other.
         .route("/", get(webui))
         .route("/webui.css", get(webui_css))
+        .route("/theme-color.js", get(theme_color_js))
         .route("/phi-tklogo.png", get(logo))
         .route("/api/status", get(status))
         .route("/api/jobs", get(list_jobs))
@@ -312,6 +314,13 @@ async fn webui_css() -> impl IntoResponse {
 
 async fn logo() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "image/png")], LOGO_PNG)
+}
+
+async fn theme_color_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        THEME_COLOR_JS,
+    )
 }
 
 /// Live job snapshots for the mobile app (`ws://<host>/render`).
