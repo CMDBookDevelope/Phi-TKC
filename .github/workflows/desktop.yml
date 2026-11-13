@@ -38,7 +38,11 @@ jobs:
             platform: windows-latest
             # prpr-avc only ships ffmpeg static libs for the GNU triple, so the whole
             # app is built with the MinGW toolchain (this is what the old CI did).
-            toolchain: stable-x86_64-pc-windows-gnu
+            # tauri-build 2.6.3 assumes OUT_DIR is build/<package>-<hash>/out.
+            # Rust 1.100 changed it to build/<package>/<hash>/out, causing its
+            # GNU WebView2 scan to open release/build/build (os error 3).
+            # Keep the toolchain that passed the complete 1.2.5 Windows release.
+            toolchain: 1.99.1-x86_64-pc-windows-gnu
             rust-target: x86_64-pc-windows-gnu
             # `--target` has to be explicit. Without it tauri CLI (<= 2.11.x) hands
             # the bundler the triple it was compiled for (msvc), and the NSIS step
