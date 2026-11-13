@@ -64,6 +64,7 @@ en:
       saved: "Background saved!"
       fix: "Fix"
       refresh: "Refresh"
+      autoColorOnRefresh: "Auto-pick color on refresh"
       fixed: "Background successfully fixed"
       fixFailed: "Failed to fix the background"
       refreshFailed: "Failed to refresh the background"
@@ -142,6 +143,7 @@ zh-CN:
       saved: "背景已保存！"
       fix: "固定背景"
       refresh: "刷新背景"
+      autoColorOnRefresh: "刷新自动取色"
       fixed: "背景成功固定!"
       fixFailed: "固定背景失败"
       refreshFailed: "刷新背景失败"
@@ -158,7 +160,7 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { open } from '@tauri-apps/plugin-dialog';
 import { appConfigDir } from '@tauri-apps/api/path';
@@ -172,7 +174,7 @@ import { mainColor, bgColor, subColor } from './colorStore';
 import { isMobile } from './platform';
 import ColorDot from './components/ColorDot.vue';
 import { extractMainColor } from './themeColor.js';
-import { backgroundPath, backgroundUrl, customBackgroundUrl as backgroundPreviewUrl, backgroundBusy, selectCustomBackground, clearCustomBackground, fixCurrentBackground, refreshApiBackground } from './background';
+import { backgroundPath, backgroundUrl, customBackgroundUrl as backgroundPreviewUrl, backgroundBusy, autoColorOnRefresh, backgroundColorError, selectCustomBackground, clearCustomBackground, fixCurrentBackground, refreshApiBackground } from './background';
 
 const { t } = useI18n();
 const mobile = isMobile();
@@ -275,7 +277,8 @@ async function fixBackground() {
 
 async function refreshBackground() {
   const ok = await refreshApiBackground();
-  toast(t(ok ? 'settings.background.saved' : 'settings.background.refreshFailed'), ok ? 'success' : 'error');
+  if (ok && backgroundColorError.value) toast(t('settings.colors.extractFailed'), 'error');
+  else toast(t(ok ? 'settings.background.saved' : 'settings.background.refreshFailed'), ok ? 'success' : 'error');
 }
 
 // ===== Theme colours =====
@@ -284,6 +287,9 @@ async function refreshBackground() {
 const tempMainColor = ref(mainColor.value);
 const tempBgColor = ref(bgColor.value);
 const tempSubColor = ref(subColor.value);
+// Refreshing can apply a new accent outside the picker. Show that actual value
+// in the preview so a later Apply cannot accidentally restore the old colour.
+watch(mainColor, (color) => { tempMainColor.value = color; });
 
 function saveColor(colorKey: 'mainColor' | 'bgColor' | 'subColor', value: string) {
   localStorage.setItem(colorKey, value);
@@ -743,6 +749,8 @@ onUnmounted(stopWatching);
             <v-icon icon="mdi-close" size="18" />
           </v-btn>
         </div>
+        <v-switch v-model="autoColorOnRefresh" :label="t('settings.background.autoColorOnRefresh')"
+          :disabled="backgroundControlsBusy" color="primary" hide-details class="mt-2" />
       </div>
 
       <!-- Theme colours -->

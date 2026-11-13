@@ -410,6 +410,7 @@
           <button class="btn ghost" id="refreshBg">换个背景</button>
           <span class="hint">与桌面端共用一套配色变量，背景与桌面端同源（api.yppp.net）</span>
         </div>
+        <label class="hint"><input type="checkbox" id="autoColorOnRefresh" /> 刷新自动取色</label>
         <p class="hint" id="colorHint" role="status"></p>
       </div>
 
@@ -532,9 +533,15 @@ import { extractMainColor } from '/theme-color.js';
   let currentBackground = null;
   let backgroundBusy = false;
   let extractingColor = false;
+  const autoColorOnRefreshInput = $('autoColorOnRefresh');
+  autoColorOnRefreshInput.checked = localStorage.getItem('autoColorOnRefresh') !== 'false';
+  autoColorOnRefreshInput.addEventListener('change', () => {
+    localStorage.setItem('autoColorOnRefresh', String(autoColorOnRefreshInput.checked));
+  });
   function updateBackgroundControls() {
     $('wallpaperColor').disabled = !currentBackground || backgroundBusy || extractingColor;
     $('refreshBg').disabled = backgroundBusy || extractingColor;
+    autoColorOnRefreshInput.disabled = backgroundBusy || extractingColor;
   }
   const showBackground = (url) => {
     currentBackground = url;
@@ -542,13 +549,13 @@ import { extractMainColor } from '/theme-color.js';
     bgLayer.classList.add('on');
     updateBackgroundControls();
   };
-  async function loadApiBackground() {
-    if (backgroundBusy) return;
+  async function loadApiBackground(refresh = false) {
+    if (backgroundBusy || extractingColor) return;
     backgroundBusy = true;
     updateBackgroundControls();
     try {
       const cached = localStorage.getItem('BgBase64');
-      if (cached) { showBackground(cached); return; }
+      if (!refresh && cached) { showBackground(cached); return; }
       try {
         const res = await fetch(API_BACKGROUND_URL, { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -564,9 +571,18 @@ import { extractMainColor } from '/theme-color.js';
           localStorage.setItem('BgBase64', base64);
         } catch (err) {
           // A random API image can be several MB; localStorage has a ~5 MB quota.
+          localStorage.removeItem('BgBase64');
           console.warn('背景缓存写入失败（图片过大）', err);
         }
+        if (refresh && autoColorOnRefreshInput.checked) await pickWallpaperColor();
       } catch (err) {
+        if (refresh) {
+          // Retain A and its cache when downloading B fails. No colour read is
+          // started for a failed refresh or for the direct random-URL fallback.
+          console.error('背景刷新失败', err);
+          $('colorHint').textContent = '刷新背景失败，请重试。';
+          return;
+        }
         // Direct URL still works as a plain CSS background, even without CORS.
         console.warn('API 背景加载失败，改用直连地址', err);
         showBackground(API_BACKGROUND_URL + '?t=' + Date.now());
@@ -576,8 +592,8 @@ import { extractMainColor } from '/theme-color.js';
       updateBackgroundControls();
     }
   }
-  $('wallpaperColor').addEventListener('click', async () => {
-    if (!currentBackground || backgroundBusy || extractingColor) return;
+  async function pickWallpaperColor() {
+    if (!currentBackground || extractingColor) return;
     extractingColor = true;
     updateBackgroundControls();
     const hint = $('colorHint');
@@ -597,12 +613,13 @@ import { extractMainColor } from '/theme-color.js';
       extractingColor = false;
       updateBackgroundControls();
     }
+  }
+  $('wallpaperColor').addEventListener('click', () => {
+    if (backgroundBusy || extractingColor) return;
+    void pickWallpaperColor();
   });
   $('refreshBg').addEventListener('click', () => {
-    localStorage.removeItem('BgBase64');
-    bgLayer.classList.remove('on');
-    bgLayer.style.backgroundImage = '';
-    void loadApiBackground();
+    void loadApiBackground(true);
   });
   void loadApiBackground();
 

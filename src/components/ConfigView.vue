@@ -49,7 +49,7 @@ en:
   disable-loading: Skip Loading
   disable-loading-tips: May have issues
   chart_debug: Debug Mode
-  block-area-ui: 噪域Block Area
+  block-area-ui: Show UI above Block Area
   block-area-ui-tips: Draw the HUD above the block-area effect
   chart_ratio: Chart Scale
   buffer_size: Buffer Size
@@ -150,7 +150,7 @@ zh-CN:
   disable-loading: 渲染时跳过加载
   disable-loading-tips: 可能有问题
   chart_debug: 调试模式
-  block-area-ui: 噪域Block Area
+  block-area-ui: UI显示在噪域上层
   block-area-ui-tips: 开启后 UI 绘制在噪域效果之上
   chart_ratio: 谱面缩放
   buffer_size: 缓冲区

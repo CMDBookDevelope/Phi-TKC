@@ -64,6 +64,7 @@ export function toast(message: string, kind?: 'success' | 'info' | 'warning' | '
     duration: 2000,
     cardProps: {
       color: kind,
+      class: 'tk-toast blur-glass',
     },
   });
 }

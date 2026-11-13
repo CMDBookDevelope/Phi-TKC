@@ -181,7 +181,9 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
     <div class="custom-bg-layer" :style="backgroundStyle"></div>
     <div class="custom-bg-overlay"></div>
 
-    <v-sonner position="top-center" />
+    <Teleport to="body">
+      <v-sonner position="top-right" :offset="mobile ? 16 + mobileTopInset : 24" />
+    </Teleport>
 
     <v-app-bar
       v-if="mobile"
@@ -215,6 +217,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
           :prepend-icon="route.name === item.key ? item.activeIcon : item.icon"
           :title="t(item.key)"
           :active="route.name === item.key"
+          variant="text"
           class="nav-item"
           @click="navigateTo(item.key)"
         />
@@ -223,9 +226,10 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
       <template #append>
         <v-list nav density="compact" class="nav-list">
           <v-list-item
-            prepend-icon="mdi-cog-outline"
+            :prepend-icon="route.name === 'setting' ? 'mdi-cog' : 'mdi-cog-outline'"
             :title="t('setting')"
             :active="route.name === 'setting'"
+            variant="text"
             class="nav-item"
             @click="navigateTo('setting')"
           />
@@ -299,6 +303,12 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 .tk-nav {
   border-right: 1px solid rgba(var(--main-color-rgb), 0.12) !important;
   z-index: 10;
+  /* The shared glass transition replaces Vuetify's width transition. */
+  transition:
+    width 0.25s var(--md3-ease-standard),
+    transform 0.25s var(--md3-ease-standard),
+    box-shadow 0.2s ease-in-out,
+    backdrop-filter 0.2s ease-in-out !important;
 }
 
 .nav-logo {
@@ -319,15 +329,28 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 }
 .nav-item {
   border-radius: 12px;
-  margin-bottom: 2px;
-  color: rgba(var(--main-color-rgb), 0.65);
+  margin: 2px 0 !important;
+  background: var(--bg-color) !important;
+  color: var(--main-color) !important;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 .nav-item:hover {
-  background: rgba(var(--main-color-rgb), 0.1);
+  background: var(--bg-color) !important;
+  box-shadow: inset 0 0 0 1px rgba(var(--main-color-rgb), 0.4);
 }
-.nav-item.v-list-item--active {
-  color: var(--main-color);
-  background: rgba(var(--main-color-rgb), 0.16);
+.nav-item.v-list-item--active,
+.nav-item.v-list-item--active:hover {
+  color: var(--bg-color) !important;
+  background: var(--main-color) !important;
+}
+.nav-item :deep(.v-icon),
+.nav-item :deep(.v-list-item-title) {
+  color: inherit !important;
+  opacity: 1;
+}
+.nav-item :deep(.v-list-item__overlay),
+.nav-item :deep(.v-list-item__underlay) {
+  opacity: 0 !important;
 }
 
 /* ===== Main content ===== */
@@ -392,7 +415,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
    invert — otherwise they are primary-on-primary and invisible. */
 .tk-bottomnav .v-btn--active .v-icon,
 .tk-bottomnav .v-btn--active span {
-  color: #0d0d0f !important;
+  color: var(--bg-color) !important;
 }
 .tk-bottomnav .v-btn span {
   font-size: 11px;
@@ -406,6 +429,13 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
   }
   .nav-item {
     min-height: 48px; /* 44px+ touch target */
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tk-nav,
+  .nav-item {
+    transition: none !important;
   }
 }
 </style>

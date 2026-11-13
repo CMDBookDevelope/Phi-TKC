@@ -1,8 +1,10 @@
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { appDataDir } from '@tauri-apps/api/path';
 import { BaseDirectory, exists, mkdir, readFile, remove, writeFile } from '@tauri-apps/plugin-fs';
 import { fetch } from '@tauri-apps/plugin-http';
 import { isMobile } from './platform';
+import { mainColor, bgColor } from './colorStore';
+import { extractMainColor } from './themeColor.js';
 
 export const API_BACKGROUND_URL = 'https://api.yppp.net/api.php';
 export const backgroundPath = ref<string | null>(null);
@@ -10,6 +12,12 @@ export const customBackgroundUrl = ref<string | null>(null);
 export const apiBackgroundUrl = ref<string | null>(null);
 export const backgroundBusy = ref(false);
 export const backgroundUrl = computed(() => customBackgroundUrl.value ?? apiBackgroundUrl.value);
+export const autoColorOnRefresh = ref(localStorage.getItem('autoColorOnRefresh') !== 'false');
+export const backgroundColorError = ref(false);
+
+watch(autoColorOnRefresh, (enabled) => {
+  localStorage.setItem('autoColorOnRefresh', String(enabled));
+}, { flush: 'sync' });
 
 const formats = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
 const managedName = /^(?:custom|fixed)_background\.(png|jpe?g|gif|webp|bmp)$/;
@@ -147,11 +155,28 @@ export async function clearCustomBackground(): Promise<boolean> {
 
 export async function refreshApiBackground(): Promise<boolean> {
   return action(async () => {
+    backgroundColorError.value = false;
     // Keep the displayed image if fetching fails. Once B has loaded, discard
     // A's persisted snapshot before switching back to the API layer.
     await loadApiBackground();
     await cleanManagedFiles();
     setCustom(null, null);
+    if (autoColorOnRefresh.value) {
+      try {
+        // Sample B after the refresh has switched away from any fixed/custom A.
+        // extractMainColor waits for these exact data-URL bytes to decode; it
+        // never fetches another random wallpaper. Keep the controls busy until
+        // the colour is applied, so another action cannot change the source.
+        const color = await extractMainColor(backgroundUrl.value!, bgColor.value);
+        localStorage.setItem('mainColor', color);
+        mainColor.value = color;
+      } catch (error) {
+        // The wallpaper refresh succeeded. A colour-read failure must retain
+        // the old accent and must not be reported as a failed image download.
+        backgroundColorError.value = true;
+        console.error('Wallpaper color extraction failed', error);
+      }
+    }
   });
 }
 

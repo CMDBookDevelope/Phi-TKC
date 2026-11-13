@@ -16,8 +16,13 @@ const url = (bytes) => `data:image/${bytes[0] === 0xff ? 'jpeg' : 'png'};base64,
 
 function harness({ mobile = true, storage = new Map(), files = new Map() } = {}) {
   let network = async () => new Response(png(1));
+  let extraction = async () => '#99ccaa';
   let quota = false;
   const calls = [];
+  const colors = {
+    mainColor: vue.ref(storage.get('mainColor') || '#82b1ff'),
+    bgColor: vue.ref(storage.get('bgColor') || '#1e1e2e'),
+  };
   const key = (file, options) => options?.baseDir === 14 ? `app/${file}` : file;
   class FileReader {
     readAsDataURL(blob) {
@@ -31,6 +36,11 @@ function harness({ mobile = true, storage = new Map(), files = new Map() } = {})
   const modules = {
     vue,
     './platform': { isMobile: () => mobile },
+    './colorStore': colors,
+    './themeColor.js': { extractMainColor: (source, background) => {
+      calls.push(['extract', source, background]);
+      return extraction(source, background);
+    } },
     '@tauri-apps/api/path': { appDataDir: async () => '/container/new/com.cnmdbook.phi.tkc/' },
     '@tauri-apps/plugin-http': { fetch: (...args) => network(...args) },
     '@tauri-apps/plugin-fs': {
@@ -64,8 +74,9 @@ function harness({ mobile = true, storage = new Map(), files = new Map() } = {})
       removeItem: (name) => storage.delete(name),
     },
   });
-  return { store: exports, storage, files, calls,
+  return { store: exports, storage, files, calls, colors,
     network: (handler) => { network = handler; },
+    extraction: (handler) => { extraction = handler; },
     quota: () => { quota = true; } };
 }
 
@@ -177,4 +188,83 @@ test('cache quota failure removes the stale cached A while B remains fixable', a
   assert.equal(h.storage.has('BgBase64'), false);
   assert.equal(await h.store.fixCurrentBackground(), true);
   assert.deepEqual(h.files.get('app/fixed_background.png'), png(2));
+});
+
+test('explicit refresh picks only displayed B once and retains the background colour', async () => {
+  const h = harness({
+    storage: new Map([['BgBase64', url(png(1))], ['bgColor', '#224466'], ['subColor', '#aa66cc']]),
+  });
+  await h.store.initializeBackground();
+  await h.store.fixCurrentBackground();
+  assert.equal(h.calls.filter(([action]) => action === 'extract').length, 0,
+    'Startup and pinning must not automatically change the accent');
+  h.network(async () => new Response(png(2)));
+  h.extraction(async (source) => {
+    assert.equal(h.store.backgroundUrl.value, url(png(2)));
+    assert.equal(source, url(png(2)));
+    assert.equal(h.store.customBackgroundUrl.value, null);
+    assert.equal(h.store.backgroundBusy.value, true);
+    return '#cceeaa';
+  });
+  assert.equal(await h.store.refreshApiBackground(), true);
+  assert.deepEqual(h.calls.filter(([action]) => action === 'extract'), [['extract', url(png(2)), '#224466']]);
+  assert.equal(h.colors.mainColor.value, '#cceeaa');
+  assert.equal(h.storage.get('mainColor'), '#cceeaa');
+  assert.equal(h.storage.get('bgColor'), '#224466');
+  assert.equal(h.storage.get('subColor'), '#aa66cc');
+});
+
+test('disabled automatic colour selection is persisted across restart and does not sample', async () => {
+  const h = harness({ storage: new Map([['BgBase64', url(png(1))]]) });
+  assert.equal(h.store.autoColorOnRefresh.value, true);
+  h.store.autoColorOnRefresh.value = false;
+  assert.equal(h.storage.get('autoColorOnRefresh'), 'false');
+  const restarted = harness(h);
+  await restarted.store.initializeBackground();
+  assert.equal(restarted.store.autoColorOnRefresh.value, false);
+  restarted.network(async () => new Response(png(2)));
+  await restarted.store.refreshApiBackground();
+  assert.equal(restarted.store.backgroundUrl.value, url(png(2)));
+  assert.equal(restarted.colors.mainColor.value, '#82b1ff');
+  assert.equal(restarted.calls.filter(([action]) => action === 'extract').length, 0);
+  restarted.store.autoColorOnRefresh.value = true;
+  assert.equal(restarted.storage.get('autoColorOnRefresh'), 'true');
+});
+
+test('failed refresh never samples and a colour-read failure preserves the prior accent', async () => {
+  const h = harness({ storage: new Map([['BgBase64', url(png(1))], ['mainColor', '#abcdef']]) });
+  await h.store.initializeBackground();
+  h.network(async () => new Response('offline', { status: 503 }));
+  assert.equal(await h.store.refreshApiBackground(), false);
+  assert.equal(h.calls.filter(([action]) => action === 'extract').length, 0);
+  assert.equal(h.colors.mainColor.value, '#abcdef');
+  h.network(async () => new Response(png(2)));
+  h.extraction(async () => { throw new Error('Canvas readback unavailable'); });
+  assert.equal(await h.store.refreshApiBackground(), true, 'The wallpaper itself was refreshed');
+  assert.equal(h.store.backgroundUrl.value, url(png(2)));
+  assert.equal(h.store.backgroundColorError.value, true);
+  assert.equal(h.colors.mainColor.value, '#abcdef');
+  assert.equal(h.storage.get('mainColor'), '#abcdef');
+  assert.equal(h.store.backgroundBusy.value, false);
+  h.extraction(async () => '#cceeaa');
+  assert.equal(await h.store.refreshApiBackground(), true);
+  assert.equal(h.store.backgroundColorError.value, false);
+  assert.equal(h.colors.mainColor.value, '#cceeaa');
+});
+
+test('controls remain busy through asynchronous colour read and do not overlap a second refresh', { timeout: 2000 }, async () => {
+  const h = harness({ storage: new Map([['BgBase64', url(png(1))]]) });
+  await h.store.initializeBackground();
+  let resolve;
+  h.extraction(() => new Promise((done) => { resolve = done; }));
+  const pending = h.store.refreshApiBackground();
+  while (!resolve) await new Promise((done) => setImmediate(done));
+  assert.equal(h.store.backgroundBusy.value, true);
+  assert.equal(await h.store.refreshApiBackground(), false);
+  assert.equal(await h.store.fixCurrentBackground(), false);
+  assert.equal(h.calls.filter(([action]) => action === 'extract').length, 1);
+  resolve('#cceeaa');
+  assert.equal(await pending, true);
+  assert.equal(h.store.backgroundBusy.value, false);
+  assert.equal(h.colors.mainColor.value, '#cceeaa');
 });

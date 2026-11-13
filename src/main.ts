@@ -96,11 +96,16 @@ app.directive('glass', {
     let to = 0;
     let started = 0;
     let duration = 0;
+    let active = false;
 
     const read = () => parseFloat(el.style.getPropertyValue('--highlight-opacity')) || 0;
     const write = (v: number) => el.style.setProperty('--highlight-opacity', v.toFixed(3));
 
     const animate = (target: number, ms: number) => {
+      // Pointer moves can arrive faster than animation frames. Restarting the
+      // fade on each move keeps its elapsed time near zero, so a moving mouse
+      // never reveals the highlight. Only a change of target starts a fade.
+      if (to === target && (raf || Math.abs(read() - target) < 0.001)) return;
       if (raf) {
         cancelAnimationFrame(raf);
         raf = 0;
@@ -127,31 +132,49 @@ app.directive('glass', {
       raf = requestAnimationFrame(step);
     };
 
-    const handleMove = (e: PointerEvent) => {
+    const updatePosition = (e: PointerEvent) => {
       const rect = el.getBoundingClientRect();
       el.style.setProperty('--highlight-x', `${e.clientX - rect.left}px`);
       el.style.setProperty('--highlight-y', `${e.clientY - rect.top}px`);
+    };
+    const handleEnter = (e: PointerEvent) => {
+      active = true;
+      updatePosition(e);
       animate(1, GLASS_FADE_IN);
     };
-    const handleLeave = () => animate(0, GLASS_FADE_OUT);
+    const handleMove = (e: PointerEvent) => {
+      updatePosition(e);
+      if (!active) handleEnter(e);
+    };
+    const handleLeave = () => {
+      active = false;
+      animate(0, GLASS_FADE_OUT);
+    };
+    const handleUp = (e: PointerEvent) => {
+      // Releasing a mouse button leaves the pointer hovering over the panel.
+      // A touch has no hover state, so its release should still fade out.
+      if (e.pointerType === 'touch') handleLeave();
+    };
 
-    // Pointer events cover the mouse and touch alike: on a touchscreen the
-    // finger is implicitly captured, `pointerleave` arrives when it lifts.
+    // Enter shows the highlight even if the pointer stops immediately. Down
+    // covers touch input, whose implicit capture can suppress further enters.
+    el.addEventListener('pointerenter', handleEnter);
     el.addEventListener('pointermove', handleMove);
-    el.addEventListener('pointerdown', handleMove);
-    el.addEventListener('pointerup', handleLeave);
+    el.addEventListener('pointerdown', handleEnter);
+    el.addEventListener('pointerup', handleUp);
     el.addEventListener('pointerleave', handleLeave);
     el.addEventListener('pointercancel', handleLeave);
 
     // Stored on the element so `unmounted` can detach the exact handlers.
-    (el as any).__glassHandlers = { handleMove, handleLeave, cancel: () => raf && cancelAnimationFrame(raf) };
+    (el as any).__glassHandlers = { handleEnter, handleMove, handleLeave, handleUp, cancel: () => raf && cancelAnimationFrame(raf) };
   },
   unmounted(el: HTMLElement) {
     const handlers = (el as any).__glassHandlers;
     if (handlers) {
+      el.removeEventListener('pointerenter', handlers.handleEnter);
       el.removeEventListener('pointermove', handlers.handleMove);
-      el.removeEventListener('pointerdown', handlers.handleMove);
-      el.removeEventListener('pointerup', handlers.handleLeave);
+      el.removeEventListener('pointerdown', handlers.handleEnter);
+      el.removeEventListener('pointerup', handlers.handleUp);
       el.removeEventListener('pointerleave', handlers.handleLeave);
       el.removeEventListener('pointercancel', handlers.handleLeave);
       handlers.cancel?.();
