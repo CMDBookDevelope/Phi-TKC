@@ -15,9 +15,6 @@ import * as components from 'vuetify/components';
 import * as directives from 'vuetify/directives';
 import { aliases, mdi } from 'vuetify/iconsets/mdi';
 import 'vuetify/styles';
-// `vuetify-sonner` is a wrapper around vue-sonner and relies on its own stylesheet;
-// without it toasts render unstyled / invisible.
-import 'vuetify-sonner/style.css';
 
 import theme from './theme';
 

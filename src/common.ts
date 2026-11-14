@@ -1,4 +1,4 @@
-import { toast as sonnerToast } from 'vuetify-sonner';
+import { showToast, type ToastKind } from './toastStore';
 
 import { SUPPORTED_LOCALES, i18n } from './i18n';
 
@@ -59,14 +59,8 @@ export function changeLocale(locale: string) {
   moment.locale(momentLocale);
 }
 
-export function toast(message: string, kind?: 'success' | 'info' | 'warning' | 'error') {
-  sonnerToast(message, {
-    duration: 2000,
-    cardProps: {
-      color: kind,
-      class: 'tk-toast blur-glass',
-    },
-  });
+export function toast(message: string, kind?: ToastKind) {
+  showToast(message, kind);
 }
 
 export function toastError(error: any) {

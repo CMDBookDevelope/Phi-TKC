@@ -23,7 +23,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useTheme } from 'vuetify';
-import { VSonner } from 'vuetify-sonner';
+import ToastHost from './components/ToastHost.vue';
 
 import { mainColor, bgColor, subColor, loadCustomColors } from './colorStore';
 import { routeComponent } from './appState';
@@ -182,7 +182,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
     <div class="custom-bg-overlay"></div>
 
     <Teleport to="body">
-      <v-sonner position="top-right" :offset="mobile ? 16 + mobileTopInset : 24" />
+      <ToastHost :offset="mobile ? 16 + mobileTopInset : 24" />
     </Teleport>
 
     <v-app-bar
@@ -301,6 +301,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 
 /* ===== Navigation ===== */
 .tk-nav {
+  background: rgba(var(--bg-color-rgb), 0.2) !important;
   border-right: 1px solid rgba(var(--main-color-rgb), 0.12) !important;
   z-index: 10;
   /* The shared glass transition replaces Vuetify's width transition. */
@@ -330,12 +331,12 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 .nav-item {
   border-radius: 12px;
   margin: 2px 0 !important;
-  background: var(--bg-color) !important;
+  background: rgba(var(--bg-color-rgb), 0.2) !important;
   color: var(--main-color) !important;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 .nav-item:hover {
-  background: var(--bg-color) !important;
+  background: rgba(var(--main-color-rgb), 0.1) !important;
   box-shadow: inset 0 0 0 1px rgba(var(--main-color-rgb), 0.4);
 }
 .nav-item.v-list-item--active,

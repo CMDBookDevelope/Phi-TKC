@@ -132,19 +132,14 @@ textarea,
   opacity: var(--highlight-opacity, 0); /* 初始透明，由 v-glass 指令切换 */
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
+/* Hide the scrollbar without changing any scroll container's overflow. */
+* {
+  scrollbar-width: none;
 }
-::-webkit-scrollbar-thumb {
-  transition: all 0.2s ease;
-  background: rgba(var(--main-color-rgb), 0.15);
-  border-radius: 1px;
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
-}
-::-webkit-scrollbar-thumb:hover {
-  transition: all 0.2s ease;
-  background: rgba(var(--main-color-rgb), 0.25);
+*::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* 工具文本类 */
@@ -343,35 +338,6 @@ input[type='number'] {
 }
 
 /* Snackbar */
-/* Sonner lives under body so page animations and navigation cannot trap it in
-   a lower stacking context. Its cards need a surface despite the VCard reset. */
-[data-sonner-toaster] {
-  z-index: 10000 !important;
-  --width: min(356px, calc(100vw - 32px)) !important;
-  width: var(--width) !important;
-}
-[data-sonner-toaster][data-x-position='right'] {
-  left: auto !important;
-  right: max(16px, env(safe-area-inset-right, 0px)) !important;
-}
-[data-sonner-toaster][data-y-position='top'] {
-  top: max(var(--offset), env(safe-area-inset-top, 0px)) !important;
-}
-[data-sonner-toaster] [data-sonner-toast] {
-  width: 100% !important;
-}
-.v-card.tk-toast.blur-glass {
-  min-width: 0 !important;
-  max-width: 100% !important;
-  width: 100%;
-  background: rgba(var(--bg-color-rgb), 0.78) !important;
-  color: var(--main-color) !important;
-  border: 1px solid rgba(var(--main-color-rgb), 0.25) !important;
-  border-radius: 16px !important;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-}
 .v-snackbar__wrapper {
   border-radius: 16px !important;
   background: rgba(var(--bg-color-rgb), 0.95) !important;

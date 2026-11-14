@@ -264,6 +264,10 @@ const STD_CHALLENGE_COLORS = ['white', 'green', 'blue', 'red', 'golden', 'rainbo
 const form = ref<VForm>();
 const activeCategory = ref('output');
 
+function revealCategory(event: FocusEvent) {
+  (event.currentTarget as HTMLElement).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
 const categories = [
   { key: 'output', icon: 'mdi-video-outline', labelKey: 'head-categories.output' },
   { key: 'recording', icon: 'mdi-music-note', labelKey: 'head-categories.record' },
@@ -695,7 +699,7 @@ async function replacePreset() {
   <v-form ref="form" class="config-root" @submit.prevent>
     <!-- Category chips -->
     <div class="cat-bar clear-glass">
-      <button v-for="cat in categories" :key="cat.key" type="button" class="cat-chip" :class="{ 'is-active': activeCategory === cat.key }" @click="activeCategory = cat.key">
+      <button v-for="cat in categories" :key="cat.key" type="button" class="cat-chip" :class="{ 'is-active': activeCategory === cat.key }" @click="activeCategory = cat.key" @focus="revealCategory">
         <v-icon :icon="cat.icon" size="18" />
         <span>{{ t(cat.labelKey) }}</span>
       </button>
@@ -1058,6 +1062,7 @@ async function replacePreset() {
 .settings-col {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
