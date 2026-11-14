@@ -116,6 +116,7 @@ struct AppState {
     /// Fan-out for the WebSocket clients (mobile app shows live progress).
     events: broadcast::Sender<String>,
     assets: PathBuf,
+    server_id: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -124,11 +125,13 @@ pub struct ServerStatus {
     pub running: bool,
     pub host: String,
     pub port: u16,
+    pub server_id: Option<String>,
 }
 
 struct Managed {
     host: String,
     port: u16,
+    server_id: String,
     stop: tokio::sync::watch::Sender<bool>,
 }
 
@@ -153,7 +156,7 @@ pub async fn start_managed(host: String, port: u16) -> Result<ServerStatus> {
     let bound_port = listener.local_addr()?.port();
 
     let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
-    let app = build_app(resolve_assets(""));
+    let (app, server_id) = build_app(resolve_assets(""));
     tokio::spawn(async move {
         let _ = axum::serve(listener, app)
             .with_graceful_shutdown(async move {
@@ -165,12 +168,14 @@ pub async fn start_managed(host: String, port: u16) -> Result<ServerStatus> {
     *managed().lock().unwrap() = Some(Managed {
         host: host.clone(),
         port: bound_port,
+        server_id: server_id.clone(),
         stop: stop_tx,
     });
     Ok(ServerStatus {
         running: true,
         host,
         port: bound_port,
+        server_id: Some(server_id),
     })
 }
 
@@ -191,11 +196,13 @@ pub fn managed_status() -> ServerStatus {
             running: true,
             host: managed.host.clone(),
             port: managed.port,
+            server_id: Some(managed.server_id.clone()),
         },
         None => ServerStatus {
             running: false,
             host: "127.0.0.1".to_string(),
             port: 6787,
+            server_id: None,
         },
     }
 }
@@ -215,17 +222,20 @@ pub async fn run(args: ServerArgs) -> Result<()> {
         log::info!("  Only local connections are accepted; use `--host 0.0.0.0` for phones.");
     }
 
-    let app = build_app(resolve_assets(&args.assets));
+    let (app, _) = build_app(resolve_assets(&args.assets));
     axum::serve(listener, app).await?;
     Ok(())
 }
 
-fn build_app(assets: PathBuf) -> Router {
+fn build_app(assets: PathBuf) -> (Router, String) {
     let (events, _) = broadcast::channel::<String>(32);
+    let server_id = format!("{}-{}-{}", std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos(), next_id());
     let state = AppState {
         jobs: Arc::new(Mutex::new(HashMap::new())),
         events: events.clone(),
         assets,
+        server_id: server_id.clone(),
     };
 
     // Push a full snapshot twice a second; clients do not need per-frame events and
@@ -248,7 +258,7 @@ fn build_app(assets: PathBuf) -> Router {
         }
     });
 
-    Router::new()
+    let app = Router::new()
         // `/` is the human-facing WebUI; `/render` is the WebSocket endpoint the
         // mobile app connects to. Keep them distinct — do not alias one to the other.
         .route("/", get(webui))
@@ -265,7 +275,8 @@ fn build_app(assets: PathBuf) -> Router {
         .layer(CorsLayer::permissive())
         // axum's default body limit is 2 MB, which rejects ordinary chart archives.
         .layer(DefaultBodyLimit::max(MAX_UPLOAD))
-        .with_state(state)
+        .with_state(state);
+    (app, server_id)
 }
 
 /// Resolve the renderer's asset folder.
@@ -356,6 +367,7 @@ async fn status(State(st): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "name": "Phi-TKC",
         "version": env!("CARGO_PKG_VERSION"),
+        "serverId": st.server_id,
         "busy": running,
         "queued": queued,
         "jobs": jobs.len(),
@@ -381,10 +393,17 @@ async fn get_job(State(st): State<AppState>, UrlPath(id): UrlPath<String>) -> Re
 }
 
 async fn cancel(State(st): State<AppState>, UrlPath(id): UrlPath<String>) -> Response {
-    let jobs = st.jobs.lock().await;
-    match jobs.get(&id) {
+    let mut jobs = st.jobs.lock().await;
+    match jobs.get_mut(&id) {
         Some(job) => {
-            job.cancel.store(true, Ordering::Relaxed);
+            // Completing and canceling use this same lock. A late/repeated
+            // request succeeds without changing a terminal result.
+            if matches!(job.view.status, "queued" | "mixing" | "running") {
+                job.cancel.store(true, Ordering::Relaxed);
+                if job.view.status == "queued" {
+                    job.view.status = "canceled";
+                }
+            }
             StatusCode::NO_CONTENT.into_response()
         }
         None => (StatusCode::NOT_FOUND, "job not found").into_response(),
@@ -737,9 +756,11 @@ fn build_config(
 }
 
 async fn run_job(state: AppState, id: &str) {
-    let (input, output, config, info, cancel, name) = {
-        let jobs = state.jobs.lock().await;
-        let Some(job) = jobs.get(id) else { return };
+    let (input, output, config, info, cancel, name, canceled_before_start) = {
+        let mut jobs = state.jobs.lock().await;
+        let Some(job) = jobs.get_mut(id) else { return };
+        let canceled = job.cancel.load(Ordering::Relaxed);
+        job.view.status = if canceled { "canceled" } else { "running" };
         (
             job.input.clone(),
             job.output.clone(),
@@ -747,13 +768,14 @@ async fn run_job(state: AppState, id: &str) {
             job.info.clone(),
             job.cancel.clone(),
             job.view.name.clone(),
+            canceled,
         )
     };
 
-    set_status(&state, id, |view| {
-        view.status = "running";
-    })
-    .await;
+    if canceled_before_start {
+        cleanup_inputs(&input, &output).await;
+        return;
+    }
 
     log::info!("[server] job {id} ({name}) started");
     let result = render_one(&state, id, &input, &output, &config, info.as_ref(), &cancel).await;
@@ -830,13 +852,17 @@ async fn render_one(
         config: config.clone(),
     };
 
-    let mut child = tokio::process::Command::new(std::env::current_exe()?)
+    let mut command = tokio::process::Command::new(std::env::current_exe()?);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let mut child = command
         .arg("render")
         .env("PHI_TKC_IPC", "1")
         .arg(&state.assets)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .context("failed to spawn the renderer")?;
 

@@ -254,6 +254,34 @@ input[type='number'] {
   color: rgba(var(--main-color-rgb), 0.4) !important;
 }
 
+/* Switches must remain visible on the glass surface before hover. Vuetify's
+   off-state surface colours track our background, leaving both parts dark. */
+.v-switch .v-switch__track {
+  opacity: 1;
+  border: 1px solid rgba(var(--main-color-rgb), 0.5);
+}
+.v-switch .v-selection-control:not(.v-selection-control--dirty) .v-switch__track {
+  background: rgba(var(--bg-color-rgb), 0.65);
+}
+.v-switch .v-switch__track.bg-primary {
+  background: var(--main-color) !important;
+}
+.v-switch .v-selection-control--dirty .v-switch__track {
+  border-color: transparent;
+}
+.v-switch .v-switch__thumb {
+  background: var(--main-color) !important;
+  color: var(--bg-color) !important;
+}
+.v-switch .v-selection-control--dirty .v-switch__thumb {
+  background: var(--bg-color) !important;
+  color: var(--main-color) !important;
+}
+.v-switch .v-selection-control--focus-visible .v-switch__track {
+  outline: 2px solid var(--main-color);
+  outline-offset: 3px;
+}
+
 /* Dialogs / overlays */
 .v-dialog .v-overlay__content > .v-card,
 .v-dialog .v-overlay__content > form > .v-card {

@@ -44,8 +44,9 @@ en:
 
   source-local: This device
   source-remote: Server
+  source-local-server: This PC's server
   download: Download
-  remote-offline: Server unreachable, showing local tasks only
+  remote-offline: 'Render server unreachable: {server}'
   remote-job: Remote job
 
 zh-CN:
@@ -93,8 +94,9 @@ zh-CN:
 
   source-local: 本机
   source-remote: 服务器
+  source-local-server: 本机服务
   download: 下载
-  remote-offline: 服务器连不上，只显示本机任务
+  remote-offline: '渲染服务器连不上：{server}'
   remote-job: 远程任务
 
 </i18n>
@@ -131,19 +133,35 @@ interface RemoteJob {
   duration?: number;
 }
 
-const remoteJobs = ref<RemoteJob[]>([]);
-const remoteBase = ref('');
-const remoteEnabled = ref(false);
-const remoteOnline = ref(false);
-const remoteError = ref('');
+interface ServerSource {
+  base: string;
+  kind: 'local-server' | 'remote';
+  serverId?: string;
+  jobs: RemoteJob[];
+}
+interface ManagedServerStatus {
+  running: boolean;
+  host: string;
+  port: number;
+  serverId?: string | null;
+}
+const serverSources = ref<ServerSource[]>([]);
+const serverErrors = ref<{ base: string; error: string }[]>([]);
+const canceling = ref(new Set<string>());
+let stopped = false;
+let sourceGeneration = 0;
+let localListGeneration = 0;
+const identityCache = new Map<string, string | null>();
 
 const ACTIVE_STATUSES = ['pending', 'loading', 'mixing', 'rendering'];
 const POLL_ACTIVE_MS = 300;
 const POLL_IDLE_MS = 2000;
 
 async function updateList() {
+  const generation = ++localListGeneration;
   try {
-    tasks.value = await invoke<Task[]>('get_tasks');
+    const list = await invoke<Task[]>('get_tasks');
+    if (!stopped && generation === localListGeneration) tasks.value = list;
   } catch (e) {
     console.error('Failed to refresh tasks:', e);
     tasks.value ??= [];
@@ -159,40 +177,76 @@ function normalizeBase(raw: string): string {
   let value = raw.trim().replace(/\/+$/, '');
   if (!value) return '';
   if (!/^https?:\/\//i.test(value)) value = `http://${value}`;
-  return value;
+  try { return new URL(value).toString().replace(/\/+$/, ''); } catch { return value; }
 }
 
-async function updateRemote() {
-  remoteBase.value = normalizeBase(localStorage.getItem('remoteRenderer') || '');
-  const enabled = localStorage.getItem('remoteConnected') === '1' && !!remoteBase.value;
-  remoteEnabled.value = enabled;
-  if (!enabled) {
-    remoteJobs.value = [];
-    remoteOnline.value = false;
-    remoteError.value = '';
-    return;
-  }
+function configuredRemote(): string {
+  return localStorage.getItem('remoteConnected') === '1'
+    ? normalizeBase(localStorage.getItem('remoteRenderer') || '') : '';
+}
+
+function managedBase(server: ManagedServerStatus): string {
+  let host = server.host.replace(/^\[|\]$/g, '');
+  if (host === '0.0.0.0' || host === '*') host = '127.0.0.1';
+  if (host === '::') host = '::1';
+  return normalizeBase(`http://${host.includes(':') ? `[${host}]` : host}:${server.port}`);
+}
+
+async function updateServers() {
+  const generation = ++sourceGeneration;
+  const remote = configuredRemote();
+  const sources: ServerSource[] = [];
+  const errors: { base: string; error: string }[] = [];
   try {
-    const list = (await invoke('remote_jobs', { base: remoteBase.value })) as RemoteJob[];
-    remoteJobs.value = Array.isArray(list) ? list : [];
-    remoteOnline.value = true;
-    remoteError.value = '';
+    const local = await invoke<ManagedServerStatus | null>('render_server_status');
+    if (local?.running) sources.push({
+      base: managedBase(local), kind: 'local-server', serverId: local.serverId || undefined, jobs: [],
+    });
   } catch (e) {
-    remoteJobs.value = [];
-    remoteOnline.value = false;
-    remoteError.value = String((e as Error)?.message || e);
+    errors.push({ base: t('source-local-server'), error: String(e) });
   }
+  const local = sources[0];
+  if (remote && remote !== local?.base) {
+    let serverId: string | null = null;
+    // Resolve identity when an endpoint or local server instance changes. LAN
+    // and loopback addresses can point to the same server; job IDs alone are
+    // not unique across distinct servers.
+    if (local?.serverId) {
+      const cacheKey = `${local.serverId} ${remote}`;
+      if (!identityCache.has(cacheKey)) {
+        try {
+          const status = await invoke<{ serverId?: string }>('remote_status', { base: remote });
+          identityCache.set(cacheKey, status?.serverId || null);
+        } catch { /* older/offline servers can still be queried for jobs below */ }
+      }
+      serverId = identityCache.get(cacheKey) || null;
+    }
+    if (!serverId || serverId !== local?.serverId) {
+      sources.push({ base: remote, kind: 'remote', serverId: serverId || undefined, jobs: [] });
+    }
+  }
+  await Promise.all(sources.map(async (source) => {
+    try {
+      const list = await invoke<RemoteJob[]>('remote_jobs', { base: source.base });
+      source.jobs = Array.isArray(list) ? list : [];
+    } catch (e) {
+      errors.push({ base: source.base, error: String((e as Error)?.message || e) });
+    }
+  }));
+  if (stopped || generation !== sourceGeneration || remote !== configuredRemote()) return;
+  serverSources.value = sources;
+  serverErrors.value = errors;
 }
 
-await Promise.all([updateList(), updateRemote()]);
+await Promise.all([updateList(), updateServers()]);
 
 // Adaptive polling: a fixed interval can stack calls when IPC is slower than the tick,
 // so chain the next tick only after the previous one settles.
-let stopped = false;
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
 function remoteBusy() {
-  return remoteJobs.value.some((job) => ['queued', 'mixing', 'running'].includes(job.status));
+  return serverSources.value.some((source) => source.jobs.some((job) =>
+    ['queued', 'mixing', 'running'].includes(job.status)));
 }
 
 function scheduleNextPoll() {
@@ -204,7 +258,7 @@ function scheduleNextPoll() {
 
 async function poll() {
   try {
-    await Promise.all([updateList(), updateRemote()]);
+    await Promise.all([updateList(), updateServers()]);
   } catch (e) {
     console.error('Failed to refresh tasks:', e);
   }
@@ -215,6 +269,8 @@ scheduleNextPoll();
 
 onUnmounted(() => {
   stopped = true;
+  sourceGeneration++;
+  localListGeneration++;
   if (pollTimer !== undefined) clearTimeout(pollTimer);
 });
 
@@ -248,13 +304,14 @@ function remoteStatus(job: RemoteJob): TaskStatus {
 
 interface Row {
   key: string;
-  source: 'local' | 'remote';
+  source: 'local' | 'local-server' | 'remote';
   name: string;
   path: string;
   cover: string;
   status: TaskStatus;
   task?: Task;
   job?: RemoteJob;
+  jobBase?: string;
 }
 
 // Union of this device's queue and the connected server's jobs. Local tasks
@@ -273,15 +330,16 @@ const rows = computed<Row[]>(() => {
       task,
     });
   }
-  for (const job of remoteJobs.value) {
+  for (const server of serverSources.value) for (const job of server.jobs) {
     out.push({
-      key: `remote-${job.id}`,
-      source: 'remote',
+      key: JSON.stringify([server.serverId || server.base, job.id]),
+      source: server.kind,
       name: job.name || t('remote-job'),
-      path: job.id,
+      path: `${server.base} · ${job.id}`,
       cover: '',
       status: remoteStatus(job),
       job,
+      jobBase: server.base,
     });
   }
   return out;
@@ -327,29 +385,27 @@ async function showFolder() {
   try { await invoke('show_folder'); } catch (e) { toastError(e); }
 }
 
-async function cancelTask(id: number) {
+async function cancelRow(row: Row) {
+  if (canceling.value.has(row.key)) return;
+  canceling.value.add(row.key);
   try {
-    await invoke('cancel_task', { id });
+    if (row.source === 'local' && row.task) {
+      await invoke('cancel_task', { id: row.task.id });
+    } else if (row.job && row.jobBase) {
+      await invoke('remote_cancel', { base: row.jobBase, id: row.job.id });
+    }
+    await Promise.all([updateList(), updateServers()]);
   } catch (e) {
     toastError(e);
+  } finally {
+    canceling.value.delete(row.key);
   }
 }
 
-async function cancelRow(row: Row) {
-  if (row.source === 'local' && row.task) return cancelTask(row.task.id);
-  if (row.source === 'remote' && row.job) {
-    try {
-      await invoke('remote_cancel', { base: remoteBase.value, id: row.job.id });
-    } catch (e) {
-      toastError(e);
-    }
-  }
-}
-
-async function downloadRemote(job: RemoteJob) {
-  if (!job.download) return;
+async function downloadRemote(row: Row) {
+  if (!row.job?.download || !row.jobBase) return;
   try {
-    await openUrl(`${remoteBase.value}${job.download}`);
+    await openUrl(`${row.jobBase}${row.job.download}`);
   } catch (e) {
     toastError(e);
   }
@@ -371,8 +427,8 @@ async function saveLog(text: string, name: string) {
 
 function showOutput(row: Row) {
   if (row.status.type !== 'done') return;
-  if (row.source === 'remote' && row.job) {
-    void downloadRemote(row.job);
+  if (row.source !== 'local' && row.job) {
+    void downloadRemote(row);
     return;
   }
   outputDialogMessage.value = row.status.output;
@@ -425,9 +481,9 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 
     <!-- Task list -->
     <div class="task-list">
-      <div v-if="remoteEnabled && !remoteOnline" class="remote-offline glass">
+      <div v-for="error in serverErrors" :key="error.base" class="remote-offline glass" :title="error.error">
         <v-icon icon="mdi-cloud-off-outline" size="18" class="mr-2" />
-        <span>{{ t('remote-offline') }}</span>
+        <span>{{ t('remote-offline', { server: error.base }) }}</span>
       </div>
 
       <div
@@ -452,8 +508,8 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
         <div class="task-info">
           <div class="task-header">
             <h3 class="task-name" :title="row.name">{{ row.name }}</h3>
-            <span v-if="row.source === 'remote'" class="source-chip">
-              <v-icon icon="mdi-cloud-outline" size="12" class="mr-1" />{{ t('source-remote') }}
+            <span v-if="row.source !== 'local'" class="source-chip">
+              <v-icon icon="mdi-cloud-outline" size="12" class="mr-1" />{{ t(row.source === 'local-server' ? 'source-local-server' : 'source-remote') }}
             </span>
             <span class="status-chip" :class="'chip-' + statusColor(row.status.type)">
               {{ t('chip.' + row.status.type) }}
@@ -469,7 +525,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
           </div>
 
           <p class="task-path" :title="row.path">
-            {{ row.source === 'remote' ? t('remote-job') + ' · ' + row.path : row.path }}
+            {{ row.source !== 'local' ? t('remote-job') + ' · ' + row.path : row.path }}
           </p>
 
           <div class="task-status">
@@ -493,7 +549,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 
           <div class="task-actions">
             <template v-if="['loading', 'mixing', 'rendering', 'pending'].includes(row.status.type)">
-              <v-btn variant="text" size="small" color="primary" @click="cancelRow(row)">
+              <v-btn variant="text" size="small" color="primary" :disabled="canceling.has(row.key)" :loading="canceling.has(row.key)" @click="cancelRow(row)">
                 <v-icon icon="mdi-cancel" size="16" class="mr-1" />
                 <span>{{ t('cancel') }}</span>
               </v-btn>
@@ -506,8 +562,8 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
             </template>
             <template v-else-if="row.status.type === 'done'">
               <v-btn variant="text" size="small" color="primary" @click="showOutput(row)">
-                <v-icon :icon="row.source === 'remote' ? 'mdi-download' : 'mdi-text-box-outline'" size="16" class="mr-1" />
-                <span>{{ row.source === 'remote' ? t('download') : t('show-output') }}</span>
+                <v-icon :icon="row.source !== 'local' ? 'mdi-download' : 'mdi-text-box-outline'" size="16" class="mr-1" />
+                <span>{{ row.source !== 'local' ? t('download') : t('show-output') }}</span>
               </v-btn>
               <!-- Desktop shell integration only (explorer / gdbus / open). -->
               <v-btn
@@ -586,7 +642,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
         <v-card-text>
           <div class="detail-list">
             <div class="detail-row"><span class="detail-label">{{ t('detail.name') }}</span><span>{{ selectedRow.name }}</span></div>
-            <div class="detail-row"><span class="detail-label">{{ t('detail.path') }}</span><span class="break-all">{{ selectedRow.source === 'remote' ? t('remote-job') + ' · ' + selectedRow.path : selectedRow.path }}</span></div>
+            <div class="detail-row"><span class="detail-label">{{ t('detail.path') }}</span><span class="break-all">{{ selectedRow.source !== 'local' ? t('remote-job') + ' · ' + selectedRow.path : selectedRow.path }}</span></div>
             <div class="detail-row"><span class="detail-label">{{ t('detail.status') }}</span><span>{{ describeStatus(selectedRow.status) }}</span></div>
             <div class="detail-row" v-if="selectedRow.status.type === 'rendering'">
               <span class="detail-label">{{ t('detail.progress') }}</span><span>{{ Math.round(selectedRow.status.progress * 100) }}%</span>

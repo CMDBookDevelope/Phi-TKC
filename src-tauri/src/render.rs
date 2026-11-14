@@ -290,15 +290,11 @@ struct EncoderAvailability {
 
 #[cfg(target_os = "windows")]
 mod hw_detect {
+    use super::cmd_hidden;
     use std::path::Path;
     use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
 
     pub fn detect_nvidia() -> bool {
-        use std::process::Command;
-        use winreg::enums::HKEY_LOCAL_MACHINE;
-        use winreg::RegKey;
-        use std::path::Path;
-
         if let Ok(key) = RegKey::predef(HKEY_LOCAL_MACHINE)
             .open_subkey(r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}")
         {
@@ -315,7 +311,7 @@ mod hw_detect {
         if Path::new(r"C:\Windows\System32\nvcuda.dll").exists() {
             return true;
         }
-        Command::new("nvidia-smi").output().is_ok()
+        cmd_hidden("nvidia-smi").output().is_ok()
     }
 
     pub fn detect_intel_qsv() -> bool {
@@ -356,16 +352,16 @@ mod hw_detect {
 
 #[cfg(target_os = "linux")]
 mod hw_detect {
+    use super::cmd_hidden;
     use std::path::Path;
-    use std::process::Command;
 
     pub fn detect_nvidia() -> bool {
-        Path::new("/dev/nvidia0").exists() || Command::new("nvidia-smi").status().is_ok()
+        Path::new("/dev/nvidia0").exists() || cmd_hidden("nvidia-smi").status().is_ok()
     }
 
     pub fn detect_intel_qsv() -> bool {
         Path::new("/dev/dri/renderD128").exists()
-            && Command::new("vainfo")
+            && cmd_hidden("vainfo")
             .output()
             .map(|out| String::from_utf8_lossy(&out.stdout).contains("VAProfileH264"))
             .unwrap_or(false)
@@ -373,7 +369,7 @@ mod hw_detect {
 
     pub fn detect_amd() -> bool {
         Path::new("/dev/kfd").exists()
-            && Command::new("vainfo")
+            && cmd_hidden("vainfo")
             .output()
             .map(|out| String::from_utf8_lossy(&out.stdout).contains("AMD"))
             .unwrap_or(false)
@@ -388,10 +384,10 @@ mod hw_detect {
 
 #[cfg(target_os = "macos")]
 mod hw_detect {
-    use std::process::Command;
+    use super::cmd_hidden;
 
     pub fn detect_nvidia() -> bool {
-        Command::new("system_profiler")
+        cmd_hidden("system_profiler")
             .args(&["SPDisplaysDataType"])
             .output()
             .map(|out| String::from_utf8_lossy(&out.stdout).contains("NVIDIA"))
@@ -399,7 +395,7 @@ mod hw_detect {
     }
 
     pub fn detect_intel_qsv() -> bool {
-        Command::new("system_profiler")
+        cmd_hidden("system_profiler")
             .args(&["SPDisplaysDataType"])
             .output()
             .map(|out| String::from_utf8_lossy(&out.stdout).contains("Intel"))
@@ -407,7 +403,7 @@ mod hw_detect {
     }
 
     pub fn detect_amd() -> bool {
-        Command::new("system_profiler")
+        cmd_hidden("system_profiler")
             .args(&["SPDisplaysDataType"])
             .output()
             .map(|out| String::from_utf8_lossy(&out.stdout).contains("AMD"))
@@ -415,7 +411,7 @@ mod hw_detect {
     }
 
     pub fn detect_vulkan() -> bool {
-        Command::new("sh")
+        cmd_hidden("sh")
             .arg("-c")
             .arg("ls /usr/local/lib/libMoltenVK.dylib 2>/dev/null || ls /opt/homebrew/lib/libMoltenVK.dylib 2>/dev/null || ls ~/Library/Frameworks/libMoltenVK.dylib 2>/dev/null")
             .status()
@@ -1254,9 +1250,21 @@ async fn render_impl(
     // The Vulkan Video encoder is driven from swapchain-backed frames; a
     // headless context has none, so fall back to the NV12 + ffmpeg path.
     let headless_vulkan = crate::vulkan_readback::headless_vulkan();
+    let amd_gpu = macroquad::window::miniquad_context().vulkan_context()
+        .map(|context| unsafe {
+            context.instance.get_physical_device_properties(context.physical_device).vendor_id == 0x1002
+        }).unwrap_or(false);
+    // RX 7900 XTX can stall inside the driver's video-session/DPB creation,
+    // before a fence timeout can apply. Keep rendering through the working
+    // AMF path even when an AMD user selected Vulkan; other GPUs keep Vulkan.
+    let amd_vulkan_fallback = amd_gpu && matches!(params.config.encoder.as_str(), "auto" | "vulkan");
+    if amd_vulkan_fallback && params.config.hardware_accel {
+        info!("AMD GPU: using FFmpeg AMF instead of Vulkan Video; software encoding is the fallback");
+    }
     let want_vulkan_video = params.config.hardware_accel
         && params.config.video_codec == "h264"
         && !headless_vulkan
+        && !amd_gpu
         && matches!(params.config.encoder.as_str(), "auto" | "vulkan");
     let mut video_context = if want_vulkan_video {
         crate::vulkan_video::VideoContext::new(vw, vh, qp, 16)
@@ -1378,7 +1386,7 @@ async fn render_impl(
         } else {
             None
         };
-        let mut cmd = Command::new(ffmpeg);
+        let mut cmd = cmd_hidden(ffmpeg);
 
         if encoder.ends_with("_vulkan") {
             cmd.args(&[
@@ -1422,7 +1430,7 @@ async fn render_impl(
 
     fn probe_dx_encoder(ffmpeg: &Path, enc: DxEncoder) -> bool {
         let device = format!("{}={}", enc.hw, DX_DEVICE);
-        let mut cmd = Command::new(ffmpeg);
+        let mut cmd = cmd_hidden(ffmpeg);
         cmd.args([
             "-init_hw_device",
             device.as_str(),
@@ -1456,8 +1464,8 @@ async fn render_impl(
         hevc_qsv: params.config.hardware_accel
             && params.config.video_codec == "hevc"
             && hw_detect::detect_intel_qsv(),
-        h264_amf: params.config.hardware_accel && hw_detect::detect_amd(),
-        hevc_amf: params.config.hardware_accel && params.config.video_codec == "hevc" && hw_detect::detect_amd(),
+        h264_amf: params.config.hardware_accel && (amd_gpu || hw_detect::detect_amd()),
+        hevc_amf: params.config.hardware_accel && params.config.video_codec == "hevc" && (amd_gpu || hw_detect::detect_amd()),
         h264_cuvid: params.config.hardware_accel && hw_detect::detect_nvidia(),
         hevc_cuvid: params.config.hardware_accel && params.config.video_codec == "hevc" && hw_detect::detect_nvidia(),
         av1_cuvid: params.config.hardware_accel && params.config.video_codec == "av1" && hw_detect::detect_nvidia(),
@@ -1469,7 +1477,7 @@ async fn render_impl(
             && hw_detect::detect_intel_qsv(),
         av1_amf: params.config.hardware_accel
             && params.config.video_codec == "av1"
-            && hw_detect::detect_amd(),
+            && (amd_gpu || hw_detect::detect_amd()),
         h264_vulkan: params.config.hardware_accel && hw_detect::detect_vulkan(),
         hevc_vulkan: params.config.hardware_accel
             && params.config.video_codec == "hevc"
@@ -1539,6 +1547,7 @@ async fn render_impl(
     };
     let vendors: Vec<[&str; 3]> = match params.config.encoder.as_str() {
         "cpu" => vec![],
+        "auto" | "vulkan" if amd_vulkan_fallback => vec![V_AMF, V_NV, V_QSV],
         "amf" => vec![V_AMF, V_NV, V_QSV, V_VK],
         "qsv" => vec![V_QSV, V_NV, V_AMF, V_VK],
         "vulkan" => vec![V_VK, V_NV, V_QSV, V_AMF],
@@ -1546,6 +1555,9 @@ async fn render_impl(
     };
     let mut hw_errors: Vec<String> = hw_errors;
     for v in vendors {
+        if amd_gpu && v == V_VK {
+            continue;
+        }
         // The built-in Vulkan encoder produces the stream itself; probing
         // ffmpeg's encoders would only mislabel the run and waste ~0.5s.
         if vulkan_video {
@@ -1615,7 +1627,7 @@ async fn render_impl(
                 ("libsvtav1", "matroska")
             };
 
-            let mut encode_cmd = Command::new(&ffmpeg);
+            let mut encode_cmd = cmd_hidden(&ffmpeg);
             encode_cmd.args(&[
                 "-f", "lavfi",
                 "-i", "testsrc=duration=1:size=320x240:rate=30",
@@ -1628,7 +1640,7 @@ async fn render_impl(
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
 
-            let mut decode_cmd = Command::new(&ffmpeg);
+            let mut decode_cmd = cmd_hidden(&ffmpeg);
             decode_cmd.args(&[
                 "-hwaccel", "cuvid",
                 "-hwaccel_device", "0",

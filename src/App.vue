@@ -256,6 +256,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
          zone instead of a hamburger drawer at the top of the screen. -->
     <v-bottom-navigation
       v-if="mobile"
+      tag="nav"
       :model-value="String(route.name)"
       class="glass fluent-glass tk-bottomnav"
       :height="58 + mobileBottomInset"
@@ -263,16 +264,18 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
       grow
       flat
     >
-      <v-btn
+      <button
         v-for="item in mobileNavItems"
         :key="item.key"
-        :value="item.key"
+        type="button"
         class="tk-bottomnav-btn"
+        :class="{ 'is-active': route.name === item.key }"
+        :aria-current="route.name === item.key ? 'page' : undefined"
         @click="navigateTo(item.key)"
       >
         <v-icon :icon="route.name === item.key ? item.activeIcon : item.icon" size="22" />
         <span>{{ t(item.key) }}</span>
-      </v-btn>
+      </button>
     </v-bottom-navigation>
   </v-app>
 </template>
@@ -399,26 +402,41 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 /* Bottom navigation: thumb-reachable primary destinations on phones. */
 .tk-bottomnav {
   border: 0 !important;
+  border-radius: 16px 16px 0 0 !important;
   box-shadow: inset 0 1px 0 rgba(var(--main-color-rgb), 0.14) !important;
-  background: rgba(var(--bg-color-rgb), 0.55) !important;
-  backdrop-filter: blur(24px);
+  background: rgba(var(--bg-color-rgb), 0.2) !important;
   z-index: 10;
 }
-.tk-bottomnav .v-btn {
-  min-height: 58px;
-  opacity: 0.66;
-  transition: opacity 0.2s ease, color 0.2s ease;
+.tk-bottomnav-btn {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  height: 50px;
+  margin: 4px 3px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: rgba(var(--bg-color-rgb), 0.2);
+  color: rgba(var(--main-color-rgb), 0.75);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
-.tk-bottomnav .v-btn.v-btn--active {
-  opacity: 1;
+.tk-bottomnav-btn.is-active {
+  background: rgba(var(--main-color-rgb), 0.16);
+  border-color: rgba(var(--main-color-rgb), 0.35);
+  color: var(--main-color);
 }
-/* The active pill is filled with the primary colour, so the icon and label must
-   invert — otherwise they are primary-on-primary and invisible. */
-.tk-bottomnav .v-btn--active .v-icon,
-.tk-bottomnav .v-btn--active span {
-  color: var(--bg-color) !important;
+.tk-bottomnav-btn:hover {
+  background: rgba(var(--main-color-rgb), 0.12);
 }
-.tk-bottomnav .v-btn span {
+.tk-bottomnav-btn:focus-visible {
+  outline: 2px solid var(--main-color);
+  outline-offset: -3px;
+}
+.tk-bottomnav-btn span {
   font-size: 11px;
   font-weight: 600;
 }
@@ -435,7 +453,8 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 
 @media (prefers-reduced-motion: reduce) {
   .tk-nav,
-  .nav-item {
+  .nav-item,
+  .tk-bottomnav-btn {
     transition: none !important;
   }
 }

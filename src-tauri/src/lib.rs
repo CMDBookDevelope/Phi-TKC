@@ -6,10 +6,12 @@ prpr::tl_file!("main" mtl);
 mod av1_level;
 mod frame_handoff;
 mod common;
+mod chart_archive;
 mod gpu_info;
 pub mod ipc;
 pub mod logger;
 mod preview;
+mod process_output;
 pub mod render;
 pub mod server;
 mod task;
@@ -176,6 +178,7 @@ pub async fn run() -> Result<()> {
             preview_chart,
             parse_chart,
             pick_chart,
+            pick_chart_folder,
             batch_add_tasks,
             post_render,
             get_tasks,
@@ -366,9 +369,8 @@ fn show_in_folder(path: &Path) -> Result<(), InvokeError> {
 
 /// Turn a picker result into a real file path.
 ///
-/// Android hands back `content://` URIs; `android_uri::resolve` imports those
-/// into the app cache. Every command that receives a chart path goes through
-/// this so the renderer never has to know about content URIs.
+/// Native pickers import into the app cache. Also accept legacy picker results:
+/// Android `content://` URIs and Apple percent-encoded `file://` URLs.
 fn localize_chart_path(path: &Path) -> Result<PathBuf> {
     #[cfg(target_os = "android")]
     {
@@ -376,23 +378,43 @@ fn localize_chart_path(path: &Path) -> Result<PathBuf> {
     }
     #[cfg(not(target_os = "android"))]
     {
+        if let Some(url) = path.to_str().filter(|value| value.starts_with("file:")) {
+            return url.parse::<tauri_plugin_fs::FilePath>()?
+                .into_path().context("Invalid chart file URL");
+        }
         Ok(path.to_path_buf())
     }
 }
 
 #[tauri::command]
 async fn pick_chart(app: tauri::AppHandle) -> Result<Option<String>, InvokeError> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         return tokio::task::spawn_blocking(move || {
             app.state::<tauri_plugin_chart_picker::ChartPicker<tauri::Wry>>()
                 .pick().map_err(|error| InvokeError::from(error.to_string()))
         }).await.map_err(|error| InvokeError::from(error.to_string()))?;
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
-        Err(InvokeError::from("The document picker is only used on Android"))
+        Err(InvokeError::from("The document picker is only used on mobile"))
+    }
+}
+
+#[tauri::command]
+async fn pick_chart_folder(app: tauri::AppHandle) -> Result<Option<String>, InvokeError> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        return tokio::task::spawn_blocking(move || {
+            app.state::<tauri_plugin_chart_picker::ChartPicker<tauri::Wry>>()
+                .pick_folder().map_err(|error| InvokeError::from(error.to_string()))
+        }).await.map_err(|error| InvokeError::from(error.to_string()))?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = app;
+        Err(InvokeError::from("The folder picker is only used on mobile"))
     }
 }
 
@@ -414,7 +436,10 @@ async fn parse_chart(path: &Path) -> Result<ChartInfo, InvokeError> {
 async fn preview_chart(mut params: RenderParams) -> Result<(), InvokeError> {
     wrap_async(async move {
         params.path = localize_chart_path(&params.path)?;
-        let mut child = Command::new(std::env::current_exe()?)
+        let mut command = Command::new(std::env::current_exe()?);
+        #[cfg(target_os = "windows")]
+        command.creation_flags(0x08000000);
+        let mut child = command
             .arg("preview")
             .arg(ASSET_PATH.get().unwrap())
             .stdin(Stdio::piped())
@@ -436,6 +461,10 @@ async fn post_render(app: tauri::AppHandle, queue: State<'_, TaskQueue>, mut par
     prepare_platform_assets(app).await?;
     wrap_async(async move {
         params.path = localize_chart_path(&params.path)?;
+        // Mobile output lives in the app's accessible output directory. A stale
+        // desktop setting cannot grant Files/SAF access to an external folder.
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let output_path: Option<String> = None;
         let output_path = output_path.map(PathBuf::from);
         Ok(queue.post(params, output_path).await?)
     })
@@ -931,13 +960,9 @@ async fn remote_render_upload(base: String, params: RenderParams) -> Result<serd
         let posted = serde_json::json!({ "info": params.info, "config": params.config });
         multipart_text(&boundary, "params", &serde_json::to_string(&posted)?, &mut body);
 
-        let chart = tokio::fs::read(&params.path).await?;
-        let chart_name = params
-            .path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("chart.pez");
-        multipart_file(&boundary, "file", chart_name, &chart, &mut body);
+        let path = localize_chart_path(&params.path)?;
+        let (chart_name, chart) = tokio::task::spawn_blocking(move || chart_archive::read_upload(&path)).await??;
+        multipart_file(&boundary, "file", &chart_name, &chart, &mut body);
 
         for (field, path) in [
             ("respack", params.config.res_pack_path.as_ref()),
@@ -973,19 +998,23 @@ async fn remote_render_upload(base: String, params: RenderParams) -> Result<serd
 }
 
 #[tauri::command]
-async fn remote_cancel(base: String, id: String) -> Result<serde_json::Value, InvokeError> {
-    wrap_async(async move {
+async fn remote_cancel(base: String, id: String) -> Result<(), InvokeError> {
+    wrap_async(remote_cancel_request(base, id)).await
+}
+
+async fn remote_cancel_request(base: String, id: String) -> Result<()> {
         let url = format!("{}/api/jobs/{id}/cancel", base.trim_end_matches('/'));
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(6))
             .build()?;
         let response = client.post(&url).send().await?;
-        if !response.status().is_success() {
-            anyhow::bail!("HTTP {}", response.status());
+        let status = response.status();
+        if !status.is_success() {
+            let detail = response.text().await?;
+            anyhow::bail!("HTTP {status}: {detail}");
         }
-        Ok(response.json::<serde_json::Value>().await?)
-    })
-    .await
+        // The server returns 204 No Content when cancellation is accepted.
+        Ok(())
 }
 
 #[cfg(test)]

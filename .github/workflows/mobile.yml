@@ -80,6 +80,9 @@ jobs:
       - name: Init Android project
         run: pnpm tauri android init --ci --skip-targets-install
 
+      - name: Install Phi-TKC Android icons
+        run: python3 scripts/sync-mobile-icons.py android
+
       - name: Bundle libc++_shared.so
         # oboe (via sasa) is built with its `shared-stdcxx` feature, so the Rust
         # cdylib has a DT_NEEDED entry for libc++_shared.so.  The Tauri Gradle
@@ -210,6 +213,9 @@ jobs:
 
       - name: Init iOS project
         run: pnpm tauri ios init --ci --skip-targets-install
+
+      - name: Install Phi-TKC iOS icons
+        run: python3 scripts/sync-mobile-icons.py ios
 
       - name: Build unsigned IPA
         run: pnpm tauri ios build --ci --no-sign --target aarch64

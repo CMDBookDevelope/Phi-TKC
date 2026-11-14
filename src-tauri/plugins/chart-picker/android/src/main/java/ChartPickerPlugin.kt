@@ -2,6 +2,7 @@ package com.cnmdbook.chartpicker
 
 import android.app.Activity
 import android.content.Intent
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.activity.result.ActivityResult
 import app.tauri.annotation.ActivityCallback
@@ -56,6 +57,86 @@ class ChartPickerPlugin(private val activity: Activity) : Plugin(activity) {
             .setType("*/*")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         startActivityForResult(invoke, intent, "picked")
+    }
+
+    @Command
+    fun pickFolder(invoke: Invoke) {
+        // A document tree has no filesystem path. Import its contents while
+        // the result grant is valid, preserving the chart's relative paths.
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivityForResult(invoke, intent, "folderPicked")
+    }
+
+    @ActivityCallback
+    fun folderPicked(invoke: Invoke, result: ActivityResult) {
+        if (result.resultCode == Activity.RESULT_CANCELED) {
+            invoke.resolve(JSObject().put("path", org.json.JSONObject.NULL))
+            return
+        }
+        val tree = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || tree == null) {
+            invoke.reject("Failed to select a chart folder")
+            return
+        }
+        importer.execute {
+            var importDir: File? = null
+            try {
+                val resolver = activity.contentResolver
+                val rootId = DocumentsContract.getTreeDocumentId(tree)
+                val rootUri = DocumentsContract.buildDocumentUriUsingTree(tree, rootId)
+                val rootName = resolver.query(
+                    rootUri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null
+                )?.use {
+                    if (it.moveToFirst()) it.getString(0) else null
+                } ?: "chart"
+                fun checkedName(name: String?): String {
+                    check(!name.isNullOrBlank() && name != "." && name != ".." &&
+                        name.none { it == '/' || it == '\\' || it == '\u0000' }) {
+                        "The selected folder contains an invalid file name"
+                    }
+                    return name!!
+                }
+                val dir = File(activity.cacheDir, "charts/${java.util.UUID.randomUUID()}")
+                importDir = dir
+                check(dir.mkdirs()) { "Cannot create the chart import directory" }
+                val target = File(dir, checkedName(rootName))
+                val ancestors = mutableSetOf<String>()
+                fun copyFolder(documentId: String, destination: File) {
+                    check(ancestors.add(documentId)) { "The selected folder contains a directory cycle" }
+                    try {
+                        check(destination.mkdir()) { "Cannot create a chart folder" }
+                        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, documentId)
+                        resolver.query(children, arrayOf(
+                            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                            DocumentsContract.Document.COLUMN_MIME_TYPE
+                        ), null, null, null)?.use { cursor ->
+                            while (cursor.moveToNext()) {
+                                val childId = cursor.getString(0)
+                                val file = File(destination, checkedName(cursor.getString(1)))
+                                check(!file.exists()) { "The selected folder contains duplicate file names" }
+                                if (cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR) {
+                                    copyFolder(childId, file)
+                                } else {
+                                    val childUri = DocumentsContract.buildDocumentUriUsingTree(tree, childId)
+                                    resolver.openInputStream(childUri)?.use { input ->
+                                        file.outputStream().use { output -> input.copyTo(output) }
+                                    } ?: error("A file in the selected folder cannot be read")
+                                }
+                            }
+                        } ?: error("The selected folder cannot be read")
+                    } finally {
+                        ancestors.remove(documentId)
+                    }
+                }
+                copyFolder(rootId, target)
+                invoke.resolve(JSObject().put("path", target.absolutePath))
+            } catch (error: Exception) {
+                importDir?.deleteRecursively()
+                invoke.reject(error.message ?: "Failed to import the chart folder")
+            }
+        }
     }
 
     @ActivityCallback

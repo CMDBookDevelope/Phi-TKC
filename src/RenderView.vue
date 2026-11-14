@@ -123,6 +123,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
+import { useLayout } from 'vuetify';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { toastError, toast, anyFilter, isString, RULES } from './common';
@@ -133,10 +134,10 @@ import moment from 'moment';
 import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
 import gsap from 'gsap';
-import { isAndroid, isMobile } from './platform';
+import { isMobile } from './platform';
 
-const android = isAndroid();
 const mobile = isMobile();
+const { mainRect } = useLayout();
 
 const { t } = useI18n();
 
@@ -178,11 +179,13 @@ async function chooseChart(folder?: boolean) {
   if (choosingChart.value) return;
   choosingChart.value = true;
   try {
-    // Android charts use ACTION_OPEN_DOCUMENT and are imported before the
-    // temporary URI permission expires; GET_CONTENT may open a photo picker.
+    // Native mobile pickers import files/trees while the provider permission
+    // is active, returning stable local paths for parsing and queued rendering.
     let file = folder
-      ? await dialog.open({ directory: true })
-      : android
+      ? mobile
+        ? await invoke<string | null>('pick_chart_folder')
+        : await dialog.open({ directory: true })
+      : mobile
         ? await invoke<string | null>('pick_chart')
         : await dialog.open({
                 filters: [
@@ -528,7 +531,7 @@ function resetAndGoChoose() {
 </script>
 
 <template>
-  <div class="render-container">
+  <div class="render-container" :class="{ 'is-mobile': mobile, 'has-mobile-action': mobile && (step === 'config' || step === 'options') }">
     <!-- MD3 Top Action Bar -->
     <header class="clear-glass glass md3-top-bar" v-glass v-if="step !== 'choose' && step !== 'render'">
       <div class="bar-left">
@@ -734,7 +737,8 @@ function resetAndGoChoose() {
 
     <Teleport to="body">
       <button v-if="mobile && (step === 'config' || step === 'options')"
-        class="bar-btn bar-btn-filled mobile-render-action" @click="moveNext">
+        class="bar-btn blur-glass mobile-render-action"
+        :style="{ bottom: `${mainRect.bottom + 12}px` }" @click="moveNext">
         <span>{{ step === 'options' ? t('render') : t('next-step') }}</span>
         <v-icon icon="mdi-arrow-right" size="18" />
       </button>
@@ -1177,20 +1181,42 @@ function resetAndGoChoose() {
   font-size: 14px;
 }
 
-  .mobile-render-action {
-    position: fixed;
-    left: 14px;
-    right: 14px;
-    bottom: calc(84px + env(safe-area-inset-bottom));
-    height: 52px;
-    justify-content: center;
-    border-radius: 16px;
-    font-size: 16px;
-    font-weight: 700;
-    z-index: 1005;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  }
-  .mobile-render-action span { display: inline; }
+.render-container.is-mobile {
+  height: calc(100dvh - var(--v-layout-top, 0px) - var(--v-layout-bottom, 0px));
+  min-height: 0 !important;
+  padding-bottom: 0;
+}
+.is-mobile.has-mobile-action .step-panel.is-active {
+  padding: 12px 12px 76px;
+}
+.is-mobile .config-card-wrapper {
+  align-items: flex-start;
+  height: auto;
+  min-height: 100%;
+}
+.is-mobile .options-wrapper {
+  /* Keep the parameter list usable when landscape leaves little vertical space. */
+  min-height: 240px;
+}
+.mobile-render-action {
+  position: fixed;
+  right: 14px;
+  width: 104px;
+  height: 52px;
+  padding: 0;
+  justify-content: center;
+  border: 1px solid rgba(var(--main-color-rgb), 0.2);
+  border-radius: 16px;
+  color: var(--main-color);
+  font-size: 16px;
+  font-weight: 700;
+  z-index: 1005;
+}
+.mobile-render-action.bar-btn span { display: inline; }
+.mobile-render-action:focus-visible {
+  outline: 2px solid var(--main-color);
+  outline-offset: 3px;
+}
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
   .config-grid {

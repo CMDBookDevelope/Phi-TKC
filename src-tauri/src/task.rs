@@ -281,16 +281,21 @@ impl Task {
 
         *self.status.lock().await = TaskStatus::Loading;
 
-        let mut child = tokio::process::Command::new(std::env::current_exe()?)
+        let mut command = tokio::process::Command::new(std::env::current_exe()?);
+        #[cfg(target_os = "windows")]
+        command.creation_flags(0x08000000);
+        let mut child = command
             .arg("render")
             .env("PHI_TKC_IPC", "1")
             .arg(ASSET_PATH.get().unwrap())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .kill_on_drop(true)
             .spawn()?;
         let mut stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
+        let stderr_reader = tokio::spawn(crate::process_output::drain(child.stderr.take().unwrap()));
 
         stdin
             .write_all(format!("{}\n", serde_json::to_string(&self.params)?).as_bytes())
@@ -299,6 +304,7 @@ impl Task {
             .write_all(format!("{}\n", serde_json::to_string(&self.output)?).as_bytes())
             .await?;
         stdin.flush().await?;
+        drop(stdin);
 
         let mut lines = BufReader::new(stdout).lines();
         // Non-JSON lines on stdout are the renderer's log records (they go through
@@ -307,12 +313,19 @@ impl Task {
         let mut child_log = String::new();
         let mut total = 0;
         let mut frame_count: u64 = 0;
-        let start = Instant::now();
         // A task can sit in the queue for minutes; measure FPS from when it actually
         // starts, and seed the estimate with the requested frame rate.
         *self.last_fps_update.lock().await = Instant::now();
         let mut last_fps: usize = self.params.config.fps as usize;
+        let mut completed_duration = None;
         loop {
+            // Log-only output can keep next_line ready forever. Check before
+            // reading too, so cancellation never depends on an IPC event.
+            if self.request_cancel.load(Ordering::Relaxed) {
+                let _ = child.kill().await;
+                *self.status.lock().await = TaskStatus::Canceled;
+                return Ok(());
+            }
             // If the renderer stalls (or emits no lines), a plain `next_line().await`
             // would make cancellation impossible. Wake up periodically to check the flag.
             let line = match tokio::time::timeout(Duration::from_millis(250), lines.next_line()).await {
@@ -360,27 +373,13 @@ impl Task {
                         *last_update = now;
                     }
 
-                    let cur = start.elapsed().as_secs_f64();
                     let estimate =
                         total.saturating_sub(frame_count).max(1) as f64 / last_fps.max(1) as f64;
-                    if total > 0 && frame_count >= total {
-                        let output = child.wait_with_output().await?;
-                        let stdout = String::from_utf8(output.stdout)
-                            .unwrap_or_else(|_| "Invalid output".to_owned());
-                        let stderr = String::from_utf8(output.stderr)
-                            .unwrap_or_else(|_| "Invalid output".to_owned());
-                        *self.status.lock().await = TaskStatus::Done {
-                            duration: cur,
-                            output: format!("[STDOUT]\n{stdout}\n\n[STDERR]\n{stderr}"),
-                        };
-                        return Ok(());
-                    } else {
-                        *self.status.lock().await = TaskStatus::Rendering {
-                            progress: if total > 0 { frame_count as f64 / total as f64 } else { 0. },
-                            fps: last_fps as u64,
-                            estimate,
-                        };
-                    }
+                    *self.status.lock().await = TaskStatus::Rendering {
+                        progress: if total > 0 { (frame_count as f64 / total as f64).min(1.) } else { 0. },
+                        fps: last_fps as u64,
+                        estimate,
+                    };
                 }
                 IPCEvent::EncoderFps(fps) => {
                     // Encoder-side FPS (frames actually written to the pipe); it is a
@@ -400,16 +399,9 @@ impl Task {
                     }
                 }
                 IPCEvent::Done(duration) => {
-                    let output = child.wait_with_output().await?;
-                    let stdout = String::from_utf8(output.stdout)
-                        .unwrap_or_else(|_| "Invalid output".to_owned());
-                    let stderr = String::from_utf8(output.stderr)
-                        .unwrap_or_else(|_| "Invalid output".to_owned());
-                    *self.status.lock().await = TaskStatus::Done {
-                        duration,
-                        output: format!("[LOG]\n{child_log}\n\n[STDOUT]\n{stdout}\n\n[STDERR]\n{stderr}"),
-                    };
-                    return Ok(());
+                    // Continue draining stdout and stderr through process exit.
+                    // A final frame or Done event does not prove muxing succeeded.
+                    completed_duration = Some(duration);
                 }
             }
             if self.request_cancel.load(Ordering::Relaxed) {
@@ -419,27 +411,33 @@ impl Task {
             }
         }
 
-        let output = child.wait_with_output().await?;
-        if !output.status.success() {
+        let exit_status = crate::process_output::wait(&mut child, &self.request_cancel).await?;
+        let stderr = stderr_reader.await??;
+        if self.request_cancel.load(Ordering::Relaxed) {
+            *self.status.lock().await = TaskStatus::Canceled;
+            return Ok(());
+        }
+        if !exit_status.success() {
             *self.status.lock().await = TaskStatus::Failed {
                 error: format!(
                     "Child process exited abnormally ({:?})\n\n[LOG]\n{}\n\n[STDERR]\n{}",
-                    output.status.code(),
+                    exit_status.code(),
                     child_log,
-                    String::from_utf8_lossy(&output.stderr)
+                    stderr
                 ),
             };
             return Ok(());
         }
 
-        // A successful exit without an IPCEvent::Done leaves the task in Loading/
-        // Rendering forever, so the UI would show a render that never finishes.
-        let mut status = self.status.lock().await;
-        if !matches!(&*status, TaskStatus::Done { .. } | TaskStatus::Canceled | TaskStatus::Failed { .. }) {
-            *status = TaskStatus::Failed {
-                error: "The renderer exited without reporting completion".to_owned(),
-            };
-        }
+        *self.status.lock().await = match completed_duration {
+            Some(duration) => TaskStatus::Done {
+                duration,
+                output: format!("[LOG]\n{child_log}\n\n[STDERR]\n{stderr}"),
+            },
+            None => TaskStatus::Failed {
+                error: format!("The renderer exited without reporting completion\n\n[LOG]\n{child_log}\n\n[STDERR]\n{stderr}"),
+            },
+        };
 
         Ok(())
     }
