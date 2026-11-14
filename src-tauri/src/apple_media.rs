@@ -802,6 +802,10 @@ mod tests {
     use super::*;
 
     extern "C" {
+        fn CFGetTypeID(value: Ref) -> usize;
+        fn CFCopyDescription(value: Ref) -> Ref;
+        fn CMSampleBufferGetTypeID() -> usize;
+        fn CMSampleBufferIsValid(sample: Ref) -> u8;
         fn CMSampleBufferGetNumSamples(sample: Ref) -> i64;
         fn CMSampleBufferGetPresentationTimeStamp(sample: Ref) -> Time;
         fn CMSampleBufferGetDecodeTimeStamp(sample: Ref) -> Time;
@@ -817,6 +821,7 @@ mod tests {
     #[derive(Default, Debug)]
     struct TrackSamples {
         count: u64,
+        empty_buffers: usize,
         first_time: Option<f64>,
         end_time: f64,
     }
@@ -869,6 +874,15 @@ mod tests {
                     return None;
                 }
                 let sample = Cf(sample);
+                assert_eq!(
+                    CFGetTypeID(sample.0),
+                    CMSampleBufferGetTypeID(),
+                    "Reader returned a non-sample object"
+                );
+                assert!(
+                    CMSampleBufferIsValid(sample.0) != 0,
+                    "Reader returned an invalid sample buffer"
+                );
                 let count = CMSampleBufferGetNumSamples(sample.0);
                 let time = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample.0));
                 let decode = CMTimeGetSeconds(CMSampleBufferGetDecodeTimeStamp(sample.0));
@@ -883,16 +897,35 @@ mod tests {
                     kCMSampleBufferAttachmentKey_EndsPreviousSampleDuration,
                     null_mut(),
                 ) == kCFBooleanTrue;
-                Some((count, time, decode, duration, empty_media, ends_previous))
+                let detail = if count == 0 {
+                    let text = Cf(CFCopyDescription(sample.0));
+                    description(text.0 as *mut Object)
+                        .chars()
+                        .take(4000)
+                        .collect::<String>()
+                } else {
+                    String::new()
+                };
+                Some((
+                    count,
+                    time,
+                    decode,
+                    duration,
+                    empty_media,
+                    ends_previous,
+                    detail,
+                ))
             });
-            let Some((count, time, decode, duration, empty_media, ends_previous)) = next else {
+            let Some((count, time, decode, duration, empty_media, ends_previous, detail)) = next
+            else {
                 break;
             };
-            if count == 0 && (empty_media || ends_previous) {
-                // AVAssetReader also emits marker buffers for empty edits and
-                // the end of the previous sample. They contain no media frames.
-                // Reject unmarked zero-sample buffers and still require the exact
-                // media frame count after reading the whole track.
+            if count == 0 {
+                // Empty buffers do not contribute media samples. Their metadata
+                // can describe edit or control intervals without a marker flag.
+                // Count only actual samples; the final exact video count still
+                // rejects missing frames and a track consisting only of markers.
+                result.empty_buffers += 1;
                 if ends_previous && result.count > 0 {
                     // This marker terminates the previous decode interval.
                     // Reordering is disabled, so PTS is also usable if DTS is absent.
@@ -903,13 +936,16 @@ mod tests {
                     );
                     result.end_time = end;
                 }
-                eprintln!("Native MP4 {} marker: empty_media={empty_media}, ends_previous={ends_previous}, PTS={time:.6}s, DTS={decode:.6}s, duration={duration:.6}s",
-                    if audio { "audio" } else { "video" });
+                if result.empty_buffers <= 8 {
+                    eprintln!("Native MP4 {} empty buffer: empty_media={empty_media}, ends_previous={ends_previous}, PTS={time:.6}s, DTS={decode:.6}s, duration={duration:.6}s",
+                        if audio { "audio" } else { "video" });
+                    eprintln!("{detail}");
+                }
                 continue;
             }
             assert!(
                 count > 0,
-                "Unmarked empty sample buffer in {} track at PTS={time}, duration={duration}",
+                "Invalid sample count {count} in {} track at PTS={time}, duration={duration}",
                 if audio { "audio" } else { "video" }
             );
             assert!(time.is_finite() && duration.is_finite() && duration > 0.0);
@@ -928,6 +964,13 @@ mod tests {
         let state: isize = msg_send![reader.0, status];
         let error: *mut Object = msg_send![reader.0, error];
         assert_eq!(state, 2, "AVAssetReader failed: {}", description(error));
+        eprintln!(
+            "Native MP4 {} readback: {} media samples, {} empty buffers, end={:.6}s",
+            if audio { "audio" } else { "video" },
+            result.count,
+            result.empty_buffers,
+            result.end_time
+        );
         result
     }
 
@@ -997,6 +1040,20 @@ mod tests {
             let state: isize = unsafe { msg_send![encoder.writer.0, status] };
             assert_eq!(state, 2, "MP4 writer did not complete");
             drop(encoder);
+
+            // Retain these generated fixtures on CI so a readback failure can
+            // be checked independently of AVAssetReader and the Rust FFI.
+            if let Some(folder) = std::env::var_os("PHI_TKC_APPLE_SMOKE_ARTIFACTS") {
+                let folder = std::path::PathBuf::from(folder);
+                std::fs::create_dir_all(&folder).unwrap();
+                std::fs::copy(
+                    &path,
+                    folder.join(format!(
+                        "{width}x{height}-{fps}fps-{frames}video-{audio_frames}audio.mp4"
+                    )),
+                )
+                .unwrap();
+            }
 
             let (video, audio) = unsafe { read_media(&path) };
             assert_eq!(

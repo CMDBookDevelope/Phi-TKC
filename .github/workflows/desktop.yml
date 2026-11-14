@@ -170,6 +170,8 @@ jobs:
 
       - name: Verify Apple native rendering and MP4 encoding
         if: matrix.rust-target == 'aarch64-apple-darwin'
+        env:
+          PHI_TKC_APPLE_SMOKE_ARTIFACTS: ${{ runner.temp }}/apple-media-smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -178,6 +180,14 @@ jobs:
           MINIQUAD_MANIFEST="$(cargo metadata --locked --manifest-path src-tauri/Cargo.toml \
             --format-version 1 | python3 -c 'import json,sys; print(next(p["manifest_path"] for p in json.load(sys.stdin)["packages"] if p["name"] == "miniquad"))')"
           cargo run --manifest-path "$MINIQUAD_MANIFEST" --example metal_offscreen --features metal
+
+      - name: Preserve failed Apple media fixtures
+        if: failure() && matrix.rust-target == 'aarch64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-media-smoke-${{ github.run_id }}
+          path: ${{ runner.temp }}/apple-media-smoke/*.mp4
+          if-no-files-found: ignore
 
       - name: Build bundles
         shell: bash
