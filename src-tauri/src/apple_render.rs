@@ -60,6 +60,7 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> 
     normalize_config(&mut request.params.config)?;
     let (vw, vh) = request.params.config.output_resolution()?;
     crate::apple_platform::debug_log(&format!("render: using requested {vw}x{vh}"));
+    crate::apple_platform::debug_log(&format!("render: assets={}", request.asset_dir.display()));
     let conf = build_conf(vw, vh);
 
     let shared: std::sync::Arc<std::sync::Mutex<Option<Result<()>>>> =

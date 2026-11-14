@@ -4,6 +4,7 @@
 prpr::tl_file!("main" mtl);
 
 mod av1_level;
+mod asset_path;
 mod frame_handoff;
 mod common;
 mod chart_archive;
@@ -265,36 +266,38 @@ pub async fn run() -> Result<()> {
     //   1. normal Tauri bundle / deb / rpm / AppImage -> <resource_dir>/assets
     //   2. legacy Phi-TKC deb -> /usr/lib/ptkc-assets
     //   3. `pnpm tauri dev` -> src-tauri/assets
-    //   4. iOS -> Tauri's resource_dir() already ends with /assets
-    //   5. Android -> the assets live inside the APK, exposed as `asset://localhost/`,
-    //      which is not a filesystem path (rendering is disabled there anyway).
+    //   4. iOS -> resource_dir() is <app>/assets; bundle resources named "assets"
+    //      are copied into <app>/assets/assets, while older bundles may be flat.
+    //   5. Android -> assets inside the APK are imported by the native renderer.
     let mut candidates: Vec<PathBuf> = Vec::new();
     #[cfg(not(mobile))]
     if exe_dir.join("assets/ending.mp3").is_file() {
         candidates.push(exe_dir.join("assets"));
     }
     if let Ok(dir) = resolver.resource_dir() {
-        #[cfg(target_os = "ios")]
-        candidates.push(dir.clone());
         candidates.push(dir.join("assets"));
+        #[cfg(target_os = "ios")]
+        candidates.push(dir);
     }
     #[cfg(target_os = "linux")]
     candidates.push(PathBuf::from("/usr/lib/ptkc-assets"));
     candidates.push(exe_dir.join("assets"));
+    #[cfg(target_os = "ios")]
+    candidates.push(exe_dir.to_owned());
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"));
 
-    if let Some(asset_dir) = candidates.into_iter().find(|dir| dir.exists()) {
+    if let Some(asset_dir) = asset_path::find_renderer_assets(candidates.iter().cloned()) {
+        log::info!("Renderer assets: {}", asset_dir.display());
         ASSET_PATH.set(asset_dir.clone()).ok();
-        // Macroquad's asset folder is only meaningful on desktop; on iOS/Android the
-        // renderer and preview window are gated off (see MOBILE.md).
+        // Native mobile renderers set this on their own graphics context/thread.
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
         set_pc_assets_folder(&asset_dir.display().to_string());
     } else {
-        log::error!("错误：资源目录不存在");
+        log::error!("资源目录未找到或缺少字体／音频／资源包，已检查：{candidates:?}");
         // Mobile builds must still start so the settings/tasks/about pages work even if
         // the resource layout is unexpected; never make that a fatal error there.
         #[cfg(not(any(target_os = "ios", target_os = "android")))]
-        bail!("资源目录未找到，请检查安装路径");
+        bail!("资源目录未找到或缺少必要文件，请检查安装路径");
     }
 
     app.run(|_, _| {});
