@@ -81,6 +81,7 @@ targets:
         # plain HTTP (`http://192.168.x.x:6787`). iOS 14+ needs the local-network
         # purpose string, and ATS needs an exception for raw IP hosts.
         NSLocalNetworkUsageDescription: 连接同一局域网内的 Phi-TKC 渲染服务器，提交谱面并取回渲染结果。
+        NSPhotoLibraryAddUsageDescription: 将渲染完成的视频自动保存到相册。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSAllowsArbitraryLoads: true
@@ -121,6 +122,7 @@ targets:
       - sdk: CoreMedia.framework
       - sdk: CoreVideo.framework
       - sdk: VideoToolbox.framework
+      - sdk: Photos.framework
       - sdk: CoreGraphics.framework
       - sdk: Metal.framework
       - sdk: MetalKit.framework

@@ -360,6 +360,40 @@ input[type='number'] {
 }
 
 /* Progress */
+.v-progress-circular__underlay,
+.v-progress-circular__overlay {
+  /* These are stroked rings. Do not paint an interior, including inside button loaders. */
+  fill: none !important;
+}
+.tk-progress-circular--paint .v-progress-circular__underlay {
+  stroke: var(--tk-progress-underlay) !important;
+  opacity: 1 !important;
+}
+.tk-progress-linear--paint .v-progress-linear__background {
+  background-color: var(--tk-progress-background) !important;
+  opacity: 1 !important;
+}
+.tk-progress-linear--paint .v-progress-linear__buffer {
+  background-color: var(--tk-progress-buffer) !important;
+  opacity: 1 !important;
+}
+.tk-progress-linear--paint .v-progress-linear__stream {
+  color: var(--tk-progress-stream) !important;
+  opacity: 1 !important;
+}
+@media (forced-colors: active) {
+  .tk-progress-circular--paint .v-progress-circular__underlay {
+    stroke: CanvasText !important;
+    opacity: 0.12 !important;
+  }
+  .tk-progress-linear--paint .v-progress-linear__background,
+  .tk-progress-linear--paint .v-progress-linear__buffer,
+  .tk-progress-linear--paint .v-progress-linear__stream {
+    background-color: Highlight !important;
+    color: Highlight !important;
+    opacity: 0.5 !important;
+  }
+}
 .v-progress-linear__background,
 .v-progress-linear__determinate {
   border-radius: 4px !important;

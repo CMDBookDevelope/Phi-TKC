@@ -11,10 +11,20 @@ pub struct ChartPicker<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 impl<R: Runtime> ChartPicker<R> {
+    #[cfg(target_os = "ios")]
+    pub fn save_video(
+        &self,
+        path: &str,
+    ) -> Result<PhotoSave, tauri::plugin::mobile::PluginInvokeError> {
+        self.0
+            .run_mobile_plugin("saveVideo", serde_json::json!({ "path": path }))
+    }
     #[cfg(target_os = "android")]
     pub fn assets(&self) -> Result<String, tauri::plugin::mobile::PluginInvokeError> {
         #[derive(serde::Deserialize)]
-        struct Response { path: String }
+        struct Response {
+            path: String,
+        }
         self.0
             .run_mobile_plugin::<Response>("prepareAssets", serde_json::json!({}))
             .map(|response| response.path)
@@ -39,6 +49,15 @@ impl<R: Runtime> ChartPicker<R> {
             .run_mobile_plugin::<Response>("pickFolder", serde_json::json!({}))
             .map(|response| response.path)
     }
+}
+
+#[cfg(target_os = "ios")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhotoSave {
+    pub saved: bool,
+    pub asset_id: Option<String>,
+    pub message: Option<String>,
 }
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {

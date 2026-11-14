@@ -8,7 +8,7 @@ use objc::{
     sel, sel_impl, Encode, Encoding,
 };
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     ffi::c_void,
     path::Path,
     ptr::null_mut,
@@ -72,18 +72,32 @@ extern "C" {
     link(name = "CoreVideo", kind = "framework")
 )]
 extern "C" {
-    fn CVPixelBufferCreate(
+    fn CVPixelBufferPoolCreate(
         allocator: Ref,
-        width: usize,
-        height: usize,
-        format: u32,
-        attributes: Ref,
+        pool_attributes: Ref,
+        pixel_attributes: Ref,
+        output: *mut Ref,
+    ) -> i32;
+    fn CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+        allocator: Ref,
+        pool: Ref,
+        auxiliary: Ref,
         output: *mut Ref,
     ) -> i32;
     fn CVPixelBufferLockBaseAddress(buffer: Ref, flags: u64) -> i32;
     fn CVPixelBufferUnlockBaseAddress(buffer: Ref, flags: u64) -> i32;
     fn CVPixelBufferGetBaseAddress(buffer: Ref) -> Ref;
     fn CVPixelBufferGetBytesPerRow(buffer: Ref) -> usize;
+    fn CVPixelBufferGetWidth(buffer: Ref) -> usize;
+    fn CVPixelBufferGetHeight(buffer: Ref) -> usize;
+    fn CVPixelBufferGetPixelFormatType(buffer: Ref) -> u32;
+    static kCVPixelBufferWidthKey: Ref;
+    static kCVPixelBufferHeightKey: Ref;
+    static kCVPixelBufferPixelFormatTypeKey: Ref;
+    static kCVPixelBufferMetalCompatibilityKey: Ref;
+    static kCVPixelBufferIOSurfacePropertiesKey: Ref;
+    static kCVPixelBufferPoolMinimumBufferCountKey: Ref;
+    static kCVPixelBufferPoolAllocationThresholdKey: Ref;
 }
 #[cfg_attr(
     any(target_os = "macos", target_os = "ios"),
@@ -167,6 +181,8 @@ extern "C" {
     static kVTCompressionPropertyKey_ExpectedFrameRate: Ref;
     static kVTCompressionPropertyKey_MaxKeyFrameInterval: Ref;
     static kVTCompressionPropertyKey_ProfileLevel: Ref;
+    static kVTEncodeFrameOptionKey_ForceKeyFrame: Ref;
+    static kVTCompressionPropertyKey_MaxFrameDelayCount: Ref;
     static kVTProfileLevel_H264_High_AutoLevel: Ref;
 }
 #[cfg_attr(
@@ -183,6 +199,16 @@ impl Drop for Cf {
                 CFRelease(self.0);
             }
         }
+    }
+}
+
+/// An owned BGRA8 IOSurface from the encoder's reusable pixel buffer pool.
+/// Keep this lease alive while Metal writes the surface. Submit it only after
+/// those writes have completed, and do not write the surface after submission.
+pub struct PixelBuffer(Cf);
+impl PixelBuffer {
+    pub fn as_ptr(&self) -> *mut c_void {
+        self.0 .0
     }
 }
 struct Obj(*mut Object);
@@ -212,6 +238,15 @@ fn dictionary(entries: &[(&str, &Obj)]) -> Obj {
         let key_ptrs: Vec<*mut Object> = keys.iter().map(|key| key.0).collect();
         let values: Vec<*mut Object> = entries.iter().map(|(_, value)| value.0).collect();
         let object: *mut Object = msg_send![class!(NSDictionary), dictionaryWithObjects:values.as_ptr() forKeys:key_ptrs.as_ptr() count:values.len()];
+        let _: () = msg_send![object, retain];
+        Obj(object)
+    }
+}
+fn reference_dictionary(entries: &[(Ref, Ref)]) -> Obj {
+    unsafe {
+        let keys: Vec<Ref> = entries.iter().map(|(key, _)| *key).collect();
+        let values: Vec<Ref> = entries.iter().map(|(_, value)| *value).collect();
+        let object: *mut Object = msg_send![class!(NSDictionary), dictionaryWithObjects:values.as_ptr() forKeys:keys.as_ptr() count:values.len()];
         let _: () = msg_send![object, retain];
         Obj(object)
     }
@@ -274,28 +309,81 @@ enum PumpGoal {
     Finish,
 }
 const MAX_PENDING_VIDEO: usize = 64;
+const MAX_IN_FLIGHT_VIDEO: usize = 6;
+// Six VideoToolbox inputs, three GPU frame leases and one allocation margin.
+const MAX_PIXEL_BUFFERS: usize = MAX_IN_FLIGHT_VIDEO + 4;
+const BGRA: u32 = 0x42475241;
+const POOL_THRESHOLD_EXCEEDED: i32 = -6689;
+const INVALID_SESSION: i32 = -12903;
+
+struct FrameInput {
+    frame: u64,
+    pixel: PixelBuffer,
+}
+struct EncodedFrame {
+    sample: Cf,
+    // Keep the source until this output joins the contiguous writer prefix.
+    // After a session interruption, later P frames must be reencoded with the
+    // gap rather than spliced onto another session's reference pictures.
+    pixel: PixelBuffer,
+}
 
 #[derive(Default)]
 struct CallbackState {
-    samples: Vec<Cf>,
+    samples: BTreeMap<u64, EncodedFrame>,
+    // Register before EncodeFrame: its callback may run synchronously. The
+    // sourceFrameRefCon is a unique integer token, never a pointer to a Box.
+    pixels: BTreeMap<usize, FrameInput>,
+    retry: BTreeMap<u64, PixelBuffer>,
+    needs_resume: bool,
     error: Option<i32>,
+    error_frame: Option<u64>,
 }
-extern "C" fn compressed(context: Ref, _frame: Ref, code: i32, flags: u32, sample: Ref) {
+extern "C" fn compressed(context: Ref, frame: Ref, code: i32, flags: u32, sample: Ref) {
     // Never unwind through Apple's C callback ABI.
     let state = unsafe { &*(context as *const Mutex<CallbackState>) };
     if let Ok(mut state) = state.lock() {
+        let token = frame as usize;
+        let Some(input) = state.pixels.remove(&token) else {
+            // A cancelled or failed submission can receive a late callback.
+            // Tokens never repeat, so it cannot refer to a resumed submission.
+            return;
+        };
+        let FrameInput { frame, pixel } = input;
+        if code == INVALID_SESSION {
+            state.retry.insert(frame, pixel);
+            state.needs_resume = true;
+            return;
+        }
         // Bit zero reports asynchronous encoding; bit one means frame dropped.
         if code != 0 || flags & 2 != 0 || sample.is_null() {
-            state.error = Some(if code != 0 { code } else { -1 });
+            if state.error.is_none() {
+                state.error = Some(if code != 0 { code } else { -1 });
+                state.error_frame = Some(frame);
+            }
         } else {
-            state.samples.push(Cf(unsafe { CFRetain(sample) }));
+            state.samples.entry(frame).or_insert_with(|| EncodedFrame {
+                sample: Cf(unsafe { CFRetain(sample) }),
+                pixel,
+            });
         }
+        // On success the source lease follows its compressed sample until it
+        // joins the ordered writer prefix; an interruption can replay that source.
     }
 }
 
 pub struct Encoder {
     session: Ref,
     callbacks: Box<Mutex<CallbackState>>,
+    pixel_pool: Cf,
+    pixel_attributes: Obj,
+    pixel_auxiliary: Obj,
+    bounded_frame_delay: bool,
+    force_next_keyframe: bool,
+    keyframe_properties: Obj,
+    bitrate: u32,
+    next_token: usize,
+    next_output_frame: u64,
     writer: Obj,
     video: Option<Obj>,
     pending_video: VecDeque<Cf>,
@@ -391,14 +479,64 @@ impl Encoder {
                 ),
                 "PCM format creation",
             )?;
+            let audio_format = Cf(audio_format);
+            let pixel_width = number(width as i64);
+            let pixel_height = number(height as i64);
+            let pixel_format = number(BGRA as i64);
+            let true_value: *mut Object = msg_send![class!(NSNumber), numberWithBool:YES];
+            let _: () = msg_send![true_value, retain];
+            let true_value = Obj(true_value);
+            let surface_properties = dictionary(&[]);
+            let pixel_attributes = reference_dictionary(&[
+                (kCVPixelBufferWidthKey, pixel_width.0 as Ref),
+                (kCVPixelBufferHeightKey, pixel_height.0 as Ref),
+                (kCVPixelBufferPixelFormatTypeKey, pixel_format.0 as Ref),
+                (kCVPixelBufferMetalCompatibilityKey, true_value.0 as Ref),
+                (
+                    kCVPixelBufferIOSurfacePropertiesKey,
+                    surface_properties.0 as Ref,
+                ),
+            ]);
+            let minimum_buffers = number(2);
+            let pool_attributes = reference_dictionary(&[(
+                kCVPixelBufferPoolMinimumBufferCountKey,
+                minimum_buffers.0 as Ref,
+            )]);
+            let maximum_buffers = number(MAX_PIXEL_BUFFERS as i64);
+            let pixel_auxiliary = reference_dictionary(&[(
+                kCVPixelBufferPoolAllocationThresholdKey,
+                maximum_buffers.0 as Ref,
+            )]);
+            let mut pixel_pool = null_mut();
+            status(
+                CVPixelBufferPoolCreate(
+                    null_mut(),
+                    pool_attributes.0 as Ref,
+                    pixel_attributes.0 as Ref,
+                    &mut pixel_pool,
+                ),
+                "IOSurface pixel buffer pool creation",
+            )?;
             let mut encoder = Self {
                 session: null_mut(),
                 callbacks: Box::default(),
+                pixel_pool: Cf(pixel_pool),
+                pixel_attributes,
+                bitrate,
+                next_token: 1,
+                next_output_frame: 0,
+                force_next_keyframe: true,
+                keyframe_properties: reference_dictionary(&[(
+                    kVTEncodeFrameOptionKey_ForceKeyFrame,
+                    true_value.0 as Ref,
+                )]),
+                pixel_auxiliary,
+                bounded_frame_delay: false,
                 writer,
                 video: None,
                 pending_video: VecDeque::new(),
                 audio,
-                audio_format: Cf(audio_format),
+                audio_format,
                 width,
                 height,
                 fps,
@@ -410,29 +548,49 @@ impl Encoder {
                 audio_finished: false,
                 complete: false,
             };
-            status(
-                VTCompressionSessionCreate(
-                    null_mut(),
-                    width as i32,
-                    height as i32,
-                    0x61766331,
-                    null_mut(),
-                    null_mut(),
-                    null_mut(),
-                    compressed,
-                    encoder.callbacks.as_mut() as *mut _ as Ref,
-                    &mut encoder.session,
-                ),
-                "VideoToolbox session creation",
-            )?;
+            encoder.create_session()?;
+            Ok(encoder)
+        }
+    }
+    fn create_session(&mut self) -> Result<()> {
+        ensure!(
+            self.session.is_null(),
+            "compression session is already active"
+        );
+        self.force_next_keyframe = true;
+        unsafe {
+            let code = VTCompressionSessionCreate(
+                null_mut(),
+                self.width as i32,
+                self.height as i32,
+                0x61766331,
+                null_mut(),
+                self.pixel_attributes.0 as Ref,
+                null_mut(),
+                compressed,
+                self.callbacks.as_mut() as *mut _ as Ref,
+                &mut self.session,
+            );
+            if code == INVALID_SESSION {
+                self.invalidate_for_resume()?;
+                return Ok(());
+            }
+            status(code, "VideoToolbox session creation")?;
+            ensure!(
+                !self.session.is_null(),
+                "VideoToolbox returned a null session"
+            );
             for (key, value) in [
                 (kVTCompressionPropertyKey_RealTime, 0),
                 (kVTCompressionPropertyKey_AllowFrameReordering, 0),
-                (kVTCompressionPropertyKey_AverageBitRate, bitrate as i64),
-                (kVTCompressionPropertyKey_ExpectedFrameRate, fps as i64),
+                (
+                    kVTCompressionPropertyKey_AverageBitRate,
+                    self.bitrate as i64,
+                ),
+                (kVTCompressionPropertyKey_ExpectedFrameRate, self.fps as i64),
                 (
                     kVTCompressionPropertyKey_MaxKeyFrameInterval,
-                    fps.saturating_mul(2) as i64,
+                    self.fps.saturating_mul(2) as i64,
                 ),
             ] {
                 // Boolean properties use true CFBoolean values, not CFNumber.
@@ -445,60 +603,351 @@ impl Encoder {
                 } else {
                     number(value)
                 };
-                status(
-                    VTSessionSetProperty(encoder.session, key, value.0 as Ref),
-                    "VideoToolbox property",
-                )?;
+                let code = VTSessionSetProperty(self.session, key, value.0 as Ref);
+                if code == INVALID_SESSION {
+                    self.invalidate_for_resume()?;
+                    return Ok(());
+                }
+                status(code, "VideoToolbox property")?;
             }
-            status(
-                VTSessionSetProperty(
-                    encoder.session,
-                    kVTCompressionPropertyKey_ProfileLevel,
-                    kVTProfileLevel_H264_High_AutoLevel,
-                ),
-                "VideoToolbox profile",
-            )?;
-            status(
-                VTCompressionSessionPrepareToEncodeFrames(encoder.session),
-                "VideoToolbox preparation",
-            )?;
-            Ok(encoder)
+            let code = VTSessionSetProperty(
+                self.session,
+                kVTCompressionPropertyKey_ProfileLevel,
+                kVTProfileLevel_H264_High_AutoLevel,
+            );
+            if code == INVALID_SESSION {
+                self.invalidate_for_resume()?;
+                return Ok(());
+            }
+            status(code, "VideoToolbox profile")?;
+            // Limit the encoder's compression window so the producer can stop
+            // at its bounded in-flight limit without waiting for a future frame.
+            let delay = number((MAX_IN_FLIGHT_VIDEO - 2) as i64);
+            let delay_status = VTSessionSetProperty(
+                self.session,
+                kVTCompressionPropertyKey_MaxFrameDelayCount,
+                delay.0 as Ref,
+            );
+            if delay_status == INVALID_SESSION {
+                self.invalidate_for_resume()?;
+                return Ok(());
+            }
+            self.bounded_frame_delay = delay_status == 0;
+            if !self.bounded_frame_delay {
+                log::warn!("VideoToolbox frame delay bound unsupported ({delay_status}); flush only when the in-flight window fills");
+            }
+            let code = VTCompressionSessionPrepareToEncodeFrames(self.session);
+            if code == INVALID_SESSION {
+                self.invalidate_for_resume()?;
+                return Ok(());
+            }
+            status(code, "VideoToolbox preparation")?;
+        }
+        Ok(())
+    }
+
+    /// Acquire a reusable Metal-compatible BGRA8 IOSurface. The caller must
+    /// drop temporary texture aliases after completing GPU writes so the pool
+    /// can recycle the surface when the encoder releases its input ownership.
+    pub fn pixel_buffer(&mut self, pcm16: &[u8]) -> Result<PixelBuffer> {
+        self.prepare_audio(pcm16)?;
+        ensure!(
+            !self.video_finished && !self.complete,
+            "video input is already finished"
+        );
+        self.wait_capacity(pcm16)?;
+        let mut idle_since = Instant::now();
+        loop {
+            let mut pixel = null_mut();
+            let code = unsafe {
+                CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+                    null_mut(),
+                    self.pixel_pool.0,
+                    self.pixel_auxiliary.0 as Ref,
+                    &mut pixel,
+                )
+            };
+            let pixel = Cf(pixel);
+            if code == 0 {
+                ensure!(
+                    !pixel.0.is_null(),
+                    "pixel buffer pool returned a null buffer"
+                );
+                return Ok(PixelBuffer(pixel));
+            }
+            drop(pixel);
+            if code != POOL_THRESHOLD_EXCEEDED {
+                status(code, "IOSurface pixel buffer pool allocation")?;
+            }
+            ensure!(
+                !self.needs_resume()?,
+                "IOSurface allocation interrupted: VideoToolbox requires foreground resume"
+            );
+            let before = self.in_flight()?;
+            self.service(pcm16)?;
+            ensure!(
+                !self.needs_resume()?,
+                "IOSurface allocation interrupted: VideoToolbox requires foreground resume"
+            );
+            if self.in_flight()? < before {
+                idle_since = Instant::now();
+            }
+            ensure!(idle_since.elapsed() < Duration::from_secs(30),
+                "IOSurface pool exhausted: limit={MAX_PIXEL_BUFFERS}, in_flight={}; {}; release completed Metal texture aliases",
+                self.in_flight()?, self.error());
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
-    pub fn frame(&mut self, rgba: &[u8], frame: u64, pcm16: &[u8]) -> Result<()> {
+
+    /// Submit an owned pixel buffer after the caller completes all GPU writes.
+    /// It must never modify that surface again after calling this method.
+    pub fn frame_pixel(&mut self, pixel: PixelBuffer, frame: u64, pcm16: &[u8]) -> Result<()> {
         self.prepare_audio(pcm16)?;
-        ensure!(!self.video_finished, "video input is already finished");
         ensure!(
-            frame == self.video_frames && frame < i64::MAX as u64,
+            !self.video_finished && !self.complete,
+            "video input is already finished"
+        );
+        ensure!(
+            frame == self.video_frames && frame < i64::MAX as u64 && frame < usize::MAX as u64 - 1,
             "video frames must be consecutive"
         );
+        unsafe {
+            ensure!(
+                CVPixelBufferGetWidth(pixel.as_ptr()) == self.width as usize
+                    && CVPixelBufferGetHeight(pixel.as_ptr()) == self.height as usize
+                    && CVPixelBufferGetPixelFormatType(pixel.as_ptr()) == BGRA,
+                "wrong VideoToolbox pixel buffer size or format"
+            );
+        }
+        self.submit_pixel(pixel, frame, pcm16)?;
+        self.video_frames = frame + 1;
+        self.service(pcm16)
+    }
+
+    /// Transfer a completed GPU surface while the compression session is
+    /// suspended. This performs no writer service or VideoToolbox calls, so
+    /// background quiescence cannot wait on an AVAssetWriter input.
+    pub fn defer_pixel(&mut self, pixel: PixelBuffer, frame: u64, pcm16: &[u8]) -> Result<()> {
+        self.prepare_audio(pcm16)?;
+        ensure!(
+            !self.video_finished && !self.complete,
+            "video input is already finished"
+        );
+        ensure!(
+            self.needs_resume()?,
+            "cannot defer a frame while VideoToolbox is active"
+        );
+        ensure!(
+            frame == self.video_frames && frame < i64::MAX as u64 && frame < usize::MAX as u64 - 1,
+            "video frames must be consecutive"
+        );
+        unsafe {
+            ensure!(
+                CVPixelBufferGetWidth(pixel.as_ptr()) == self.width as usize
+                    && CVPixelBufferGetHeight(pixel.as_ptr()) == self.height as usize
+                    && CVPixelBufferGetPixelFormatType(pixel.as_ptr()) == BGRA,
+                "wrong VideoToolbox pixel buffer size or format"
+            );
+        }
+        self.callbacks
+            .lock()
+            .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?
+            .retry
+            .insert(frame, pixel);
+        self.video_frames = frame + 1;
+        Ok(())
+    }
+
+    fn submit_pixel(&mut self, pixel: PixelBuffer, frame: u64, pcm16: &[u8]) -> Result<()> {
+        self.wait_capacity(pcm16)?;
+        if self.needs_resume()? {
+            self.callbacks
+                .lock()
+                .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?
+                .retry
+                .insert(frame, pixel);
+            return Ok(());
+        }
+        let token = self.next_token;
+        self.next_token = self
+            .next_token
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("compression submission token overflow"))?;
+        let image = pixel.as_ptr();
+        {
+            let mut state = self
+                .callbacks
+                .lock()
+                .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?;
+            state.pixels.insert(token, FrameInput { frame, pixel });
+        }
+        let mut flags = 0;
+        let properties = if self.force_next_keyframe {
+            self.keyframe_properties.0 as Ref
+        } else {
+            null_mut()
+        };
+        let code = unsafe {
+            VTCompressionSessionEncodeFrame(
+                self.session,
+                image,
+                Time::new(frame as i64, self.fps),
+                Time::new(1, self.fps),
+                properties,
+                token as Ref,
+                &mut flags,
+            )
+        };
+        if code == INVALID_SESSION {
+            let mut state = self
+                .callbacks
+                .lock()
+                .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?;
+            if let Some(input) = state.pixels.remove(&token) {
+                state.retry.insert(input.frame, input.pixel);
+            }
+            state.needs_resume = true;
+            return Ok(());
+        }
+        if code != 0 || flags & 2 != 0 {
+            // The callback may already have removed this token. Never reconstruct
+            // a Box from sourceFrameRefCon or release another generation's input.
+            let mut state = self
+                .callbacks
+                .lock()
+                .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?;
+            state.pixels.remove(&token);
+            anyhow::bail!(
+                "VideoToolbox frame {frame} encode failed: OSStatus={code}, flags={flags}; {}",
+                self.error()
+            );
+        }
+        self.force_next_keyframe = false;
+        Ok(())
+    }
+
+    pub fn needs_resume(&self) -> Result<bool> {
+        self.callbacks
+            .lock()
+            .map(|state| state.needs_resume || self.session.is_null())
+            .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))
+    }
+
+    /// Called on the rendering thread before the app enters the background.
+    /// Keep the writer and every unencoded pixel so foreground resume can replay
+    /// the original global frame indices without dropping a frame.
+    pub fn suspend(&mut self, pcm16: &[u8]) -> Result<()> {
+        self.prepare_audio(pcm16)?;
+        let code = if self.session.is_null() {
+            0
+        } else {
+            unsafe {
+                VTCompressionSessionCompleteFrames(
+                    self.session,
+                    Time {
+                        value: 0,
+                        scale: 0,
+                        flags: 0,
+                        epoch: 0,
+                    },
+                )
+            }
+        };
+        self.invalidate_for_resume()?;
+        // Failed flush still requires deterministic teardown; only InvalidSession
+        // is recoverable. Other VideoToolbox errors retain the normal failure path.
+        if code != INVALID_SESSION {
+            status(code, "VideoToolbox suspend completion")?;
+        }
+        // No writer waits here: UIApplication's quiesce gate needs the GPU and
+        // VideoToolbox stopped promptly. Outputs are retained for foreground.
+        self.check_callback_error()
+    }
+
+    fn invalidate_for_resume(&mut self) -> Result<()> {
+        if !self.session.is_null() {
+            unsafe {
+                VTCompressionSessionInvalidate(self.session);
+                CFRelease(self.session);
+            }
+            self.session = null_mut();
+        }
+        let mut state = self
+            .callbacks
+            .lock()
+            .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?;
+        state.needs_resume = true;
+        let encoded = std::mem::take(&mut state.samples);
+        for (frame, output) in encoded {
+            if frame >= self.next_output_frame {
+                state.retry.entry(frame).or_insert(output.pixel);
+            }
+        }
+        let remaining = std::mem::take(&mut state.pixels);
+        for (_, input) in remaining {
+            if input.frame >= self.next_output_frame {
+                state.retry.entry(input.frame).or_insert(input.pixel);
+            }
+        }
+        Ok(())
+    }
+
+    /// Recreate VideoToolbox on foreground activation and replay retained pixels
+    /// in their original frame order. The first encoded frame is forced to IDR.
+    pub fn resume(&mut self, pcm16: &[u8]) -> Result<()> {
+        self.prepare_audio(pcm16)?;
+        if !self.needs_resume()? {
+            return Ok(());
+        }
+        self.invalidate_for_resume()?;
+        self.create_session()?;
+        if self.session.is_null() {
+            return Ok(());
+        }
+        self.callbacks
+            .lock()
+            .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?
+            .needs_resume = false;
+        loop {
+            if self.needs_resume()? {
+                break;
+            }
+            let next = {
+                let mut state = self
+                    .callbacks
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?;
+                let next = state.retry.keys().next().copied();
+                next.map(|frame| (frame, state.retry.remove(&frame).unwrap()))
+            };
+            let Some((frame, pixel)) = next else {
+                break;
+            };
+            self.submit_pixel(pixel, frame, pcm16)?;
+            self.service(pcm16)?;
+        }
+        Ok(())
+    }
+
+    // CPU compatibility and the native baseline tests use the same pool and
+    // asynchronous scheduler. Production Metal submits frame_pixel directly.
+    pub fn frame(&mut self, rgba: &[u8], frame: u64, pcm16: &[u8]) -> Result<()> {
         ensure!(
             rgba.len() == self.width as usize * self.height as usize * 4,
             "wrong RGBA frame size"
         );
-        if self.pending_video.len() >= MAX_PENDING_VIDEO {
-            self.pump(pcm16, PumpGoal::MakeRoom)?;
-        }
+        let pixel = self.pixel_buffer(pcm16)?;
         unsafe {
-            let mut pixel = null_mut();
             status(
-                CVPixelBufferCreate(
-                    null_mut(),
-                    self.width as usize,
-                    self.height as usize,
-                    0x42475241,
-                    null_mut(),
-                    &mut pixel,
-                ),
-                "BGRA pixel buffer creation",
-            )?;
-            let pixel = Cf(pixel);
-            status(
-                CVPixelBufferLockBaseAddress(pixel.0, 0),
+                CVPixelBufferLockBaseAddress(pixel.as_ptr(), 0),
                 "pixel buffer lock",
             )?;
-            let stride = CVPixelBufferGetBytesPerRow(pixel.0);
-            let base = CVPixelBufferGetBaseAddress(pixel.0) as *mut u8;
+            let stride = CVPixelBufferGetBytesPerRow(pixel.as_ptr());
+            let base = CVPixelBufferGetBaseAddress(pixel.as_ptr()) as *mut u8;
+            if base.is_null() || stride < self.width as usize * 4 {
+                let _ = CVPixelBufferUnlockBaseAddress(pixel.as_ptr(), 0);
+                anyhow::bail!("invalid pooled BGRA pixel buffer layout");
+            }
             for y in 0..self.height as usize {
                 let output =
                     std::slice::from_raw_parts_mut(base.add(y * stride), self.width as usize * 4);
@@ -511,47 +960,131 @@ impl Encoder {
                 }
             }
             status(
-                CVPixelBufferUnlockBaseAddress(pixel.0, 0),
+                CVPixelBufferUnlockBaseAddress(pixel.as_ptr(), 0),
                 "pixel buffer unlock",
             )?;
-            let time = Time::new(frame as i64, self.fps);
-            status(
-                VTCompressionSessionEncodeFrame(
-                    self.session,
-                    pixel.0,
-                    time,
-                    Time::new(1, self.fps),
-                    null_mut(),
-                    null_mut(),
-                    null_mut(),
-                ),
-                "VideoToolbox frame encode",
-            )?;
-            status(
-                VTCompressionSessionCompleteFrames(self.session, time),
-                "VideoToolbox frame completion",
-            )?;
         }
-        let samples = {
-            let mut state = self
+        self.frame_pixel(pixel, frame, pcm16)
+    }
+
+    fn in_flight(&self) -> Result<usize> {
+        self.callbacks
+            .lock()
+            .map(|state| state.pixels.len())
+            .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))
+    }
+
+    fn wait_capacity(&mut self, pcm16: &[u8]) -> Result<()> {
+        self.service(pcm16)?;
+        let idle_since = Instant::now();
+        while self.in_flight()? >= MAX_IN_FLIGHT_VIDEO {
+            if self.needs_resume()? {
+                return Ok(());
+            }
+            if !self.bounded_frame_delay {
+                let token = self
+                    .callbacks
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?
+                    .pixels
+                    .values()
+                    .next()
+                    .unwrap()
+                    .frame;
+                let code = unsafe {
+                    VTCompressionSessionCompleteFrames(
+                        self.session,
+                        Time::new(token as i64, self.fps),
+                    )
+                };
+                if code == INVALID_SESSION {
+                    self.invalidate_for_resume()?;
+                    return Ok(());
+                }
+                status(code, "VideoToolbox bounded-window completion")?;
+            }
+            self.service(pcm16)?;
+            if self.in_flight()? < MAX_IN_FLIGHT_VIDEO {
+                break;
+            }
+            ensure!(
+                idle_since.elapsed() < Duration::from_secs(30),
+                "VideoToolbox callback stalled: in_flight={}; {}",
+                self.in_flight()?,
+                self.error()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Ok(())
+    }
+
+    fn drain_callbacks(&mut self, pcm16: &[u8]) -> Result<()> {
+        loop {
+            let sample = {
+                let mut state = self
+                    .callbacks
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?;
+                if let Some(error) = state.error.take() {
+                    anyhow::bail!(
+                        "VideoToolbox callback failed: frame={:?}, OSStatus={error}; {}",
+                        state.error_frame.take(),
+                        self.error()
+                    );
+                }
+                state
+                    .samples
+                    .retain(|frame, _| *frame >= self.next_output_frame);
+                // Leave ownership in callback state if the writer queue is full.
+                if self.pending_video.len() >= MAX_PENDING_VIDEO {
+                    None
+                } else {
+                    state.samples.remove(&self.next_output_frame)
+                }
+            };
+            if let Some(output) = sample {
+                self.start_video(&output.sample)?;
+                self.pending_video.push_back(output.sample);
+                self.next_output_frame += 1;
+                continue;
+            }
+            let has_next = self
                 .callbacks
                 .lock()
-                .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?;
-            if let Some(error) = state.error.take() {
-                status(error, "VideoToolbox callback")?;
-            }
-            std::mem::take(&mut state.samples)
-        };
-        ensure!(!samples.is_empty(), "VideoToolbox produced no frame");
-        for sample in samples {
-            self.start_video(&sample)?;
-            if self.pending_video.len() >= MAX_PENDING_VIDEO {
+                .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?
+                .samples
+                .contains_key(&self.next_output_frame);
+            if has_next && self.pending_video.len() >= MAX_PENDING_VIDEO {
                 self.pump(pcm16, PumpGoal::MakeRoom)?;
+                continue;
             }
-            self.pending_video.push_back(sample);
+            return Ok(());
         }
-        self.video_frames = frame + 1;
-        self.pump(pcm16, PumpGoal::Available)
+    }
+
+    fn check_callback_error(&mut self) -> Result<()> {
+        let mut state = self
+            .callbacks
+            .lock()
+            .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?;
+        if let Some(error) = state.error.take() {
+            anyhow::bail!(
+                "VideoToolbox callback failed: frame={:?}, OSStatus={error}; {}",
+                state.error_frame.take(),
+                self.error()
+            );
+        }
+        Ok(())
+    }
+
+    fn service(&mut self, pcm16: &[u8]) -> Result<()> {
+        self.drain_callbacks(pcm16)?;
+        // The writer starts only after the first asynchronous sample supplies
+        // its H.264 format description. Unknown is normal before that point.
+        if self.video.is_some() {
+            self.pump(pcm16, PumpGoal::Available)?;
+        }
+        Ok(())
     }
     fn start_video(&mut self, sample: &Cf) -> Result<()> {
         if self.video.is_some() {
@@ -772,15 +1305,65 @@ impl Encoder {
         }
     }
     pub fn finish(&mut self, pcm16: &[u8]) -> Result<()> {
-        ensure!(self.video.is_some(), "render contains no video frames");
+        ensure!(
+            self.try_finish(pcm16)?,
+            "VideoToolbox interrupted; resume before finalizing MP4"
+        );
+        Ok(())
+    }
+
+    /// Returns false after a recoverable interruption. The lifecycle gate must
+    /// wait for foreground activation, call resume, then try finishing again.
+    pub fn try_finish(&mut self, pcm16: &[u8]) -> Result<bool> {
+        if self.complete {
+            return Ok(true);
+        }
+        ensure!(self.video_frames > 0, "render contains no video frames");
         self.prepare_audio(pcm16)?;
+        if self.needs_resume()? {
+            return Ok(false);
+        }
+        // A non-numeric CMTime emits every outstanding frame before returning.
+        // This is the only normal-path forced completion for the entire clip.
+        let code = unsafe {
+            VTCompressionSessionCompleteFrames(
+                self.session,
+                Time {
+                    value: 0,
+                    scale: 0,
+                    flags: 0,
+                    epoch: 0,
+                },
+            )
+        };
+        if code == INVALID_SESSION || self.needs_resume()? {
+            self.invalidate_for_resume()?;
+            self.check_callback_error()?;
+            return Ok(false);
+        }
+        status(code, "VideoToolbox final completion")?;
+        self.drain_callbacks(pcm16)?;
+        ensure!(
+            self.in_flight()? == 0,
+            "VideoToolbox final completion left pending frame tokens"
+        );
+        ensure!(
+            self.video.is_some(),
+            "VideoToolbox produced no video frames"
+        );
+        ensure!(
+            self.next_output_frame == self.video_frames,
+            "VideoToolbox omitted frames: wrote {}, submitted {}",
+            self.next_output_frame,
+            self.video_frames
+        );
         self.pump(pcm16, PumpGoal::Finish)?;
         unsafe {
             let ok: objc::runtime::BOOL = msg_send![self.writer.0, finishWriting];
             ensure!(ok == YES, "Cannot finalize MP4: {}", self.error());
         }
         self.complete = true;
-        Ok(())
+        Ok(true)
     }
 }
 impl Drop for Encoder {
@@ -810,6 +1393,7 @@ mod tests {
         fn CMSampleBufferGetPresentationTimeStamp(sample: Ref) -> Time;
         fn CMSampleBufferGetDecodeTimeStamp(sample: Ref) -> Time;
         fn CMSampleBufferGetDuration(sample: Ref) -> Time;
+        fn CMSampleBufferGetImageBuffer(sample: Ref) -> Ref;
         fn CMFormatDescriptionGetMediaSubType(format: Ref) -> u32;
         fn CMTimeGetSeconds(time: Time) -> f64;
         fn CMGetAttachment(buffer: Ref, key: Ref, mode: *mut u32) -> Ref;
@@ -1019,7 +1603,113 @@ mod tests {
         (video, audio)
     }
 
+    unsafe fn read_video_colors(path: &Path, expected: u64) {
+        let path = string(&path.to_string_lossy());
+        let url: *mut Object = msg_send![class!(NSURL), fileURLWithPath:path.0];
+        let asset: *mut Object =
+            msg_send![class!(AVURLAsset), URLAssetWithURL:url options:null_mut::<Object>()];
+        let media = string("vide");
+        let tracks: *mut Object = msg_send![asset, tracksWithMediaType:media.0];
+        let track: *mut Object = msg_send![tracks, objectAtIndex:0usize];
+        let allocated: *mut Object = msg_send![class!(AVAssetReader), alloc];
+        let mut error: *mut Object = null_mut();
+        let reader: *mut Object = msg_send![allocated, initWithAsset:asset error:&mut error];
+        assert!(
+            !reader.is_null(),
+            "Cannot create color decoder: {}",
+            description(error)
+        );
+        let reader = Obj(reader);
+        let format = number(BGRA as i64);
+        let settings = reference_dictionary(&[(kCVPixelBufferPixelFormatTypeKey, format.0 as Ref)]);
+        let allocated: *mut Object = msg_send![class!(AVAssetReaderTrackOutput), alloc];
+        let output: *mut Object =
+            msg_send![allocated, initWithTrack:track outputSettings:settings.0];
+        assert!(!output.is_null());
+        let output = Obj(output);
+        let can_add: objc::runtime::BOOL = msg_send![reader.0, canAddOutput:output.0];
+        assert_eq!(can_add, YES);
+        let _: () = msg_send![reader.0, addOutput:output.0];
+        let started: objc::runtime::BOOL = msg_send![reader.0, startReading];
+        assert_eq!(started, YES);
+        let mut frames = 0;
+        loop {
+            let color = objc::rc::autoreleasepool(|| {
+                let sample: Ref = msg_send![output.0, copyNextSampleBuffer];
+                if sample.is_null() {
+                    return None;
+                }
+                let sample = Cf(sample);
+                if CMSampleBufferGetNumSamples(sample.0) == 0 {
+                    return Some(None);
+                }
+                let pixel = CMSampleBufferGetImageBuffer(sample.0);
+                assert!(!pixel.is_null(), "H.264 decoder returned no image");
+                assert_eq!(CVPixelBufferGetPixelFormatType(pixel), BGRA);
+                status(
+                    CVPixelBufferLockBaseAddress(pixel, 1),
+                    "decoded pixel read lock",
+                )
+                .unwrap();
+                let base = CVPixelBufferGetBaseAddress(pixel) as *const u8;
+                let offset = CVPixelBufferGetHeight(pixel) / 2 * CVPixelBufferGetBytesPerRow(pixel)
+                    + CVPixelBufferGetWidth(pixel) / 2 * 4;
+                let center = std::slice::from_raw_parts(base.add(offset), 4);
+                let color = [center[0], center[1], center[2]];
+                status(
+                    CVPixelBufferUnlockBaseAddress(pixel, 1),
+                    "decoded pixel read unlock",
+                )
+                .unwrap();
+                Some(Some(color))
+            });
+            let Some(color) = color else {
+                break;
+            };
+            let Some([blue, green, red]) = color else {
+                continue;
+            };
+            assert!(green < 40, "Unexpected green component on frame {frames}");
+            if frames % 2 == 0 {
+                assert!(
+                    red > 215 && blue < 40,
+                    "Wrong decoded red frame {frames}: R={red} B={blue}"
+                );
+            } else {
+                assert!(
+                    blue > 215 && red < 40,
+                    "Wrong decoded blue frame {frames}: R={red} B={blue}"
+                );
+            }
+            frames += 1;
+        }
+        let state: isize = msg_send![reader.0, status];
+        let error: *mut Object = msg_send![reader.0, error];
+        assert_eq!(
+            state,
+            2,
+            "H.264 color decode failed: {}",
+            description(error)
+        );
+        assert_eq!(
+            frames, expected,
+            "Decoded frame loss after session recovery"
+        );
+        eprintln!("Native MP4 session recovery decoded {frames} alternating red/blue images");
+    }
+
     fn run_smoke(width: u32, height: u32, fps: u32, frames: u64, audio_frames: usize) {
+        run_smoke_with_pause(width, height, fps, frames, audio_frames, None);
+    }
+
+    fn run_smoke_with_pause(
+        width: u32,
+        height: u32,
+        fps: u32,
+        frames: u64,
+        audio_frames: usize,
+        pause: Option<(u64, bool)>,
+    ) {
         objc::rc::autoreleasepool(|| {
             const RATE: u32 = 48_000;
             let directory = tempfile::tempdir().unwrap();
@@ -1033,8 +1723,25 @@ mod tests {
                 .concat()
                 .repeat(audio_frames);
             for frame in 0..frames {
+                if pause == Some((frame, false)) {
+                    encoder.suspend(&audio).unwrap();
+                    assert!(encoder.needs_resume().unwrap());
+                    encoder.resume(&audio).unwrap();
+                    assert!(!encoder.needs_resume().unwrap());
+                } else if pause == Some((frame, true)) {
+                    // Exercise the real native InvalidSession return rather than
+                    // simulating an app notification or a mock OSStatus.
+                    unsafe {
+                        VTCompressionSessionInvalidate(encoder.session);
+                    }
+                }
                 let rgba = if frame % 2 == 0 { &red } else { &blue };
                 objc::rc::autoreleasepool(|| encoder.frame(rgba, frame, &audio).unwrap());
+                if pause == Some((frame, true)) {
+                    assert!(encoder.needs_resume().unwrap());
+                    encoder.resume(&audio).unwrap();
+                    assert!(!encoder.needs_resume().unwrap());
+                }
             }
             encoder.finish(&audio).unwrap();
             let state: isize = unsafe { msg_send![encoder.writer.0, status] };
@@ -1046,16 +1753,29 @@ mod tests {
             if let Some(folder) = std::env::var_os("PHI_TKC_APPLE_SMOKE_ARTIFACTS") {
                 let folder = std::path::PathBuf::from(folder);
                 std::fs::create_dir_all(&folder).unwrap();
+                let suffix = pause
+                    .map(|(frame, invalid)| {
+                        format!(
+                            "-pause-{frame}-{}",
+                            if invalid { "invalid" } else { "suspend" }
+                        )
+                    })
+                    .unwrap_or_default();
                 std::fs::copy(
                     &path,
                     folder.join(format!(
-                        "{width}x{height}-{fps}fps-{frames}video-{audio_frames}audio.mp4"
+                        "{width}x{height}-{fps}fps-{frames}video-{audio_frames}audio{suffix}.mp4"
                     )),
                 )
                 .unwrap();
             }
 
             let (video, audio) = unsafe { read_media(&path) };
+            if pause.is_some() {
+                unsafe {
+                    read_video_colors(&path, frames);
+                }
+            }
             assert_eq!(
                 video.count, frames,
                 "Written MP4 has missing or extra video frames"
@@ -1116,5 +1836,15 @@ mod tests {
     #[test]
     fn videotoolbox_sustained_720p() {
         run_smoke(1280, 720, 30, 600, 20 * 48_000);
+    }
+
+    #[test]
+    fn videotoolbox_suspend_resume() {
+        run_smoke_with_pause(64, 64, 30, 90, 144_000, Some((35, false)));
+    }
+
+    #[test]
+    fn videotoolbox_invalid_session_replay() {
+        run_smoke_with_pause(64, 64, 30, 90, 144_000, Some((35, true)));
     }
 }

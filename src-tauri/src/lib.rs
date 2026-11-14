@@ -19,6 +19,10 @@ mod task;
 #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
 mod apple_media;
 #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+mod apple_frames;
+#[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+mod apple_lifecycle;
+#[cfg(any(target_os = "ios", feature = "apple-render-check"))]
 mod apple_platform;
 #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
 mod apple_render;
@@ -164,6 +168,8 @@ pub async fn run() -> Result<()> {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_chart_picker::init())
         .setup(|app| {
+            #[cfg(target_os = "ios")]
+            apple_platform::register_app(app.handle().clone());
             #[cfg(any(target_os = "android", target_os = "ios"))]
             let cover_dir = Some(app.path().app_cache_dir()?.join("task-covers"));
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

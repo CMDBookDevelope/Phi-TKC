@@ -13,6 +13,7 @@ import router from './router';
 import { createVuetify } from 'vuetify';
 import * as components from 'vuetify/components';
 import * as directives from 'vuetify/directives';
+import { AppProgressCircular, AppProgressLinear, installInternalProgressPaint } from './components/AppProgress';
 import { aliases, mdi } from 'vuetify/iconsets/mdi';
 import 'vuetify/styles';
 
@@ -35,7 +36,11 @@ function detectLocale(): string {
 changeLocale(detectLocale());
 
 const vuetify = createVuetify({
-  components: { ...components },
+  components: {
+    ...components,
+    VProgressLinear: AppProgressLinear,
+    VProgressCircular: AppProgressCircular,
+  },
   directives,
   theme: {
     defaultTheme: 'customTheme',
@@ -73,6 +78,7 @@ const vuetify = createVuetify({
 document.body.classList.add(isAndroid() ? 'is-android' : isMobile() ? 'is-ios' : 'is-desktop');
 
 const app = createApp(App);
+installInternalProgressPaint(app);
 app.use(i18n).use(router).use(vuetify);
 
 // Registers the global v-glass directive: a pointer-following specular

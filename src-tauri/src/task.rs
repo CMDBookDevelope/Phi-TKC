@@ -213,15 +213,17 @@ impl Task {
                         .map(|value| value.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "output.mp4".to_string());
                     let source = self.output.clone();
-                    let published = tokio::task::spawn_blocking(move || {
+                    let published = tokio::task::spawn_blocking(move || -> Result<(String, String)> {
                         #[cfg(target_os = "android")]
-                        { crate::android_uri::publish_video(&source, &name) }
-                        #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
-                        { let _ = name; Ok(source.to_string_lossy().into_owned()) }
+                        { crate::android_uri::publish_video(&source, &name).map(|path| (path, String::new())) }
+                        #[cfg(target_os = "ios")]
+                        { let _ = name; let note = crate::apple_platform::save_to_photos(&source); Ok((source.to_string_lossy().into_owned(), note)) }
+                        #[cfg(all(not(any(target_os = "ios", target_os = "android")), feature = "apple-render-check"))]
+                        { let _ = name; Ok((source.to_string_lossy().into_owned(), String::new())) }
                     })
                     .await
                     .unwrap_or_else(|error| Err(anyhow::anyhow!("publish task failed: {error}")));
-                    let target = match published {
+                    let (target, photo_note) = match published {
                         Ok(target) => target,
                         Err(error) => {
                             *self.status.lock().await = TaskStatus::Failed {
@@ -237,7 +239,7 @@ impl Task {
                     }
                     *self.status.lock().await = TaskStatus::Done {
                         duration: elapsed,
-                        output: format!("{log}\n\nSaved to: {target}"),
+                        output: format!("{log}\n\nSaved to: {target}\n{photo_note}"),
                     };
                     return Ok(());
                 }

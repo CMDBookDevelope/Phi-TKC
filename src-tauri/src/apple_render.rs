@@ -1,4 +1,6 @@
 use crate::{
+    apple_frames::MetalFrames,
+    apple_lifecycle::RenderActivity,
     apple_media::Encoder,
     render::{build_player, RenderParams},
 };
@@ -62,6 +64,8 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> 
     crate::apple_platform::debug_log(&format!("render: using requested {vw}x{vh}"));
     crate::apple_platform::debug_log(&format!("render: assets={}", request.asset_dir.display()));
     let conf = build_conf(vw, vh);
+    let activity = RenderActivity::begin();
+    activity.checkpoint(|| check_canceled(&request.request_cancel), || Ok(()))?;
 
     let shared: std::sync::Arc<std::sync::Mutex<Option<Result<()>>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -71,7 +75,7 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> 
         macroquad::Window::from_config(conf, async move {
             let _resources = crate::common::NativeRenderResources;
             set_pc_assets_folder(&request.asset_dir.display().to_string());
-            let result = render_async(request, vw, vh, on_progress).await;
+            let result = render_async(request, activity, vw, vh, on_progress).await;
             if let Err(error) = &result {
                 log::error!("Render failed: {error:?}");
             }
@@ -90,6 +94,7 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> 
 
 async fn render_async(
     request: RenderRequest,
+    activity: RenderActivity,
     vw: u32,
     vh: u32,
     on_progress: impl Fn(f32, f64) + 'static,
@@ -104,17 +109,8 @@ async fn render_async(
             elapsed
         }};
     }
-    let check_cancel = || -> Result<()> {
-        if request
-            .request_cancel
-            .as_ref()
-            .is_some_and(|value| value.load(Ordering::Relaxed))
-        {
-            bail!("render canceled");
-        }
-        Ok(())
-    };
-    check_cancel()?;
+    let check_cancel = || check_canceled(&request.request_cancel);
+    activity.checkpoint(check_cancel, finish_gpu)?;
     let params = request.params;
     let path = params.path.clone();
     let font = FontArc::try_from_vec(load_file("font.ttf").await?)?;
@@ -266,7 +262,7 @@ async fn render_async(
         }
     }
     mark!("mixing");
-    check_cancel()?;
+    activity.checkpoint(check_cancel, finish_gpu)?;
 
     let sample_rate = params.config.target_audio.max(8000) as usize;
     let pcm = resample_pcm(&output, SAMPLE_RATE, sample_rate);
@@ -297,6 +293,7 @@ async fn render_async(
     ));
 
     let bitrate = bitrate_bps(&params.config)?;
+    activity.checkpoint(check_cancel, finish_gpu)?;
     let mut encoder = Encoder::new(
         &request.output_path,
         vw,
@@ -341,12 +338,26 @@ async fn render_async(
     if output_frames == 0 {
         bail!("render duration contains no output frames");
     }
-    let mut rgba = vec![0u8; vw as usize * vh as usize * 4];
+    let mut gpu_frames = MetalFrames::new(
+        miniquad_context()
+            .metal_context()
+            .context("Metal context is unavailable")?,
+        vw,
+        vh,
+    )?;
     let mut fps_timer = Instant::now();
     let mut realtime_fps = 0.;
     for frame in 0..frames {
         objc::rc::autoreleasepool(|| -> Result<()> {
-            check_cancel()?;
+            if prepare_encoder(
+                &activity,
+                &mut gpu_frames,
+                &mut encoder,
+                pcm16,
+                check_cancel,
+            )? {
+                fps_timer = Instant::now();
+            }
             *my_time.borrow_mut() = frame as f64 * frame_duration;
             if frame != 0 {
                 main.update()?;
@@ -360,23 +371,43 @@ async fn render_async(
             main.render(&mut painter)?;
             unsafe { get_internal_gl() }.flush();
             let texture = target.output().texture.raw_miniquad_texture_handle();
-            miniquad_context()
-                .metal_context()
-                .context("Metal context is unavailable")?
-                .read_rgba(texture, &mut rgba);
-            // Render targets retain OpenGL's bottom-first memory convention;
-            // CoreVideo expects the first row at the top of the video.
-            let stride = vw as usize * 4;
-            for row in 0..vh as usize / 2 {
-                let opposite = (vh as usize - row - 1) * stride;
-                let (first, last) = rgba.split_at_mut(opposite);
-                first[row * stride..(row + 1) * stride].swap_with_slice(&mut last[..stride]);
-            }
             let output_index = frame - skip;
-            encoder.frame(&rgba, output_index, pcm16).with_context(|| {
-                format!("Apple media at video frame {output_index}/{output_frames}, PTS {:.3}s, {vw}x{vh} @ {fps} fps",
-                    output_index as f64 / fps_f64)
-            })?;
+            gpu_frames.drain_ready(&mut encoder, pcm16)?;
+            if gpu_frames.at_capacity() {
+                gpu_frames.drain_one(&mut encoder, pcm16)?;
+            }
+            // The pool bounds both queues. Drain a completed GPU lease before
+            // acquiring the next one; VT owns every surface after frame_pixel.
+            let pixel = loop {
+                if prepare_encoder(
+                    &activity,
+                    &mut gpu_frames,
+                    &mut encoder,
+                    pcm16,
+                    check_cancel,
+                )? {
+                    fps_timer = Instant::now();
+                }
+                match encoder.pixel_buffer(pcm16) {
+                    Ok(pixel) => break pixel,
+                    Err(_) if encoder.needs_resume()? => continue,
+                    Err(error) => return Err(error),
+                }
+            };
+            gpu_frames
+                .enqueue(
+                    miniquad_context()
+                        .metal_context()
+                        .context("Metal context is unavailable")?,
+                    texture,
+                    pixel,
+                    output_index,
+                )
+                .with_context(|| {
+                    format!(
+                        "Metal video frame {output_index}/{output_frames}, {vw}x{vh} @ {fps} fps"
+                    )
+                })?;
             if output_index % 10 == 9 {
                 realtime_fps = 10. / fps_timer.elapsed().as_secs_f64().max(1e-9);
                 fps_timer = Instant::now();
@@ -388,13 +419,87 @@ async fn render_async(
             Ok(())
         })?;
     }
-    check_cancel()?;
-    encoder.finish(pcm16).context("Apple media finalization")?;
+    loop {
+        prepare_encoder(
+            &activity,
+            &mut gpu_frames,
+            &mut encoder,
+            pcm16,
+            check_cancel,
+        )?;
+        gpu_frames.drain_all(&mut encoder, pcm16)?;
+        if encoder
+            .try_finish(pcm16)
+            .context("Apple media finalization")?
+        {
+            break;
+        }
+    }
     info!(
         "Metal render complete: {output_frames} frames in {:.2}s",
         process_start.elapsed().as_secs_f64()
     );
     Ok(())
+}
+
+fn check_canceled(cancel: &Option<Arc<AtomicBool>>) -> Result<()> {
+    if cancel
+        .as_ref()
+        .is_some_and(|value| value.load(Ordering::Relaxed))
+    {
+        bail!("render canceled");
+    }
+    Ok(())
+}
+
+fn finish_gpu() -> Result<()> {
+    unsafe { get_internal_gl() }.flush();
+    miniquad_context()
+        .metal_context()
+        .context("Metal context is unavailable")?
+        .finish();
+    Ok(())
+}
+
+fn prepare_encoder(
+    activity: &RenderActivity,
+    frames: &mut MetalFrames,
+    encoder: &mut Encoder,
+    pcm16: &[u8],
+    check_cancel: impl Fn() -> Result<()> + Copy,
+) -> Result<bool> {
+    let mut resumed = false;
+    let mut retry_since = Instant::now();
+    loop {
+        if activity.checkpoint(check_cancel, || {
+            frames.wait_all()?;
+            finish_gpu()?;
+            encoder.suspend(pcm16)?;
+            frames.defer_all(encoder, pcm16)
+        })? {
+            resumed = true;
+            retry_since = Instant::now();
+        }
+        if !encoder.needs_resume()? {
+            return Ok(resumed);
+        }
+        frames.wait_all()?;
+        finish_gpu()?;
+        encoder.suspend(pcm16)?;
+        frames.defer_all(encoder, pcm16)?;
+        encoder.resume(pcm16)?;
+        if !encoder.needs_resume()? {
+            return Ok(true);
+        }
+        // Activation and VideoToolbox availability can arrive separately. A
+        // foreground retry never advances the chart or its output frame index.
+        check_cancel()?;
+        anyhow::ensure!(
+            retry_since.elapsed().as_secs() < 30,
+            "VideoToolbox session is still unavailable in the foreground"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 fn pcm_f32_to_i16(input: &[f32]) -> Vec<u8> {
