@@ -108,11 +108,20 @@ fn dictionary(entries: &[(&str, &Obj)]) -> Obj {
 
 // Logical GL quadrants, in bottom-left / bottom-right / top-left / top-right order.
 fn quadrants(frame: u64) -> [[u8; 3]; 4] {
-    if frame % 2 == 0 {
-        [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]]
-    } else {
-        [[0, 0, 255], [255, 255, 0], [255, 0, 0], [0, 255, 0]]
+    // Every frame has a unique set of twelve saturated channels, so an even
+    // number of stale or reordered source frames is also detectable.
+    let pattern = frame ^ 0b1010_1100_1101;
+    let mut colors = [[0; 3]; 4];
+    for (quadrant, color) in colors.iter_mut().enumerate() {
+        for (channel, value) in color.iter_mut().enumerate() {
+            *value = if pattern & (1 << (quadrant * 3 + channel)) != 0 {
+                255
+            } else {
+                0
+            };
+        }
     }
+    colors
 }
 
 struct GpuSmoke {

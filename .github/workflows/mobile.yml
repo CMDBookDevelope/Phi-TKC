@@ -223,8 +223,34 @@ jobs:
       - name: Build unsigned IPA
         run: pnpm tauri ios build --ci --no-sign --target aarch64
 
+      - name: Compile PhotoKit plugin against real iOS SDK
+        run: bash scripts/check-ios-photos.sh "$GITHUB_WORKSPACE" "$RUNNER_TEMP/photos-sdk-check"
+
       - name: Verify renderer resources in IPA
         run: python3 scripts/check-ios-resources.py src-tauri/gen/apple/build/arm64/*.ipa
+
+      - name: Verify linked Photos framework and album permission description
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, pathlib, plistlib, subprocess, tempfile, zipfile
+          packages = glob.glob('src-tauri/gen/apple/build/arm64/*.ipa')
+          assert packages, 'No linked iOS application was produced'
+          for package in packages:
+              with zipfile.ZipFile(package) as archive:
+                  names = [n for n in archive.namelist() if n.count('/') == 2 and n.endswith('.app/Info.plist')]
+                  assert len(names) == 1, 'Expected one application Info.plist'
+                  info = plistlib.loads(archive.read(names[0]))
+                  assert info.get('NSPhotoLibraryAddUsageDescription'), 'Missing album addition permission description'
+                  binary_name = names[0].rsplit('/', 1)[0] + '/' + info['CFBundleExecutable']
+                  with tempfile.TemporaryDirectory() as folder:
+                      binary = pathlib.Path(folder) / 'app-binary'
+                      binary.write_bytes(archive.read(binary_name))
+                      linked = subprocess.check_output(['otool', '-L', str(binary)], text=True)
+                      assert 'Photos.framework/Photos' in linked, 'PhotoKit is absent from the actual app linkage'
+                  print('Actual IPA has linked PhotoKit and an album addition permission description')
+          PY
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

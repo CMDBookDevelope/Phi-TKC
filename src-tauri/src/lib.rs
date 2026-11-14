@@ -26,6 +26,13 @@ mod apple_lifecycle;
 mod apple_platform;
 #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
 mod apple_render;
+#[cfg(all(
+    test,
+    feature = "apple-render-check",
+    any(target_os = "macos", target_os = "ios")
+))]
+#[path = "../../scripts/apple-gpu-smoke.rs"]
+mod apple_gpu_smoke;
 mod vulkan_encode;
 mod vulkan_readback;
 mod vulkan_video;

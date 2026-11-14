@@ -5,6 +5,19 @@ on:
   push:
     branches: [ci/metal-1.3.0]
   workflow_dispatch:
+    inputs:
+      fixture_url:
+        description: Public encrypted fixture URL
+        required: false
+        type: string
+      fixture_cipher_sha256:
+        description: Expected encrypted fixture SHA256
+        required: false
+        type: string
+      fixture_plain_sha256:
+        description: Expected decrypted fixture SHA256
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -15,9 +28,11 @@ jobs:
     timeout-minutes: 90
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
-      PHI_TKC_APPLE_SMOKE_ARTIFACTS: ${{ runner.temp }}/apple-native-results
     steps:
       - uses: actions/checkout@v4
+      - name: Set native result directory
+        shell: bash
+        run: printf 'PHI_TKC_APPLE_SMOKE_ARTIFACTS=%s/apple-native-results\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           repository: CMDBookDevelope/prpr-miniquad
@@ -97,6 +112,9 @@ jobs:
       - name: Prepare private chart fixture and benchmark tools
         env:
           PHI_TKC_BENCH_KEY: ${{ secrets.PHI_TKC_BENCH_KEY }}
+          PHI_TKC_FIXTURE_URL: ${{ inputs.fixture_url || 'https://github.com/CMDBookDevelope/Phi-TKC/releases/download/v1.2.9-6a4d4b0/native-bench-41a2459a34b5e2296b81b0f5.enc' }}
+          PHI_TKC_FIXTURE_CIPHER_SHA: ${{ inputs.fixture_cipher_sha256 || '41c319ad77eea7de4a3b490b95766a320092f00eaa3fdc835f31ec0cccf7c506' }}
+          PHI_TKC_FIXTURE_PLAIN_SHA: ${{ inputs.fixture_plain_sha256 || '44121abeeba3f24820823faa5437aeee541fce2366eb3d48913372b1196c5b34' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -106,16 +124,18 @@ jobs:
           mkdir -p "$RUNNER_TEMP/apple-pipeline/private"
           chmod 700 "$RUNNER_TEMP/apple-pipeline/private"
           curl --fail --location --retry 3 --max-time 180 \
-            https://github.com/CMDBookDevelope/Phi-TKC/releases/download/v1.2.9-6a4d4b0/native-bench-41a2459a34b5e2296b81b0f5.enc \
+            "$PHI_TKC_FIXTURE_URL" \
             --output "$RUNNER_TEMP/apple-pipeline/private/fixture.enc"
           printf '%s  %s\n' \
-            41c319ad77eea7de4a3b490b95766a320092f00eaa3fdc835f31ec0cccf7c506 \
+            "$PHI_TKC_FIXTURE_CIPHER_SHA" \
             "$RUNNER_TEMP/apple-pipeline/private/fixture.enc" | shasum -a 256 --check
           crypto_bin="$(brew --prefix openssl@3)/bin/openssl"
           "$crypto_bin" enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -saltlen 8 \
             -pass env:PHI_TKC_BENCH_KEY -in "$RUNNER_TEMP/apple-pipeline/private/fixture.enc" \
             -out "$RUNNER_TEMP/apple-pipeline/private/fixture.pez"
           chmod 600 "$RUNNER_TEMP/apple-pipeline/private/fixture.pez"
+          printf '%s  %s\n' "$PHI_TKC_FIXTURE_PLAIN_SHA" \
+            "$RUNNER_TEMP/apple-pipeline/private/fixture.pez" | shasum -a 256 --check
           unset PHI_TKC_BENCH_KEY
           ln -s "$GITHUB_WORKSPACE/native-deps/Phi-TKC-render-lib" baseline-deps/Phi-TKC-render-lib
       - name: Compare old/new full pipelines on this Mac with the same 20s PCM
