@@ -7,7 +7,7 @@ use macroquad::miniquad as mq;
 use objc::{
     class, msg_send,
     runtime::{Object, NO, YES},
-    sel, sel_impl,
+    sel, sel_impl, Encode, Encoding,
 };
 use std::{
     ffi::c_void,
@@ -23,6 +23,17 @@ const FPS: u32 = 30;
 const FRAMES: u64 = 120;
 const RATE: u32 = 48_000;
 const AUDIO_FRAMES: usize = FRAMES as usize * RATE as usize / FPS as usize;
+
+#[repr(C)]
+struct TimeRange {
+    start: Time,
+    duration: Time,
+}
+unsafe impl Encode for TimeRange {
+    fn encode() -> Encoding {
+        unsafe { Encoding::from_str("{CMTimeRange={CMTime=qiIq}{CMTime=qiIq}}") }
+    }
+}
 
 #[cfg_attr(
     any(target_os = "macos", target_os = "ios"),
@@ -256,6 +267,7 @@ unsafe fn decode_video(asset: *mut Object, track: *mut Object) {
     let (reader, output) = reader(asset, track, settings);
     let mut count = 0u64;
     let mut end = 0.0;
+    let mut missing_durations = 0;
     loop {
         let next = objc::rc::autoreleasepool(|| {
             let sample: Ref = msg_send![output.0, copyNextSampleBuffer];
@@ -299,7 +311,16 @@ unsafe fn decode_video(asset: *mut Object, track: *mut Object) {
             (pts - count as f64 / FPS as f64).abs() < 1e-5,
             "video PTS gap at frame {count}: {pts}"
         );
-        assert!(duration.is_finite() && duration > 0.);
+        // Decoded image buffers can omit timing duration. Frame count and
+        // exact PTS still determine cadence; validate the stored track extent
+        // separately rather than requiring decoder-generated metadata.
+        let duration = if duration.is_finite() && duration > 0. {
+            assert!((duration - 1. / FPS as f64).abs() < 1e-5);
+            duration
+        } else {
+            missing_durations += 1;
+            1. / FPS as f64
+        };
         let expected = quadrants(count);
         // CV/MP4 rows are top-first; GL scissor coordinates are bottom-first.
         for (index, actual) in colors.into_iter().enumerate() {
@@ -318,7 +339,15 @@ unsafe fn decode_video(asset: *mut Object, track: *mut Object) {
         "GPU export dropped or duplicated a video frame"
     );
     assert!((end - FRAMES as f64 / FPS as f64).abs() <= 1. / FPS as f64);
-    eprintln!("Native GPU video decoded {count} frames with exact PTS, BGRA colors, all quadrants and top-first orientation");
+    let range: TimeRange = msg_send![track, timeRange];
+    let track_start = CMTimeGetSeconds(range.start);
+    let track_duration = CMTimeGetSeconds(range.duration);
+    assert!(track_start.is_finite() && track_start.abs() < 1e-5);
+    assert!(
+        track_duration.is_finite() && (track_duration - FRAMES as f64 / FPS as f64).abs() < 1e-5,
+        "stored video track duration differs: {track_duration}"
+    );
+    eprintln!("Native GPU video decoded {count} frames with exact PTS, BGRA colors, all quadrants and top-first orientation; stored duration={track_duration:.6}s, missing decoded durations={missing_durations}");
 }
 
 unsafe fn decode_audio(asset: *mut Object, track: *mut Object) {

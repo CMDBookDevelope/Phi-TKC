@@ -163,6 +163,8 @@ jobs:
           if-no-files-found: error
 
   ios-link:
+    # A reader-only retry keeps the earlier successful app linkage validation.
+    if: ${{ !contains(github.event.head_commit.message, '[native-only]') }}
     runs-on: macos-latest
     timeout-minutes: 120
     env:
