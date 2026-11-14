@@ -804,9 +804,14 @@ mod tests {
     extern "C" {
         fn CMSampleBufferGetNumSamples(sample: Ref) -> i64;
         fn CMSampleBufferGetPresentationTimeStamp(sample: Ref) -> Time;
+        fn CMSampleBufferGetDecodeTimeStamp(sample: Ref) -> Time;
         fn CMSampleBufferGetDuration(sample: Ref) -> Time;
         fn CMFormatDescriptionGetMediaSubType(format: Ref) -> u32;
         fn CMTimeGetSeconds(time: Time) -> f64;
+        fn CMGetAttachment(buffer: Ref, key: Ref, mode: *mut u32) -> Ref;
+        static kCFBooleanTrue: Ref;
+        static kCMSampleBufferAttachmentKey_EmptyMedia: Ref;
+        static kCMSampleBufferAttachmentKey_EndsPreviousSampleDuration: Ref;
     }
 
     #[derive(Default, Debug)]
@@ -866,13 +871,47 @@ mod tests {
                 let sample = Cf(sample);
                 let count = CMSampleBufferGetNumSamples(sample.0);
                 let time = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample.0));
+                let decode = CMTimeGetSeconds(CMSampleBufferGetDecodeTimeStamp(sample.0));
                 let duration = CMTimeGetSeconds(CMSampleBufferGetDuration(sample.0));
-                Some((count, time, duration))
+                let empty_media = CMGetAttachment(
+                    sample.0,
+                    kCMSampleBufferAttachmentKey_EmptyMedia,
+                    null_mut(),
+                ) == kCFBooleanTrue;
+                let ends_previous = CMGetAttachment(
+                    sample.0,
+                    kCMSampleBufferAttachmentKey_EndsPreviousSampleDuration,
+                    null_mut(),
+                ) == kCFBooleanTrue;
+                Some((count, time, decode, duration, empty_media, ends_previous))
             });
-            let Some((count, time, duration)) = next else {
+            let Some((count, time, decode, duration, empty_media, ends_previous)) = next else {
                 break;
             };
-            assert!(count > 0, "Empty sample buffer in written track");
+            if count == 0 && (empty_media || ends_previous) {
+                // AVAssetReader also emits marker buffers for empty edits and
+                // the end of the previous sample. They contain no media frames.
+                // Reject unmarked zero-sample buffers and still require the exact
+                // media frame count after reading the whole track.
+                if ends_previous && result.count > 0 {
+                    // This marker terminates the previous decode interval.
+                    // Reordering is disabled, so PTS is also usable if DTS is absent.
+                    let end = if decode.is_finite() { decode } else { time };
+                    assert!(
+                        end.is_finite() && end >= previous,
+                        "Invalid end-of-sample marker: PTS={time}, DTS={decode}"
+                    );
+                    result.end_time = end;
+                }
+                eprintln!("Native MP4 {} marker: empty_media={empty_media}, ends_previous={ends_previous}, PTS={time:.6}s, DTS={decode:.6}s, duration={duration:.6}s",
+                    if audio { "audio" } else { "video" });
+                continue;
+            }
+            assert!(
+                count > 0,
+                "Unmarked empty sample buffer in {} track at PTS={time}, duration={duration}",
+                if audio { "audio" } else { "video" }
+            );
             assert!(time.is_finite() && duration.is_finite() && duration > 0.0);
             assert!(
                 time > previous,
