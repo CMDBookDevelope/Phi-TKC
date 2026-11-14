@@ -277,6 +277,8 @@ async fn render_async(
         sample_rate,
         pcm.len() as f64 / 2. / sample_rate as f64
     );
+    drop(pcm);
+    drop(output);
 
     let ss = if params.config.disable_loading {
         O
@@ -368,14 +370,13 @@ async fn render_async(
             for row in 0..vh as usize / 2 {
                 let opposite = (vh as usize - row - 1) * stride;
                 let (first, last) = rgba.split_at_mut(opposite);
-                first[row * stride..(row + 1) * stride]
-                    .swap_with_slice(&mut last[..stride]);
+                first[row * stride..(row + 1) * stride].swap_with_slice(&mut last[..stride]);
             }
             let output_index = frame - skip;
-            encoder.frame(&rgba, output_index)?;
-            let audio_until =
-                ((output_index + 1) as f64 * sample_rate as f64 / fps_f64).round() as usize;
-            encoder.audio_until(pcm16, audio_until)?;
+            encoder.frame(&rgba, output_index, pcm16).with_context(|| {
+                format!("Apple media at video frame {output_index}/{output_frames}, PTS {:.3}s, {vw}x{vh} @ {fps} fps",
+                    output_index as f64 / fps_f64)
+            })?;
             if output_index % 10 == 9 {
                 realtime_fps = 10. / fps_timer.elapsed().as_secs_f64().max(1e-9);
                 fps_timer = Instant::now();
@@ -388,7 +389,7 @@ async fn render_async(
         })?;
     }
     check_cancel()?;
-    encoder.finish(pcm16)?;
+    encoder.finish(pcm16).context("Apple media finalization")?;
     info!(
         "Metal render complete: {output_frames} frames in {:.2}s",
         process_start.elapsed().as_secs_f64()

@@ -8,6 +8,7 @@ use objc::{
     sel, sel_impl, Encode, Encoding,
 };
 use std::{
+    collections::VecDeque,
     ffi::c_void,
     path::Path,
     ptr::null_mut,
@@ -90,6 +91,7 @@ extern "C" {
 )]
 extern "C" {
     fn CMSampleBufferGetFormatDescription(sample: Ref) -> Ref;
+    fn CMSampleBufferGetPresentationTimeStamp(sample: Ref) -> Time;
     fn CMAudioFormatDescriptionCreate(
         allocator: Ref,
         description: *const AudioDescription,
@@ -235,6 +237,44 @@ fn description(object: *mut Object) -> String {
     }
 }
 
+fn media_error(error: *mut Object, depth: usize) -> String {
+    if error.is_null() {
+        return "NSError=none".into();
+    }
+    unsafe {
+        let domain: *mut Object = msg_send![error, domain];
+        let code: i64 = msg_send![error, code];
+        let mut result = format!(
+            "domain={} code={code}: {}",
+            description(domain),
+            description(error)
+        );
+        if depth < 3 {
+            let info: *mut Object = msg_send![error, userInfo];
+            let key = string("NSUnderlyingError");
+            let underlying: *mut Object = msg_send![info, objectForKey:key.0];
+            if !underlying.is_null() && underlying != error {
+                result.push_str(&format!(
+                    "; underlying=[{}]",
+                    media_error(underlying, depth + 1)
+                ));
+            }
+        }
+        result
+    }
+}
+
+// AVAssetWriter can withhold readiness on one input until the other advances.
+// Available must yield to the renderer if another video frame is needed; only
+// MakeRoom and Finish wait, while continuing to service both inputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PumpGoal {
+    Available,
+    MakeRoom,
+    Finish,
+}
+const MAX_PENDING_VIDEO: usize = 64;
+
 #[derive(Default)]
 struct CallbackState {
     samples: Vec<Cf>,
@@ -258,13 +298,18 @@ pub struct Encoder {
     callbacks: Box<Mutex<CallbackState>>,
     writer: Obj,
     video: Option<Obj>,
+    pending_video: VecDeque<Cf>,
     audio: Obj,
     audio_format: Cf,
     width: u32,
     height: u32,
     fps: u32,
     rate: u32,
+    video_frames: u64,
     audio_frames: usize,
+    audio_total: Option<usize>,
+    video_finished: bool,
+    audio_finished: bool,
     complete: bool,
 }
 impl Encoder {
@@ -283,7 +328,8 @@ impl Encoder {
                 && height <= i32::MAX as u32
                 && fps > 0
                 && fps <= i32::MAX as u32
-                && rate > 0,
+                && rate > 0
+                && rate <= i32::MAX as u32,
             "invalid Apple encoder dimensions or rates"
         );
         ensure!(!path.exists(), "output already exists: {}", path.display());
@@ -298,7 +344,7 @@ impl Encoder {
             ensure!(
                 !writer.is_null(),
                 "Cannot open MP4 output: {}",
-                description(error)
+                media_error(error, 0)
             );
             let writer = Obj(writer);
             let codec = string("aac");
@@ -350,13 +396,18 @@ impl Encoder {
                 callbacks: Box::default(),
                 writer,
                 video: None,
+                pending_video: VecDeque::new(),
                 audio,
                 audio_format: Cf(audio_format),
                 width,
                 height,
                 fps,
                 rate,
+                video_frames: 0,
                 audio_frames: 0,
+                audio_total: None,
+                video_finished: false,
+                audio_finished: false,
                 complete: false,
             };
             status(
@@ -414,11 +465,20 @@ impl Encoder {
             Ok(encoder)
         }
     }
-    pub fn frame(&mut self, rgba: &[u8], frame: u64) -> Result<()> {
+    pub fn frame(&mut self, rgba: &[u8], frame: u64, pcm16: &[u8]) -> Result<()> {
+        self.prepare_audio(pcm16)?;
+        ensure!(!self.video_finished, "video input is already finished");
+        ensure!(
+            frame == self.video_frames && frame < i64::MAX as u64,
+            "video frames must be consecutive"
+        );
         ensure!(
             rgba.len() == self.width as usize * self.height as usize * 4,
             "wrong RGBA frame size"
         );
+        if self.pending_video.len() >= MAX_PENDING_VIDEO {
+            self.pump(pcm16, PumpGoal::MakeRoom)?;
+        }
         unsafe {
             let mut pixel = null_mut();
             status(
@@ -485,9 +545,13 @@ impl Encoder {
         ensure!(!samples.is_empty(), "VideoToolbox produced no frame");
         for sample in samples {
             self.start_video(&sample)?;
-            self.append(self.video.as_ref().unwrap(), &sample)?;
+            if self.pending_video.len() >= MAX_PENDING_VIDEO {
+                self.pump(pcm16, PumpGoal::MakeRoom)?;
+            }
+            self.pending_video.push_back(sample);
         }
-        Ok(())
+        self.video_frames = frame + 1;
+        self.pump(pcm16, PumpGoal::Available)
     }
     fn start_video(&mut self, sample: &Cf) -> Result<()> {
         if self.video.is_some() {
@@ -513,44 +577,64 @@ impl Encoder {
     }
     fn error(&self) -> String {
         unsafe {
+            let state: i64 = msg_send![self.writer.0, status];
+            let state_name = match state {
+                0 => "unknown",
+                1 => "writing",
+                2 => "completed",
+                3 => "failed",
+                4 => "cancelled",
+                _ => "unrecognized",
+            };
             let error: *mut Object = msg_send![self.writer.0, error];
-            description(error)
+            format!(
+                "status={state_name}({state}); video={} frames @ {} fps, pending={}; audio={}/{} frames @ {} Hz; {}",
+                self.video_frames,
+                self.fps,
+                self.pending_video.len(),
+                self.audio_frames,
+                self.audio_total.unwrap_or(0),
+                self.rate,
+                media_error(error, 0)
+            )
         }
     }
-    fn append(&self, input: &Obj, sample: &Cf) -> Result<()> {
-        let start = Instant::now();
-        loop {
-            unsafe {
-                let ready: objc::runtime::BOOL = msg_send![input.0, isReadyForMoreMediaData];
-                if ready == YES {
-                    break;
-                }
-                let state: i64 = msg_send![self.writer.0, status];
-                ensure!(state == 1, "MP4 writer stopped: {}", self.error());
-            }
-            ensure!(
-                start.elapsed() < Duration::from_secs(30),
-                "MP4 writer stalled"
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
+    fn ready(input: &Obj) -> bool {
+        let ready: objc::runtime::BOOL = unsafe { msg_send![input.0, isReadyForMoreMediaData] };
+        ready == YES
+    }
+    fn append_ready(&self, input: &Obj, sample: &Cf, track: &str) -> Result<()> {
         let ok: objc::runtime::BOOL = unsafe { msg_send![input.0,appendSampleBuffer:sample.0] };
-        ensure!(ok == YES, "Cannot append MP4 sample: {}", self.error());
+        if ok != YES {
+            let time = unsafe { CMSampleBufferGetPresentationTimeStamp(sample.0) };
+            anyhow::bail!(
+                "Cannot append MP4 {track} sample, PTS={}/{}: {}",
+                time.value,
+                time.scale,
+                self.error()
+            );
+        }
         Ok(())
     }
-    pub fn audio_until(&mut self, pcm16: &[u8], until: usize) -> Result<()> {
+    fn prepare_audio(&mut self, pcm16: &[u8]) -> Result<()> {
         ensure!(
             pcm16.len() % 4 == 0,
             "PCM data must contain complete stereo frames"
         );
+        let total = pcm16.len() / 4;
         ensure!(
-            self.video.is_some(),
-            "encode the first video frame before audio"
+            self.audio_total.map_or(true, |previous| previous == total),
+            "PCM length changed during rendering"
         );
-        let until = until.min(pcm16.len() / 4);
-        while self.audio_frames < until {
-            let count = (until - self.audio_frames).min(1024);
-            let data = &pcm16[self.audio_frames * 4..(self.audio_frames + count) * 4];
+        self.audio_total = Some(total);
+        Ok(())
+    }
+    fn append_audio(&mut self, pcm16: &[u8], until: usize) -> Result<()> {
+        let count = (until - self.audio_frames).min(1024);
+        let data = &pcm16[self.audio_frames * 4..(self.audio_frames + count) * 4];
+        // Bound temporary Objective-C allocations even when a blocked video
+        // input needs a large amount of ready audio to advance interleaving.
+        objc::rc::autoreleasepool(|| -> Result<()> {
             unsafe {
                 let mut block = null_mut();
                 status(
@@ -598,20 +682,100 @@ impl Encoder {
                     ),
                     "PCM sample creation",
                 )?;
-                self.append(&self.audio, &Cf(sample))?;
+                self.append_ready(&self.audio, &Cf(sample), "audio")?;
             }
-            self.audio_frames += count;
-        }
+            Ok(())
+        })?;
+        self.audio_frames += count;
         Ok(())
+    }
+    fn pump(&mut self, pcm16: &[u8], goal: PumpGoal) -> Result<()> {
+        let total = pcm16.len() / 4;
+        let audio_limit = ((self.video_frames as f64 * self.rate as f64 / self.fps as f64).round()
+            as usize)
+            .min(total);
+        let mut idle_since = Instant::now();
+        let mut rounds = 0;
+        loop {
+            let state: i64 = unsafe { msg_send![self.writer.0, status] };
+            ensure!(
+                state == 1,
+                "MP4 writer stopped during {goal:?}: {}",
+                self.error()
+            );
+            let mut progressed = false;
+            if self.audio_frames == total && !self.audio_finished {
+                unsafe {
+                    let _: () = msg_send![self.audio.0, markAsFinished];
+                }
+                self.audio_finished = true;
+                progressed = true;
+            }
+            if let Some(sample) = self.pending_video.front() {
+                let input = self.video.as_ref().unwrap();
+                if Self::ready(input) {
+                    self.append_ready(input, sample, "video")?;
+                    self.pending_video.pop_front();
+                    progressed = true;
+                }
+            }
+            // Normally audio follows the rendered video. If video is blocked,
+            // allow ready audio past that target instead of waiting on video.
+            // Recheck video after every PCM chunk so neither input is starved.
+            if !self.audio_finished
+                && (self.audio_frames < audio_limit
+                    || !self.pending_video.is_empty()
+                    || goal == PumpGoal::Finish)
+                && Self::ready(&self.audio)
+            {
+                let until = if !self.pending_video.is_empty() || goal == PumpGoal::Finish {
+                    total
+                } else {
+                    audio_limit
+                };
+                self.append_audio(pcm16, until)?;
+                progressed = true;
+            }
+            if self.audio_frames == total && !self.audio_finished {
+                unsafe {
+                    let _: () = msg_send![self.audio.0, markAsFinished];
+                }
+                self.audio_finished = true;
+                progressed = true;
+            }
+            if goal == PumpGoal::Finish && self.pending_video.is_empty() && !self.video_finished {
+                unsafe {
+                    let _: () = msg_send![self.video.as_ref().unwrap().0, markAsFinished];
+                }
+                self.video_finished = true;
+                progressed = true;
+            }
+            rounds += 1;
+            match goal {
+                PumpGoal::Available if !progressed || rounds >= 64 => return Ok(()),
+                PumpGoal::MakeRoom if self.pending_video.len() < MAX_PENDING_VIDEO => return Ok(()),
+                PumpGoal::Finish if self.video_finished && self.audio_finished => return Ok(()),
+                _ => {}
+            }
+            if progressed {
+                idle_since = Instant::now();
+            } else {
+                ensure!(
+                    idle_since.elapsed() < Duration::from_secs(30),
+                    "MP4 writer stalled during {goal:?}: video_ready={} audio_ready={}; {}",
+                    Self::ready(self.video.as_ref().unwrap()),
+                    Self::ready(&self.audio),
+                    self.error()
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
     }
     pub fn finish(&mut self, pcm16: &[u8]) -> Result<()> {
         ensure!(self.video.is_some(), "render contains no video frames");
+        self.prepare_audio(pcm16)?;
+        self.pump(pcm16, PumpGoal::Finish)?;
         unsafe {
-            let _: () = msg_send![self.video.as_ref().unwrap().0, markAsFinished];
-        }
-        self.audio_until(pcm16, pcm16.len() / 4)?;
-        unsafe {
-            let _: () = msg_send![self.audio.0, markAsFinished];
             let ok: objc::runtime::BOOL = msg_send![self.writer.0, finishWriting];
             ensure!(ok == YES, "Cannot finalize MP4: {}", self.error());
         }
@@ -636,24 +800,225 @@ impl Drop for Encoder {
 #[cfg(all(test, any(target_os = "macos", target_os = "ios")))]
 mod tests {
     use super::*;
-    #[test]
-    fn videotoolbox_mp4_smoke() {
+
+    extern "C" {
+        fn CMSampleBufferGetNumSamples(sample: Ref) -> i64;
+        fn CMSampleBufferGetPresentationTimeStamp(sample: Ref) -> Time;
+        fn CMSampleBufferGetDuration(sample: Ref) -> Time;
+        fn CMFormatDescriptionGetMediaSubType(format: Ref) -> u32;
+        fn CMTimeGetSeconds(time: Time) -> f64;
+    }
+
+    #[derive(Default, Debug)]
+    struct TrackSamples {
+        count: u64,
+        first_time: Option<f64>,
+        end_time: f64,
+    }
+
+    unsafe fn read_track(asset: *mut Object, track: *mut Object, audio: bool) -> TrackSamples {
+        let mut error: *mut Object = null_mut();
+        let allocated: *mut Object = msg_send![class!(AVAssetReader), alloc];
+        let reader: *mut Object = msg_send![allocated, initWithAsset:asset error:&mut error];
+        assert!(
+            !reader.is_null(),
+            "Cannot create AVAssetReader: {}",
+            description(error)
+        );
+        let reader = Obj(reader);
+        let false_value: *mut Object = msg_send![class!(NSNumber), numberWithBool:NO];
+        let _: () = msg_send![false_value, retain];
+        let false_value = Obj(false_value);
+        let settings = audio.then(|| {
+            dictionary(&[
+                ("AVFormatIDKey", &number(0x6c70636d)),
+                ("AVLinearPCMBitDepthKey", &number(16)),
+                ("AVLinearPCMIsFloatKey", &false_value),
+                ("AVLinearPCMIsBigEndianKey", &false_value),
+                ("AVLinearPCMIsNonInterleaved", &false_value),
+            ])
+        });
+        let settings_pointer = settings.as_ref().map_or(null_mut(), |value| value.0);
+        let allocated: *mut Object = msg_send![class!(AVAssetReaderTrackOutput), alloc];
+        let output: *mut Object =
+            msg_send![allocated, initWithTrack:track outputSettings:settings_pointer];
+        assert!(
+            !output.is_null(),
+            "Cannot create AVAssetReader track output"
+        );
+        let output = Obj(output);
+        let can_add: objc::runtime::BOOL = msg_send![reader.0, canAddOutput:output.0];
+        assert_eq!(can_add, YES);
+        let _: () = msg_send![reader.0, addOutput:output.0];
+        let started: objc::runtime::BOOL = msg_send![reader.0, startReading];
+        assert_eq!(started, YES, "Cannot start AVAssetReader");
+
+        let mut result = TrackSamples::default();
+        let mut previous = f64::NEG_INFINITY;
+        loop {
+            // Use a per-buffer pool as well as owned CF buffers: the long test
+            // must not retain autoreleased reader objects until the whole clip ends.
+            let next = objc::rc::autoreleasepool(|| {
+                let sample: Ref = msg_send![output.0, copyNextSampleBuffer];
+                if sample.is_null() {
+                    return None;
+                }
+                let sample = Cf(sample);
+                let count = CMSampleBufferGetNumSamples(sample.0);
+                let time = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample.0));
+                let duration = CMTimeGetSeconds(CMSampleBufferGetDuration(sample.0));
+                Some((count, time, duration))
+            });
+            let Some((count, time, duration)) = next else {
+                break;
+            };
+            assert!(count > 0, "Empty sample buffer in written track");
+            assert!(time.is_finite() && duration.is_finite() && duration > 0.0);
+            assert!(
+                time > previous,
+                "Non-increasing track PTS: {time} after {previous}"
+            );
+            if !audio {
+                assert_eq!(count, 1, "Expected one H.264 frame per sample buffer");
+            }
+            result.first_time.get_or_insert(time);
+            result.count += count as u64;
+            result.end_time = time + duration;
+            previous = time;
+        }
+        let state: isize = msg_send![reader.0, status];
+        let error: *mut Object = msg_send![reader.0, error];
+        assert_eq!(state, 2, "AVAssetReader failed: {}", description(error));
+        result
+    }
+
+    unsafe fn read_media(path: &Path) -> (TrackSamples, TrackSamples) {
+        let path = string(&path.to_string_lossy());
+        let url: *mut Object = msg_send![class!(NSURL), fileURLWithPath:path.0];
+        let asset: *mut Object =
+            msg_send![class!(AVURLAsset), URLAssetWithURL:url options:null_mut::<Object>()];
+        assert!(!asset.is_null());
+        let _: () = msg_send![asset, retain];
+        let asset = Obj(asset);
+        let video_type = string("vide");
+        let audio_type = string("soun");
+        let video_tracks: *mut Object = msg_send![asset.0, tracksWithMediaType:video_type.0];
+        let audio_tracks: *mut Object = msg_send![asset.0, tracksWithMediaType:audio_type.0];
+        let video_count: usize = msg_send![video_tracks, count];
+        let audio_count: usize = msg_send![audio_tracks, count];
+        assert_eq!(video_count, 1, "MP4 must contain one video track");
+        assert!(
+            audio_count <= 1,
+            "MP4 contains unexpected extra audio tracks"
+        );
+        let video_track: *mut Object = msg_send![video_tracks, objectAtIndex:0usize];
+        let descriptions: *mut Object = msg_send![video_track, formatDescriptions];
+        let count: usize = msg_send![descriptions, count];
+        assert!(count > 0, "H.264 track has no format description");
+        let format: Ref = msg_send![descriptions, objectAtIndex:0usize];
+        assert_eq!(CMFormatDescriptionGetMediaSubType(format), 0x61766331);
+        let video = read_track(asset.0, video_track, false);
+        let audio = if audio_count == 0 {
+            TrackSamples::default()
+        } else {
+            let audio_track: *mut Object = msg_send![audio_tracks, objectAtIndex:0usize];
+            let descriptions: *mut Object = msg_send![audio_track, formatDescriptions];
+            let count: usize = msg_send![descriptions, count];
+            if count == 0 {
+                // A finished input with no PCM may leave an empty track. There
+                // is no format to decode; a nonempty source fails below on count.
+                TrackSamples::default()
+            } else {
+                let format: Ref = msg_send![descriptions, objectAtIndex:0usize];
+                assert_eq!(CMFormatDescriptionGetMediaSubType(format), 0x61616320);
+                read_track(asset.0, audio_track, true)
+            }
+        };
+        (video, audio)
+    }
+
+    fn run_smoke(width: u32, height: u32, fps: u32, frames: u64, audio_frames: usize) {
         objc::rc::autoreleasepool(|| {
+            const RATE: u32 = 48_000;
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("native.mp4");
-            let mut encoder = Encoder::new(&path,64,64,30,1_000_000,48_000).unwrap();
-            let rgba = [255u8,0,0,255].repeat(64*64);
-            let audio = vec![0u8;48_000*4];
-            for frame in 0..30 {
-                encoder.frame(&rgba,frame).unwrap();
-                encoder.audio_until(&audio,(frame as usize+1)*1600).unwrap();
+            let mut encoder = Encoder::new(&path, width, height, fps, 4_000_000, RATE).unwrap();
+            let red = [255u8, 0, 0, 255].repeat(width as usize * height as usize);
+            let blue = [0u8, 0, 255, 255].repeat(width as usize * height as usize);
+            // Nonzero stereo PCM lets the decoder test both sample count and
+            // track presence rather than accidentally accepting an empty track.
+            let audio = [1200i16.to_le_bytes(), (-1200i16).to_le_bytes()]
+                .concat()
+                .repeat(audio_frames);
+            for frame in 0..frames {
+                let rgba = if frame % 2 == 0 { &red } else { &blue };
+                objc::rc::autoreleasepool(|| encoder.frame(rgba, frame, &audio).unwrap());
             }
             encoder.finish(&audio).unwrap();
-            let bytes=std::fs::read(path).unwrap();
-            assert!(bytes.len()>1024);
-            assert_eq!(&bytes[4..8],b"ftyp");
-            assert!(bytes.windows(4).any(|tag|tag==b"mdat"));
-            assert!(bytes.windows(4).any(|tag|tag==b"moov"));
+            let state: isize = unsafe { msg_send![encoder.writer.0, status] };
+            assert_eq!(state, 2, "MP4 writer did not complete");
+            drop(encoder);
+
+            let (video, audio) = unsafe { read_media(&path) };
+            assert_eq!(
+                video.count, frames,
+                "Written MP4 has missing or extra video frames"
+            );
+            assert!(video.first_time.unwrap().abs() < 1e-6);
+            let video_duration = frames as f64 / fps as f64;
+            assert!((video.end_time - video_duration).abs() <= 1.0 / fps as f64);
+            if audio_frames == 0 {
+                assert_eq!(
+                    audio.count, 0,
+                    "Empty PCM unexpectedly produced audio samples"
+                );
+            } else {
+                // AAC uses 1024-frame packets. Apple TN2258 describes common
+                // 2112-frame priming plus a tail packet; leave room for both when
+                // decoded while requiring the actual track and bounded duration.
+                assert!(
+                    audio.count.abs_diff(audio_frames as u64) <= 4096,
+                    "Wrong decoded AAC length: {audio:?}"
+                );
+                let audio_duration = audio_frames as f64 / RATE as f64;
+                let tolerance = 4096.0 / RATE as f64;
+                assert!(audio.first_time.unwrap().abs() <= tolerance);
+                assert!(
+                    (audio.end_time - audio_duration).abs() <= tolerance,
+                    "Wrong AAC duration: {audio:?}"
+                );
+            }
+            let media_duration = video.end_time.max(audio.end_time);
+            let expected = video_duration.max(audio_frames as f64 / RATE as f64);
+            assert!(
+                (media_duration - expected).abs() <= (1.0 / fps as f64).max(4096.0 / RATE as f64)
+            );
+            eprintln!("Native MP4 verified {width}x{height}: {frames} frames, {audio_frames} PCM frames, {media_duration:.3}s");
         });
+    }
+
+    #[test]
+    fn videotoolbox_mp4_smoke() {
+        run_smoke(64, 64, 30, 30, 48_000);
+    }
+
+    #[test]
+    fn videotoolbox_empty_audio() {
+        run_smoke(64, 64, 30, 24, 0);
+    }
+
+    #[test]
+    fn videotoolbox_short_audio() {
+        run_smoke(64, 64, 30, 90, 9_600);
+    }
+
+    #[test]
+    fn videotoolbox_long_audio() {
+        run_smoke(64, 64, 30, 30, 96_000);
+    }
+
+    #[test]
+    fn videotoolbox_sustained_720p() {
+        run_smoke(1280, 720, 30, 600, 20 * 48_000);
     }
 }
