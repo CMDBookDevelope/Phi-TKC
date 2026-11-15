@@ -16,6 +16,7 @@ fn build_conf() -> macroquad::window::Conf {
         headless: !is_preview,
         platform: macroquad::miniquad::conf::Platform {
             rendering_backend: macroquad::miniquad::conf::RenderingBackend::Vulkan,
+            swap_interval: is_preview.then_some(0),
             ..Default::default()
         },
         ..Default::default()

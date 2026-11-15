@@ -9,7 +9,7 @@ use prpr::{
     ui::{FontArc, TextPainter, Ui},
     Main,
 };
-use std::{collections::VecDeque, io::BufRead, time::Instant};
+use std::{collections::VecDeque, io::BufRead, time::{Duration, Instant}};
 struct BaseScene(Option<NextScene>, bool);
 impl Scene for BaseScene {
     fn on_result(&mut self, _tm: &mut TimeManager, result: Box<dyn std::any::Any>) -> Result<()> {
@@ -53,6 +53,7 @@ pub async fn main() -> Result<()> {
     let mut line = String::new();
     stdin.read_line(&mut line)?;
     let params: RenderParams = serde_json::from_str(line.trim())?;
+    let frame_time = Duration::from_secs_f64(1.0 / params.config.fps.max(1) as f64);
 
     let fs = fs::fs_from_file(&params.path)?;
     let info = params.info;
@@ -106,6 +107,9 @@ pub async fn main() -> Result<()> {
         let rendered = Instant::now();
         if main.should_exit() {
             break;
+        }
+        if let Some(wait) = frame_time.checked_sub(frame_start.elapsed()) {
+            std::thread::sleep(wait);
         }
         next_frame().await;
         let now = Instant::now();

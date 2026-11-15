@@ -77,7 +77,14 @@ pub fn wait_until_active() {
 #[no_mangle]
 pub extern "C" fn phi_tkc_render_lifecycle(active: i32) {
     // A Swift/C caller must never receive a Rust unwind.
-    let _ = std::panic::catch_unwind(|| activity().change(active != 0));
+    let _ = std::panic::catch_unwind(|| {
+        if active == 0 {
+            // Wake a low-FPS preview before the synchronous GPU checkpoint.
+            // UIKit observer order must not postpone background entry.
+            crate::native_preview::suspend_for_background();
+        }
+        activity().change(active != 0);
+    });
 }
 
 pub struct RenderActivity {

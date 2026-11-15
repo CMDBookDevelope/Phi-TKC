@@ -156,7 +156,6 @@ final class PreviewViewController: UIViewController {
         } else {
             link.preferredFramesPerSecond = maximum
         }
-        phi_tkc_preview_set_refresh_rate(session, UInt32(maximum))
     }
     private func setActive(_ active: Bool) {
         if active { configureFrameRate() }
@@ -164,11 +163,8 @@ final class PreviewViewController: UIViewController {
         link?.isPaused = !active
     }
     @objc private func frame(_ link: CADisplayLink) {
-        let interval = link.targetTimestamp - link.timestamp
-        if interval > 0 {
-            phi_tkc_preview_set_refresh_rate(session, UInt32(min(120, max(1, (1 / interval).rounded()))))
-        }
-        phi_tkc_preview_frame_tick(session)
+        // The display link presents the latest completed frame. Rust renders
+        // independently at the FPS requested in the preview settings.
         if let label = fpsLabel {
             let text = String(format: "%.1f FPS", phi_tkc_preview_fps(session))
             if text != label.text { label.text = text }

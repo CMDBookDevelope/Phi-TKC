@@ -17,8 +17,6 @@ void phi_tkc_preview_touch(uint64_t session, uint64_t contact, int32_t phase,
 void phi_tkc_preview_active(uint64_t session, int32_t active);
 void phi_tkc_preview_close(uint64_t session);
 float phi_tkc_preview_fps(uint64_t session);
-void phi_tkc_preview_set_refresh_rate(uint64_t session, uint32_t frames_per_second);
-void phi_tkc_preview_frame_tick(uint64_t session);
 
 #ifdef __cplusplus
 }

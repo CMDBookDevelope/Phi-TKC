@@ -67,37 +67,36 @@ struct Session {
     touches: Mutex<VecDeque<macroquad::input::Touch>>,
     reset_touches: AtomicBool,
     fps: AtomicU32,
-    refresh_rate: AtomicU32,
-    display_tick: Mutex<bool>,
-    display_wake: Condvar,
+    pacing: Mutex<()>,
+    pacing_wake: Condvar,
     result: Mutex<Option<Result<()>>>,
 }
 
 impl Session {
-    fn close(&self) {
-        let mut pending = self.display_tick.lock().unwrap();
-        self.closed.store(true, Ordering::Release);
-        *pending = false;
-        self.display_wake.notify_all();
+    fn set_active(&self, active: bool) {
+        let _guard = self.pacing.lock().unwrap();
+        self.active.store(active, Ordering::Release);
+        self.pacing_wake.notify_all();
     }
 
-    // Coalesce display callbacks into one pending render. An overloaded preview
-    // never queues obsolete frames or renders faster than its Apple display.
-    #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
-    fn wait_for_display_tick(&self) -> bool {
-        let mut pending = self.display_tick.lock().unwrap();
-        while !*pending
-            && self.active.load(Ordering::Acquire)
+    fn close(&self) {
+        let _guard = self.pacing.lock().unwrap();
+        self.closed.store(true, Ordering::Release);
+        self.pacing_wake.notify_all();
+    }
+
+    // Only the requested FPS paces rendering. Display callbacks consume the
+    // latest frame independently, including when rendering exceeds display Hz.
+    fn wait_for_next_frame(&self, began: Instant, frame_time: Duration) {
+        let mut guard = self.pacing.lock().unwrap();
+        while self.active.load(Ordering::Acquire)
             && !self.closed.load(Ordering::Acquire)
         {
-            let rate = self.refresh_rate.load(Ordering::Relaxed).clamp(1, 120);
-            let wait = Duration::from_secs_f64(2. / rate as f64);
-            pending = self.display_wake.wait_timeout(pending, wait).unwrap().0;
+            let Some(wait) = frame_time.checked_sub(began.elapsed()) else {
+                break;
+            };
+            guard = self.pacing_wake.wait_timeout(guard, wait).unwrap().0;
         }
-        let ready =
-            *pending && self.active.load(Ordering::Acquire) && !self.closed.load(Ordering::Acquire);
-        *pending = false;
-        ready
     }
 }
 
@@ -141,6 +140,14 @@ fn current(id: u64) -> Option<Arc<Session>> {
         .cloned()
 }
 
+#[cfg(target_os = "ios")]
+pub(crate) fn suspend_for_background() {
+    let session = SESSION.get().and_then(|slot| slot.lock().ok()?.as_ref().cloned());
+    if let Some(session) = session {
+        session.set_active(false);
+    }
+}
+
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn start(
     app: tauri::AppHandle,
@@ -160,9 +167,8 @@ pub async fn start(
         touches: Mutex::new(VecDeque::new()),
         reset_touches: AtomicBool::new(false),
         fps: AtomicU32::new(0f32.to_bits()),
-        refresh_rate: AtomicU32::new(60),
-        display_tick: Mutex::new(false),
-        display_wake: Condvar::new(),
+        pacing: Mutex::new(()),
+        pacing_wake: Condvar::new(),
         result: Mutex::new(None),
     });
     *SESSION.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(Arc::clone(&session));
@@ -239,6 +245,7 @@ fn run(
         window_height: height as i32,
         headless: true,
         platform: macroquad::miniquad::conf::Platform {
+            swap_interval: Some(0),
             #[cfg(target_os = "android")]
             rendering_backend: macroquad::miniquad::conf::RenderingBackend::Vulkan,
             #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
@@ -341,11 +348,8 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
     main.viewport = Some((0, 0, width as i32, height as i32));
     let mut paused = false;
     let mut fps = PreviewFps::new();
-    #[cfg(target_os = "android")]
-    let frame_time = Duration::from_secs_f64(1.0 / 60.0);
+    let frame_time = Duration::from_secs_f64(1.0 / params.config.fps.max(1) as f64);
     while !session.closed.load(Ordering::Acquire) {
-        #[cfg(target_os = "android")]
-        let began = Instant::now();
         #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
         {
             let result = activity.checkpoint(check_open, || {
@@ -362,6 +366,7 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
                 Ok(true) if paused => {
                     main.resume()?;
                     paused = false;
+                    fps.reset(&session);
                 }
                 Ok(_) => {}
                 Err(_) if session.closed.load(Ordering::Acquire) => break,
@@ -378,15 +383,13 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
         } else if active && paused {
             main.resume()?;
             paused = false;
+            fps.reset(&session);
         }
         if paused {
             std::thread::sleep(Duration::from_millis(25));
             continue;
         }
-        #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
-        if !session.wait_for_display_tick() {
-            continue;
-        }
+        let began = Instant::now();
         let mut touches = session.touches.lock().unwrap();
         if session.reset_touches.swap(false, Ordering::AcqRel) {
             macroquad::input::cancel_touches();
@@ -423,10 +426,7 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
         if main.should_exit() {
             break;
         }
-        #[cfg(target_os = "android")]
-        if let Some(wait) = frame_time.checked_sub(began.elapsed()) {
-            std::thread::sleep(wait);
-        }
+        session.wait_for_next_frame(began, frame_time);
         next_frame().await;
     }
     // Pausing also stops the native audio stream before textures/scenes drop.
@@ -491,12 +491,7 @@ pub extern "C" fn phi_tkc_preview_close(id: u64) {
 #[no_mangle]
 pub extern "C" fn phi_tkc_preview_active(id: u64, active: i32) {
     if let Some(session) = current(id) {
-        let mut pending = session.display_tick.lock().unwrap();
-        session.active.store(active != 0, Ordering::Release);
-        if active == 0 {
-            *pending = false;
-        }
-        session.display_wake.notify_all();
+        session.set_active(active != 0);
     }
 }
 #[no_mangle]
@@ -504,25 +499,6 @@ pub extern "C" fn phi_tkc_preview_fps(id: u64) -> f32 {
     current(id).map_or(0., |session| {
         f32::from_bits(session.fps.load(Ordering::Relaxed))
     })
-}
-#[no_mangle]
-pub extern "C" fn phi_tkc_preview_set_refresh_rate(id: u64, rate: u32) {
-    if let Some(session) = current(id) {
-        session
-            .refresh_rate
-            .store(rate.clamp(1, 120), Ordering::Relaxed);
-        session.display_wake.notify_all();
-    }
-}
-#[no_mangle]
-pub extern "C" fn phi_tkc_preview_frame_tick(id: u64) {
-    if let Some(session) = current(id) {
-        let mut pending = session.display_tick.lock().unwrap();
-        if session.active.load(Ordering::Acquire) && !session.closed.load(Ordering::Acquire) {
-            *pending = true;
-            session.display_wake.notify_one();
-        }
-    }
 }
 #[no_mangle]
 pub extern "C" fn phi_tkc_preview_touch(

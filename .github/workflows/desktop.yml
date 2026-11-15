@@ -181,7 +181,7 @@ jobs:
             --features apple-render-check apple_ -- --nocapture --test-threads=1
           MINIQUAD_MANIFEST="$(cargo metadata --locked --manifest-path src-tauri/Cargo.toml \
             --format-version 1 | python3 -c 'import json,sys; print(next(p["manifest_path"] for p in json.load(sys.stdin)["packages"] if p["name"] == "miniquad"))')"
-          bash scripts/check-macos-displaylink.sh "$(dirname "$MINIQUAD_MANIFEST")" "$RUNNER_TEMP/displaylink-sdk-check"
+          bash scripts/check-macos-preview.sh "$RUNNER_TEMP/preview-sdk-check"
           cargo run --manifest-path "$MINIQUAD_MANIFEST" --example metal_offscreen --features metal
 
       - name: Preserve failed Apple media fixtures
