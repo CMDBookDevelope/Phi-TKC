@@ -158,6 +158,7 @@ import moment from 'moment';
 import { toast, toastError, RULES } from './common';
 import type { ChartInfo, RenderConfig, Task } from './model';
 import ConfigView from '@/components/ConfigView.vue';
+import RenderProgressBar from '@/components/RenderProgressBar.vue';
 
 const { t } = useI18n();
 
@@ -786,7 +787,8 @@ watch(
 
       <div v-else class="list-scroll">
         <div v-for="item in filteredCharts" :key="item.id" class="chart-row" :class="{ 'is-rendering': item.status === 'rendering', 'is-failed': item.status === 'failed' }">
-          <div v-if="item.status === 'rendering' && item.id === currentRenderingId" class="progress-bg" :style="{ width: `${renderProgress}%` }"></div>
+          <RenderProgressBar v-if="item.status === 'rendering' && item.id === currentRenderingId"
+            class="batch-render-progress" :model-value="renderProgress" :height="3" :aria-label="t('progress')" />
 
           <div class="row-content">
             <v-checkbox-btn v-model="item.selected" :disabled="item.status === 'rendering'" color="primary" />
@@ -1182,14 +1184,11 @@ watch(
   border: 1px solid rgba(var(--main-color-rgb), 0.3);
 }
 
-.progress-bg {
+.batch-render-progress {
   position: absolute;
-  top: 0;
+  bottom: 0;
   left: 0;
-  height: 100%;
-  background: linear-gradient(90deg, rgba(var(--main-color-rgb), 0.08), rgba(var(--main-color-rgb), 0.18));
   z-index: 0;
-  transition: width 0.3s linear;
 }
 
 .row-content {

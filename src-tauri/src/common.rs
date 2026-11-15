@@ -16,6 +16,30 @@ impl Drop for NativeRenderResources {
     }
 }
 
+// macroquad owns process-global graphics state; a preview and a video task
+// must never initialize it concurrently.
+#[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
+static NATIVE_GRAPHICS_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
+pub(crate) struct NativeGraphicsGuard;
+
+#[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
+impl NativeGraphicsGuard {
+    pub fn try_acquire() -> Option<Self> {
+        NATIVE_GRAPHICS_BUSY.compare_exchange(false, true,
+            std::sync::atomic::Ordering::Acquire, std::sync::atomic::Ordering::Relaxed)
+            .ok().map(|_| Self)
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
+impl Drop for NativeGraphicsGuard {
+    fn drop(&mut self) {
+        NATIVE_GRAPHICS_BUSY.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 pub fn ensure_dir(path: PathBuf) -> PathBuf {
     if path.exists() {
         if !path.is_dir() {

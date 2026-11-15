@@ -1,5 +1,5 @@
 use crate::{
-    apple_frames::MetalFrames,
+    apple_frames::{initialize_render_target, MetalFrames},
     apple_lifecycle::RenderActivity,
     apple_media::Encoder,
     render::{build_player, RenderParams},
@@ -303,6 +303,12 @@ async fn render_async(
         sample_rate as u32,
     )?;
     let target = Rc::new(MSRenderTarget::new((vw, vh), params.config.sample_count));
+    initialize_render_target(
+        miniquad_context()
+            .metal_context()
+            .context("Metal context is unavailable")?,
+        target.input().render_pass,
+    );
     let my_time = Rc::new(RefCell::new(0.));
     let tm = TimeManager::manual(Box::new({
         let clock = Rc::clone(&my_time);

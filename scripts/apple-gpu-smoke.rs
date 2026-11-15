@@ -1,6 +1,6 @@
 //! Native integration tests, included by the independent Apple CI smoke crate.
 //! Uses the actual MetalFrames and Encoder; decoding is only test verification.
-use crate::apple_frames::MetalFrames;
+use crate::apple_frames::{initialize_render_target, MetalFrames};
 use crate::apple_media::{Encoder, Time};
 use anyhow::{ensure, Result};
 use macroquad::miniquad as mq;
@@ -121,7 +121,7 @@ fn dictionary(entries: &[(&str, &Obj)]) -> Obj {
 fn quadrants(frame: u64) -> [[u8; 3]; 4] {
     // Every frame has a unique set of twelve saturated channels, so an even
     // number of stale or reordered source frames is also detectable.
-    let pattern = frame ^ 0b1010_1100_1101;
+    let pattern = frame ^ 0b1010_1100_1000;
     let mut colors = [[0; 3]; 4];
     for (quadrant, color) in colors.iter_mut().enumerate() {
         for (channel, value) in color.iter_mut().enumerate() {
@@ -194,6 +194,12 @@ impl GpuSmoke {
         };
         let mut encoder = Encoder::new(&self.path, WIDTH, HEIGHT, FPS, 4_000_000, RATE)?;
         let mut frames = MetalFrames::new(ctx.metal_context().unwrap(), WIDTH, HEIGHT)?;
+        // Poison the fresh MSAA target so a missing production initialization
+        // produces a purple first-frame quadrant instead of passing by chance
+        // because the allocator happened to return zeroed storage.
+        ctx.begin_pass(pass, mq::PassAction::clear_color(1., 0., 1., 1.));
+        ctx.end_render_pass();
+        initialize_render_target(ctx.metal_context().unwrap(), pass);
         for frame in 0..FRAMES {
             objc::rc::autoreleasepool(|| -> Result<()> {
                 if self.pause == Some(frame) {
@@ -212,10 +218,22 @@ impl GpuSmoke {
                 if frames.at_capacity() {
                     frames.drain_one(&mut encoder, &self.pcm)?;
                 }
-                ctx.begin_pass(pass, mq::PassAction::clear_color(0., 0., 0., 1.));
+                ctx.begin_pass(
+                    pass,
+                    if frame == 0 {
+                        mq::PassAction::Nothing
+                    } else {
+                        mq::PassAction::clear_color(0., 0., 0., 1.)
+                    },
+                );
                 ctx.apply_pipeline(&pipeline);
                 ctx.apply_bindings(&bindings);
                 for (index, color) in quadrants(frame).into_iter().enumerate() {
+                    if frame == 0 && color == [0, 0, 0] {
+                        // The untouched first-frame quadrant must come from the
+                        // production clear, including through MSAA and CV/VT.
+                        continue;
+                    }
                     let x = (index % 2) as i32 * WIDTH as i32 / 2;
                     let y = (index / 2) as i32 * HEIGHT as i32 / 2;
                     ctx.apply_scissor_rect(x, y, WIDTH as i32 / 2, HEIGHT as i32 / 2);

@@ -3515,7 +3515,7 @@ dependencies = [
 [[package]]
 name = "macroquad"
 version = "0.3.25"
-source = "git+https://github.com/CMDBookDevelope/prpr-macroquad#3ba4625944fe4c8f8794d21e7bb4d2c8a5a67e06"
+source = "git+https://github.com/CMDBookDevelope/prpr-macroquad#b1bda9555b7c78be400ff3d67805d42435c5d69f"
 dependencies = [
  "bumpalo",
  "fontdue",
@@ -3529,7 +3529,7 @@ dependencies = [
 [[package]]
 name = "macroquad_macro"
 version = "0.1.7"
-source = "git+https://github.com/CMDBookDevelope/prpr-macroquad#3ba4625944fe4c8f8794d21e7bb4d2c8a5a67e06"
+source = "git+https://github.com/CMDBookDevelope/prpr-macroquad#b1bda9555b7c78be400ff3d67805d42435c5d69f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5034,7 +5034,7 @@ checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 [[package]]
 name = "prpr"
 version = "0.4.0"
-source = "git+https://github.com/CMDBookDevelope/Phi-TKC-render-lib?branch=render-lib#9eebb098fe69fec9988aadd2de6e4650984d7c73"
+source = "git+https://github.com/CMDBookDevelope/Phi-TKC-render-lib?branch=render-lib#bd308971d369bb1b3df010c9a313a356820c8d7a"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -5116,7 +5116,7 @@ dependencies = [
 [[package]]
 name = "prpr-avc"
 version = "0.1.0"
-source = "git+https://github.com/CMDBookDevelope/Phi-TKC-render-lib?branch=render-lib#9eebb098fe69fec9988aadd2de6e4650984d7c73"
+source = "git+https://github.com/CMDBookDevelope/Phi-TKC-render-lib?branch=render-lib#bd308971d369bb1b3df010c9a313a356820c8d7a"
 dependencies = [
  "anyhow",
  "tracing",

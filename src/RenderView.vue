@@ -130,6 +130,7 @@ import { toastError, toast, anyFilter, isString, RULES } from './common';
 import type { ChartInfo, Task } from './model';
 import { VForm } from 'vuetify/components';
 import ConfigView from './components/ConfigView.vue';
+import RenderProgressBar from './components/RenderProgressBar.vue';
 import moment from 'moment';
 import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
@@ -551,11 +552,11 @@ function resetAndGoChoose() {
       </div>
 
       <div class="bar-right">
-        <button class="bar-btn bar-btn-tonal" v-if="step === 'options' && !mobile" @click="playChart">
+        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="playChart" :title="t('play')" :aria-label="t('play')">
           <v-icon icon="mdi-gamepad-variant" size="18" />
           <span>{{ t('play') }}</span>
         </button>
-        <button class="bar-btn bar-btn-tonal" v-if="step === 'options' && !mobile" @click="previewChart">
+        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="previewChart" :title="t('preview')" :aria-label="t('preview')">
           <v-icon icon="mdi-eye" size="18" />
           <span>{{ t('preview') }}</span>
         </button>
@@ -717,7 +718,7 @@ function resetAndGoChoose() {
               </div>
             </div>
             <div v-if="renderProgress !== undefined" class="render-progress">
-              <v-progress-linear :model-value="renderProgress" color="primary" height="6" rounded />
+              <RenderProgressBar :model-value="renderProgress" color="primary" :height="6" :aria-label="t('render')" />
               <p class="progress-text">{{ renderMsg }}</p>
             </div>
             <div class="render-actions">

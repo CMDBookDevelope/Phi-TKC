@@ -169,10 +169,21 @@ impl Task {
         let runtime = tokio::runtime::Handle::current();
         std::thread::Builder::new().name("native-render".into()).spawn(move || {
             let _runtime = runtime.enter();
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| native_render::run(request, move |value, fps| {
-                progress_out.store((value.max(0.) * 10000.) as u64, AtomicOrdering::Relaxed);
-                fps_out.store(fps.max(0.) as u64, AtomicOrdering::Relaxed);
-            }))).unwrap_or_else(|panic| {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _graphics = loop {
+                    if let Some(guard) = crate::common::NativeGraphicsGuard::try_acquire() {
+                        break guard;
+                    }
+                    if request.request_cancel.as_ref().is_some_and(|cancel| cancel.load(AtomicOrdering::Relaxed)) {
+                        anyhow::bail!("render canceled while waiting for the preview");
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                };
+                native_render::run(request, move |value, fps| {
+                    progress_out.store((value.max(0.) * 10000.) as u64, AtomicOrdering::Relaxed);
+                    fps_out.store(fps.max(0.) as u64, AtomicOrdering::Relaxed);
+                })
+            })).unwrap_or_else(|panic| {
                 let message = panic.downcast_ref::<String>().map(String::as_str)
                     .or_else(|| panic.downcast_ref::<&str>().copied()).unwrap_or("unknown panic");
                 Err(anyhow::anyhow!("Native renderer panicked: {message}"))

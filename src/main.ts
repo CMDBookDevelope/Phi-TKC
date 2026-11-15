@@ -6,6 +6,7 @@ import { createApp } from 'vue';
 import { changeLocale } from './common';
 import { i18n, SUPPORTED_LOCALES } from './i18n';
 import { isMobile, isAndroid } from './platform';
+import { installIosPageZoomGuard } from './uiGestures';
 
 import App from './App.vue';
 import router from './router';
@@ -43,6 +44,9 @@ const vuetify = createVuetify({
   },
   directives,
   theme: {
+    // Tauri authorizes the index's static style with a CSP nonce. Reuse it for
+    // Vuetify's runtime theme so native WebViews receive its color/alpha vars.
+    cspNonce: document.querySelector<HTMLStyleElement>('style[nonce]')?.nonce,
     defaultTheme: 'customTheme',
     themes: {
       customTheme: theme,
@@ -76,6 +80,7 @@ const vuetify = createVuetify({
 
 // Platform classes drive the Android status-bar inset and mobile ergonomics.
 document.body.classList.add(isAndroid() ? 'is-android' : isMobile() ? 'is-ios' : 'is-desktop');
+if (isMobile() && !isAndroid()) installIosPageZoomGuard();
 
 const app = createApp(App);
 installInternalProgressPaint(app);

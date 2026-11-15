@@ -10,7 +10,9 @@ let package = Package(
     ],
     dependencies: [.package(name: "Tauri", path: "../.tauri/tauri-api")],
     targets: [
+        .target(name: "PhiTKCNativeBridge", path: "Bridge", publicHeadersPath: "include"),
         .target(name: "tauri-plugin-chart-picker",
-                dependencies: [.byName(name: "Tauri")], path: "Sources")
+                dependencies: [.byName(name: "Tauri"), .byName(name: "PhiTKCNativeBridge")],
+                path: "Sources")
     ]
 )

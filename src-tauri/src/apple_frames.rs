@@ -3,7 +3,7 @@ use crate::apple_media::{Encoder, PixelBuffer};
 use anyhow::{ensure, Context, Result};
 use macroquad::miniquad::{
     graphics::metal::{MetalContext, MetalSubmission},
-    Texture,
+    PassAction, RenderPass, Texture,
 };
 use objc::{class, msg_send, runtime::Object, sel, sel_impl};
 use std::{collections::VecDeque, ffi::c_void, ptr::null_mut};
@@ -11,6 +11,21 @@ use std::{collections::VecDeque, ffi::c_void, ptr::null_mut};
 type Ref = *mut c_void;
 const MAX_GPU_FRAMES: usize = 3;
 const BGRA8_UNORM: u64 = 80;
+
+/// Initialize the exporter's fresh color/MSAA, depth and stencil attachments.
+/// Chart scenes draw using load passes; their first frame must not blend with
+/// undefined allocation contents. Keep this on the GPU and on its render queue.
+pub fn initialize_render_target(metal: &mut MetalContext, target: RenderPass) {
+    metal.begin_pass(
+        Some(target),
+        PassAction::Clear {
+            color: Some((0., 0., 0., 1.)),
+            depth: Some(1.),
+            stencil: Some(0),
+        },
+    );
+    metal.end_render_pass();
+}
 
 #[cfg_attr(
     any(target_os = "macos", target_os = "ios"),

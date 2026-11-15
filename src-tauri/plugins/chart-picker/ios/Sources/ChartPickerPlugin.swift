@@ -3,9 +3,7 @@ import Tauri
 import UIKit
 import UniformTypeIdentifiers
 import Photos
-
-@_silgen_name("phi_tkc_render_lifecycle")
-private func renderLifecycle(_ active: Int32)
+import PhiTKCNativeBridge
 
 private var lifecycleObservers: [NSObjectProtocol] = []
 
@@ -17,14 +15,14 @@ private func installRenderLifecycle() {
     guard lifecycleObservers.isEmpty else { return }
     lifecycleObservers.append(NotificationCenter.default.addObserver(
         forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
-    ) { _ in renderLifecycle(0) })
+    ) { _ in phi_tkc_render_lifecycle(0) })
     lifecycleObservers.append(NotificationCenter.default.addObserver(
         forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
-    ) { _ in renderLifecycle(1) })
+    ) { _ in phi_tkc_render_lifecycle(1) })
     lifecycleObservers.append(NotificationCenter.default.addObserver(
         forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
-    ) { _ in renderLifecycle(0) })
-    renderLifecycle(UIApplication.shared.applicationState == .active ? 1 : 0)
+    ) { _ in phi_tkc_render_lifecycle(0) })
+    phi_tkc_render_lifecycle(UIApplication.shared.applicationState == .active ? 1 : 0)
 }
 
 // A renderer may read the chart long after the document picker closes. Import
@@ -32,6 +30,29 @@ private func installRenderLifecycle() {
 // path (URL.path), never the percent-encoded file:// URL.
 final class ChartPickerPlugin: Plugin, UIDocumentPickerDelegate {
     private var pending: Invoke?
+    private weak var previewController: PreviewViewController?
+    private struct PreviewArgs: Decodable { let session: UInt64; let width: Int; let height: Int }
+
+    @objc public func preview(_ invoke: Invoke) {
+        let args: PreviewArgs
+        do { args = try invoke.parseArgs(PreviewArgs.self) }
+        catch { invoke.reject("Invalid preview settings"); return }
+        DispatchQueue.main.async {
+            guard self.previewController == nil, self.pending == nil,
+                  let presenter = self.manager.viewController,
+                  presenter.presentedViewController == nil else {
+                invoke.reject("The app window is unavailable or busy")
+                return
+            }
+            let controller = PreviewViewController(session: args.session, width: args.width, height: args.height) {
+                self.previewController = nil
+                invoke.resolve([:])
+            }
+            self.previewController = controller
+            presenter.present(controller, animated: true)
+        }
+    }
+
 
     private struct VideoArgs: Decodable { let path: String }
     private struct VideoResult: Encodable {

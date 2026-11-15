@@ -113,6 +113,8 @@ import { toast } from './common';
 import moment from 'moment';
 import { toastError } from './common';
 import { isMobile } from './platform';
+import RenderProgressBar from './components/RenderProgressBar.vue';
+import RenderProgressCircular from './components/RenderProgressCircular.vue';
 
 const { t } = useI18n();
 const mobile = isMobile();
@@ -533,18 +535,18 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
               v-if="['loading', 'mixing', 'pending'].includes(row.status.type)"
               indeterminate :color="statusColor(row.status.type)" size="20" width="2"
             />
-            <v-progress-circular
+            <RenderProgressCircular
               v-else-if="row.status.type === 'rendering'"
               :model-value="row.status.progress * 100"
-              :color="statusColor(row.status.type)" size="20" width="2"
+              :color="statusColor(row.status.type)" :size="20" :width="2" :aria-label="t('detail.progress')"
             />
             <span class="status-text">{{ describeStatus(row.status) }}</span>
           </div>
 
-          <v-progress-linear
+          <RenderProgressBar
             v-if="row.status.type === 'rendering'"
             :model-value="row.status.progress * 100"
-            :color="statusColor(row.status.type)" height="3" rounded
+            :color="statusColor(row.status.type)" :height="3" :aria-label="t('detail.progress')"
           />
 
           <div class="task-actions">

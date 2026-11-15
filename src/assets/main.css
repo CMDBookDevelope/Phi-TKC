@@ -37,6 +37,14 @@ body.is-android {
   padding-top: 0;
 }
 
+/* Allow ordinary scrolling while excluding the WebView's page pinch gesture. */
+body.is-ios,
+body.is-ios .v-application,
+body.is-ios .v-main,
+body.is-ios .v-overlay {
+  touch-action: pan-x pan-y;
+}
+
 /* App.vue reserves status/gesture insets in the actual navigation heights so
    Vuetify also keeps the scrolling content clear of those areas. */
 
@@ -280,6 +288,29 @@ input[type='number'] {
 .v-switch .v-selection-control--focus-visible .v-switch__track {
   outline: 2px solid var(--main-color);
   outline-offset: 3px;
+}
+
+/* Anchor the absolute track segments to the track itself. Bake the primary
+   track's alpha into its paint, as with progress tracks, so backdrop-filter
+   WebViews do not need a separate opacity layer for the slider. */
+.v-slider-track {
+  position: relative;
+}
+.v-slider-track__background.bg-primary {
+  background-color: rgba(var(--main-color-rgb), 0.38) !important;
+  opacity: 1 !important;
+}
+.v-slider-track__fill.bg-primary {
+  background-color: var(--main-color) !important;
+}
+@media (forced-colors: active) {
+  .v-slider-track__background.bg-primary,
+  .v-slider-track__fill.bg-primary {
+    background-color: Highlight !important;
+  }
+  .v-slider-track__background.bg-primary {
+    opacity: 0.38 !important;
+  }
 }
 
 /* Dialogs / overlays */

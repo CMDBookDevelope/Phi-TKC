@@ -1,0 +1,4 @@
+module PhiTKCNativeBridge {
+    header "PhiTKCNativeBridge.h"
+    export *
+}

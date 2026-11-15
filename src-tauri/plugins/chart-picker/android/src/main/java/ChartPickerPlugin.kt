@@ -17,6 +17,34 @@ import java.util.concurrent.Executors
 @TauriPlugin
 class ChartPickerPlugin(private val activity: Activity) : Plugin(activity) {
     private val importer = Executors.newSingleThreadExecutor()
+    private var preview: PreviewDialog? = null
+
+    @Command
+    fun preview(invoke: Invoke) {
+        val args = invoke.getArgs()
+        val session = args.getLong("session")
+        val width = args.getInt("width")
+        val height = args.getInt("height")
+        activity.runOnUiThread {
+            if (preview != null) { invoke.reject("A preview is already open"); return@runOnUiThread }
+            try {
+                val dialog = PreviewDialog(activity, session, width, height) {
+                    preview = null
+                    invoke.resolve(JSObject())
+                }
+                preview = dialog
+                dialog.show()
+            } catch (error: Exception) {
+                preview = null
+                invoke.reject(error.message ?: "Cannot open preview")
+            }
+        }
+    }
+
+    override fun onPause() { preview?.setActive(false) }
+    override fun onResume() { preview?.setActive(true) }
+    override fun onDestroy() { preview?.dismiss(); preview = null }
+
 
     @Command
     fun prepareAssets(invoke: Invoke) {
