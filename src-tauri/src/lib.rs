@@ -451,17 +451,18 @@ async fn parse_chart(path: &Path) -> Result<ChartInfo, InvokeError> {
 }
 
 #[tauri::command]
-async fn preview_chart(app: tauri::AppHandle, mut params: RenderParams) -> Result<(), InvokeError> {
+async fn preview_chart(app: tauri::AppHandle, mut params: RenderParams, show_fps: Option<bool>) -> Result<(), InvokeError> {
     prepare_platform_assets(app.clone()).await?;
     wrap_async(async move {
         params.path = localize_chart_path(&params.path)?;
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let assets = ASSET_PATH.get().cloned().context("Renderer assets are unavailable")?;
-            return native_preview::start(app, params, assets).await;
+            return native_preview::start(app, params, assets, show_fps.unwrap_or(false)).await;
         }
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
+        let _ = show_fps;
         let mut command = Command::new(std::env::current_exe()?);
         #[cfg(target_os = "windows")]
         command.creation_flags(0x08000000);

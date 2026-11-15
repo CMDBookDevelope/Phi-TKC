@@ -31,7 +31,12 @@ private func installRenderLifecycle() {
 final class ChartPickerPlugin: Plugin, UIDocumentPickerDelegate {
     private var pending: Invoke?
     private weak var previewController: PreviewViewController?
-    private struct PreviewArgs: Decodable { let session: UInt64; let width: Int; let height: Int }
+    private struct PreviewArgs: Decodable {
+        let session: UInt64
+        let width: Int
+        let height: Int
+        let showFps: Bool
+    }
 
     @objc public func preview(_ invoke: Invoke) {
         let args: PreviewArgs
@@ -44,7 +49,9 @@ final class ChartPickerPlugin: Plugin, UIDocumentPickerDelegate {
                 invoke.reject("The app window is unavailable or busy")
                 return
             }
-            let controller = PreviewViewController(session: args.session, width: args.width, height: args.height) {
+            let controller = PreviewViewController(session: args.session, width: args.width, height: args.height,
+                showFps: args.showFps,
+                previousOrientation: presenter.view.window?.windowScene?.interfaceOrientation ?? .unknown) {
                 self.previewController = nil
                 invoke.resolve([:])
             }

@@ -229,7 +229,7 @@ jobs:
       - name: Verify renderer resources in IPA
         run: python3 scripts/check-ios-resources.py src-tauri/gen/apple/build/arm64/*.ipa
 
-      - name: Verify linked Photos framework and album permission description
+      - name: Verify linked PhotoKit, album permission, and ProMotion opt-in
         shell: bash
         run: |
           set -euo pipefail
@@ -243,13 +243,14 @@ jobs:
                   assert len(names) == 1, 'Expected one application Info.plist'
                   info = plistlib.loads(archive.read(names[0]))
                   assert info.get('NSPhotoLibraryAddUsageDescription'), 'Missing album addition permission description'
+                  assert info.get('CADisableMinimumFrameDurationOnPhone') is True, 'Missing iPhone ProMotion opt-in'
                   binary_name = names[0].rsplit('/', 1)[0] + '/' + info['CFBundleExecutable']
                   with tempfile.TemporaryDirectory() as folder:
                       binary = pathlib.Path(folder) / 'app-binary'
                       binary.write_bytes(archive.read(binary_name))
                       linked = subprocess.check_output(['otool', '-L', str(binary)], text=True)
                       assert 'Photos.framework/Photos' in linked, 'PhotoKit is absent from the actual app linkage'
-                  print('Actual IPA has linked PhotoKit and an album addition permission description')
+                  print('Actual IPA has linked PhotoKit, album permission, and iPhone ProMotion opt-in')
           PY
 
       - name: Upload artifacts

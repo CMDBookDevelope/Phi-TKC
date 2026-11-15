@@ -2,20 +2,24 @@ package com.cnmdbook.chartpicker
 
 import android.app.Activity
 import android.app.Dialog
+import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import android.os.SystemClock
+import android.util.TypedValue
 import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.TextView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import java.nio.ByteBuffer
+import java.util.Locale
 
 // The library is already loaded by Tauri before any plugin command executes.
 internal object PreviewBridge {
@@ -23,28 +27,27 @@ internal object PreviewBridge {
     external fun touch(session: Long, contact: Long, phase: Int, x: Float, y: Float, time: Double)
     external fun active(session: Long, active: Int)
     external fun close(session: Long)
+    external fun fps(session: Long): Float
 }
 
-internal class PreviewDialog(activity: Activity, private val session: Long,
-                             width: Int, height: Int, private val completed: () -> Unit) : Dialog(activity) {
+internal class PreviewDialog(private val activity: Activity, private val session: Long,
+                             width: Int, height: Int, showFps: Boolean,
+                             private val completed: () -> Unit) : Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen) {
     private var finished = false
-    private val preview = PreviewView(activity, session, width, height) { dismiss() }
+    private val previousOrientation = activity.requestedOrientation
+    private val gameOrientation = if (width >= height) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                  else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+    private var orientationApplied = false
+    private val preview = PreviewView(activity, session, width, height, showFps) { dismiss() }
 
     init {
+        // The game's pause menu owns normal exit; readFrame(-1) also closes a
+        // completed or failed worker, including a failure before the first frame.
+        setCancelable(false)
+        setCanceledOnTouchOutside(false)
         val content = FrameLayout(activity)
         content.setBackgroundColor(Color.BLACK)
         content.addView(preview, FrameLayout.LayoutParams(-1, -1))
-        val close = TextView(activity).apply {
-            text = "×"
-            textSize = 30f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(0x88000000.toInt())
-            gravity = android.view.Gravity.CENTER
-            contentDescription = "Close preview"
-            setOnClickListener { dismiss() }
-        }
-        val size = (48 * activity.resources.displayMetrics.density).toInt()
-        content.addView(close, FrameLayout.LayoutParams(size, size, android.view.Gravity.TOP or android.view.Gravity.END))
         setContentView(content)
         window?.setBackgroundDrawableResource(android.R.color.transparent)
         window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -53,26 +56,59 @@ internal class PreviewDialog(activity: Activity, private val session: Long,
                 finished = true
                 preview.stop()
                 PreviewBridge.close(session)
+                restoreOrientation()
                 completed()
             }
+        }
+    }
+
+    override fun show() {
+        activity.requestedOrientation = gameOrientation
+        orientationApplied = true
+        try {
+            super.show()
+        } catch (error: Exception) {
+            restoreOrientation()
+            throw error
+        }
+    }
+
+    private fun restoreOrientation() {
+        if (orientationApplied) {
+            orientationApplied = false
+            if (!activity.isDestroyed) activity.requestedOrientation = previousOrientation
+        }
+    }
+
+    private fun enterFullscreen() {
+        val gameWindow = window ?: return
+        WindowCompat.setDecorFitsSystemWindows(gameWindow, false)
+        WindowInsetsControllerCompat(gameWindow, gameWindow.decorView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
         }
     }
 
     override fun onStart() {
         super.onStart()
         window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        enterFullscreen()
         PreviewBridge.active(session, 1)
         preview.start()
     }
 
     fun setActive(active: Boolean) {
         PreviewBridge.active(session, if (active) 1 else 0)
-        if (active) preview.start() else preview.stop()
+        if (active) {
+            enterFullscreen()
+            preview.start()
+        } else preview.stop()
     }
 }
 
 private class PreviewView(activity: Activity, private val session: Long,
                           private val imageWidth: Int, private val imageHeight: Int,
+                          private val showFps: Boolean,
                           private val finished: () -> Unit) : View(activity), Choreographer.FrameCallback {
     private val bitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888)
     private val pixels = ByteBuffer.allocateDirect(imageWidth * imageHeight * 4)
@@ -80,6 +116,14 @@ private class PreviewView(activity: Activity, private val session: Long,
     private val frame = RectF()
     private var running = false
     private var hasImage = false
+    private var fpsText = "FPS: —"
+    private var lastFpsUpdate = 0L
+    private val fpsPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 14f, resources.displayMetrics)
+        textAlign = Paint.Align.RIGHT
+    }
+    private val fpsBackground = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x99000000.toInt() }
 
     fun start() {
         if (!running) {
@@ -99,6 +143,11 @@ private class PreviewView(activity: Activity, private val session: Long,
                 pixels.rewind()
                 bitmap.copyPixelsFromBuffer(pixels)
                 hasImage = true
+                if (showFps && frameTimeNanos - lastFpsUpdate >= 500_000_000L) {
+                    val fps = PreviewBridge.fps(session)
+                    fpsText = if (fps.isFinite()) String.format(Locale.ROOT, "FPS: %.1f", fps.coerceAtLeast(0f)) else "FPS: —"
+                    lastFpsUpdate = frameTimeNanos
+                }
                 invalidate()
             }
         }
@@ -117,6 +166,17 @@ private class PreviewView(activity: Activity, private val session: Long,
             paint.color = Color.WHITE
             paint.textSize = 18 * resources.displayMetrics.scaledDensity
             canvas.drawText("Loading…", 24f, height / 2f, paint)
+        }
+        if (showFps && hasImage) {
+            val margin = 12 * resources.displayMetrics.density
+            val padding = 6 * resources.displayMetrics.density
+            val x = width - margin
+            val y = height - margin - fpsPaint.fontMetrics.descent
+            canvas.drawRoundRect(x - fpsPaint.measureText(fpsText) - padding,
+                y + fpsPaint.fontMetrics.ascent - padding,
+                x + padding, y + fpsPaint.fontMetrics.descent + padding,
+                padding, padding, fpsBackground)
+            canvas.drawText(fpsText, x, y, fpsPaint)
         }
     }
     override fun onTouchEvent(event: MotionEvent): Boolean {

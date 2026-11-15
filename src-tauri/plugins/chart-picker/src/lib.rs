@@ -11,8 +11,14 @@ pub struct ChartPicker<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 impl<R: Runtime> ChartPicker<R> {
-    pub fn preview(&self, session: u64, width: u32, height: u32) -> Result<(), tauri::plugin::mobile::PluginInvokeError> {
-        self.0.run_mobile_plugin::<serde_json::Value>("preview", serde_json::json!({ "session": session, "width": width, "height": height }))
+    pub fn preview(
+        &self,
+        session: u64,
+        width: u32,
+        height: u32,
+        show_fps: bool,
+    ) -> Result<(), tauri::plugin::mobile::PluginInvokeError> {
+        self.0.run_mobile_plugin::<serde_json::Value>("preview", serde_json::json!({ "session": session, "width": width, "height": height, "showFps": show_fps }))
             .map(|_| ())
     }
 

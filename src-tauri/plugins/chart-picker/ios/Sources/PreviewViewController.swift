@@ -53,18 +53,28 @@ final class PreviewViewController: UIViewController {
     private let session: UInt64
     private let width: Int
     private let height: Int
+    private let showFps: Bool
+    private let previousOrientation: UIInterfaceOrientation
     private let completed: () -> Void
     private var pixels: Data
     private var link: CADisplayLink?
     private var observers: [NSObjectProtocol] = []
     private var closed = false
     private var finished = false
+    private var awaitingExternalTransition = false
     private var loading: UILabel?
+    private var fpsLabel: UILabel?
+    private var maximumFramesPerSecond = 0
+    private weak var previewScene: UIWindowScene?
+    private weak var presenter: UIViewController?
 
-    init(session: UInt64, width: Int, height: Int, completed: @escaping () -> Void) {
+    init(session: UInt64, width: Int, height: Int, showFps: Bool,
+         previousOrientation: UIInterfaceOrientation, completed: @escaping () -> Void) {
         self.session = session
         self.width = width
         self.height = height
+        self.showFps = showFps
+        self.previousOrientation = previousOrientation
         self.completed = completed
         pixels = Data(count: width * height * 4)
         super.init(nibName: nil, bundle: nil)
@@ -72,7 +82,13 @@ final class PreviewViewController: UIViewController {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override var prefersStatusBarHidden: Bool { true }
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .allButUpsideDown }
+    override var prefersHomeIndicatorAutoHidden: Bool { true }
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        width >= height ? .landscape : .portrait
+    }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        width >= height ? .landscapeRight : .portrait
+    }
     override var shouldAutorotate: Bool { true }
 
     override func loadView() {
@@ -86,29 +102,37 @@ final class PreviewViewController: UIViewController {
         NSLayoutConstraint.activate([loading.centerXAnchor.constraint(equalTo: image.centerXAnchor),
                                      loading.centerYAnchor.constraint(equalTo: image.centerYAnchor)])
         self.loading = loading
-        let close = UIButton(type: .system)
-        close.setTitle("×", for: .normal)
-        close.titleLabel?.font = .systemFont(ofSize: 32)
-        close.setTitleColor(.white, for: .normal)
-        close.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-        close.accessibilityLabel = "Close preview"
-        close.translatesAutoresizingMaskIntoConstraints = false
-        close.addTarget(self, action: #selector(PreviewViewController.close), for: .touchUpInside)
-        image.addSubview(close)
-        NSLayoutConstraint.activate([close.widthAnchor.constraint(equalToConstant: 48),
-                                     close.heightAnchor.constraint(equalToConstant: 48),
-                                     close.topAnchor.constraint(equalTo: image.safeAreaLayoutGuide.topAnchor),
-                                     close.trailingAnchor.constraint(equalTo: image.safeAreaLayoutGuide.trailingAnchor)])
+        if showFps {
+            let label = UILabel()
+            label.text = "0.0 FPS"
+            label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+            label.textColor = .white
+            label.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+            label.isUserInteractionEnabled = false
+            label.translatesAutoresizingMaskIntoConstraints = false
+            image.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.trailingAnchor.constraint(equalTo: image.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+                label.bottomAnchor.constraint(equalTo: image.safeAreaLayoutGuide.bottomAnchor, constant: -8)
+            ])
+            fpsLabel = label
+        }
     }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         UIApplication.shared.isIdleTimerDisabled = true
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
         try? AVAudioSession.sharedInstance().setActive(true)
-        let link = CADisplayLink(target: self, selector: #selector(frame))
-        link.preferredFramesPerSecond = 60
-        link.add(to: .main, forMode: .common)
+        previewScene = view.window?.windowScene
+        presenter = presentingViewController
+        if #available(iOS 16.0, *) {
+            setNeedsUpdateOfSupportedInterfaceOrientations()
+            previewScene?.requestGeometryUpdate(.iOS(interfaceOrientations: supportedInterfaceOrientations))
+        }
+        let link = CADisplayLink(target: self, selector: #selector(frame(_:)))
         self.link = link
+        configureFrameRate()
+        link.add(to: .main, forMode: .common)
         observers.append(NotificationCenter.default.addObserver(
             forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.setActive(false) })
@@ -117,11 +141,38 @@ final class PreviewViewController: UIViewController {
         ) { [weak self] _ in self?.setActive(true) })
         setActive(UIApplication.shared.applicationState == .active)
     }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        configureFrameRate()
+    }
+    private func configureFrameRate() {
+        guard let link = link else { return }
+        let maximum = min(120, view.window?.screen.maximumFramesPerSecond ?? 60)
+        guard maximum != maximumFramesPerSecond else { return }
+        maximumFramesPerSecond = maximum
+        if #available(iOS 15.0, *) {
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: Float(min(60, maximum)),
+                maximum: Float(maximum), preferred: Float(maximum))
+        } else {
+            link.preferredFramesPerSecond = maximum
+        }
+        phi_tkc_preview_set_refresh_rate(session, UInt32(maximum))
+    }
     private func setActive(_ active: Bool) {
+        if active { configureFrameRate() }
         phi_tkc_preview_active(session, active ? 1 : 0)
         link?.isPaused = !active
     }
-    @objc private func frame() {
+    @objc private func frame(_ link: CADisplayLink) {
+        let interval = link.targetTimestamp - link.timestamp
+        if interval > 0 {
+            phi_tkc_preview_set_refresh_rate(session, UInt32(min(120, max(1, (1 / interval).rounded()))))
+        }
+        phi_tkc_preview_frame_tick(session)
+        if let label = fpsLabel {
+            let text = String(format: "%.1f FPS", phi_tkc_preview_fps(session))
+            if text != label.text { label.text = text }
+        }
         let status = pixels.withUnsafeMutableBytes { bytes in
             phi_tkc_preview_read_frame(session, bytes.bindMemory(to: UInt8.self).baseAddress,
                                        numericCast(bytes.count))
@@ -144,10 +195,31 @@ final class PreviewViewController: UIViewController {
         tearDown()
         dismiss(animated: true) { self.finish() }
     }
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        guard !closed, let transition = transitionCoordinator else { return }
+        awaitingExternalTransition = true
+        // Register before the transition finishes. The return value only says
+        // whether an animation block was queued, not whether completion runs.
+        transition.animate(alongsideTransition: nil) { context in
+            self.awaitingExternalTransition = false
+            guard !context.isCancelled else { return }
+            self.closed = true
+            self.tearDown()
+            self.finish()
+        }
+    }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         tearDown()
-        finish()
+        // Our own dismissal finishes in its completion block, after UIKit has
+        // removed this controller from the orientation decision. An external
+        // dismissal waits for its transition before restoring the presenter.
+        guard !closed else { return }
+        closed = true
+        if !awaitingExternalTransition {
+            DispatchQueue.main.async { self.finish() }
+        }
     }
     private func tearDown() {
         link?.invalidate()
@@ -160,6 +232,20 @@ final class PreviewViewController: UIViewController {
     private func finish() {
         guard !finished else { return }
         finished = true
+        if #available(iOS 16.0, *) {
+            let orientation: UIInterfaceOrientationMask
+            switch previousOrientation {
+            case .portrait: orientation = .portrait
+            case .portraitUpsideDown: orientation = .portraitUpsideDown
+            case .landscapeLeft: orientation = .landscapeLeft
+            case .landscapeRight: orientation = .landscapeRight
+            default: orientation = []
+            }
+            if !orientation.isEmpty {
+                presenter?.setNeedsUpdateOfSupportedInterfaceOrientations()
+                previewScene?.requestGeometryUpdate(.iOS(interfaceOrientations: orientation))
+            }
+        }
         completed()
     }
 }

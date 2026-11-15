@@ -25,10 +25,11 @@ class ChartPickerPlugin(private val activity: Activity) : Plugin(activity) {
         val session = args.getLong("session")
         val width = args.getInt("width")
         val height = args.getInt("height")
+        val showFps = args.optBoolean("showFps", false)
         activity.runOnUiThread {
             if (preview != null) { invoke.reject("A preview is already open"); return@runOnUiThread }
             try {
-                val dialog = PreviewDialog(activity, session, width, height) {
+                val dialog = PreviewDialog(activity, session, width, height, showFps) {
                     preview = null
                     invoke.resolve(JSObject())
                 }

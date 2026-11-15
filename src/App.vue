@@ -187,7 +187,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 
     <v-app-bar
       v-if="mobile"
-      class="glass fluent-glass tk-appbar"
+      class="glass blur-glass tk-appbar"
       :height="64 + mobileTopInset"
       :style="{ '--mobile-top-inset': `${mobileTopInset}px` }"
       density="compact"
@@ -391,6 +391,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 /* ===== Mobile (iOS/iPadOS/Android) ===== */
 .tk-appbar {
   top: 0 !important;
+  background: rgba(var(--bg-color-rgb), 0.2) !important;
   border-radius: 0 0 16px 16px !important;
   border: 0 !important;
   box-shadow: inset 0 -1px 0 rgba(var(--main-color-rgb), 0.12) !important;

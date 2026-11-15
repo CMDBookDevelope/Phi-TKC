@@ -42,6 +42,7 @@
     preview: Preview
     render: Render
     play: Play
+    play-fps-hint: Hold Play to show FPS
 
     render-started: Rendering has started!
     see-tasks: See tasks
@@ -101,6 +102,7 @@
     preview: 演示
     render: 渲染
     play: 游玩
+    play-fps-hint: 长按游玩显示帧率
 
     render-started: 视频开始渲染了！
     see-tasks: 查看任务列表
@@ -312,31 +314,84 @@ async function postRender(): Promise<boolean | 'remote'> {
   }
 }
 
-async function previewChart() {
+const previewRunning = ref(false);
+
+async function startPreview(autoplay: boolean, showFps = false) {
+  if (previewRunning.value) return false;
+  previewRunning.value = true;
   try {
     let params = await buildParams();
     if (!params) return false;
-    params.config.autoplay = true;
-    await invoke('preview_chart', { params });
+    params.config.autoplay = autoplay;
+    await invoke('preview_chart', { params, showFps: mobile && showFps });
     return true;
   } catch (e) {
     toastError(e);
     return false;
+  } finally {
+    previewRunning.value = false;
   }
 }
 
-async function playChart() {
-  try {
-    let params = await buildParams();
-    if (!params) return false;
-    params.config.autoplay = false;
-    await invoke('preview_chart', { params });
-    return true;
-  } catch (e) {
-    toastError(e);
-    return false;
+function previewChart() { return startPreview(true); }
+function playChart(showFps = false) { return startPreview(false, showFps); }
+
+let playPressTimer: ReturnType<typeof setTimeout> | undefined;
+let playPressPointer: number | undefined;
+let playPressStart = { x: 0, y: 0 };
+let suppressPlayClick = false;
+
+function clearPlayPress() {
+  if (playPressTimer !== undefined) clearTimeout(playPressTimer);
+  playPressTimer = undefined;
+  playPressPointer = undefined;
+}
+
+function cancelPlayPressOnBlur() {
+  if (playPressPointer !== undefined) suppressPlayClick = true;
+  clearPlayPress();
+}
+
+function beginPlayPress(event: PointerEvent) {
+  if (!mobile || previewRunning.value || event.button !== 0 || !event.isPrimary) return;
+  clearPlayPress();
+  suppressPlayClick = false;
+  playPressPointer = event.pointerId;
+  playPressStart = { x: event.clientX, y: event.clientY };
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  playPressTimer = setTimeout(() => {
+    playPressTimer = undefined;
+    suppressPlayClick = true;
+    void playChart(true);
+  }, 600);
+}
+
+function endPlayPress(event: PointerEvent) {
+  if (event.pointerId === playPressPointer) clearPlayPress();
+}
+
+function cancelPlayPress(event: PointerEvent) {
+  if (event.pointerId !== playPressPointer) return;
+  suppressPlayClick = true;
+  clearPlayPress();
+}
+
+function movePlayPress(event: PointerEvent) {
+  if (event.pointerId === playPressPointer &&
+      Math.hypot(event.clientX - playPressStart.x, event.clientY - playPressStart.y) > 10) {
+    cancelPlayPress(event);
   }
 }
+
+function clickPlay(event: MouseEvent) {
+  if (event.detail > 0 && suppressPlayClick) {
+    suppressPlayClick = false;
+    return;
+  }
+  void playChart();
+}
+
+onMounted(() => window.addEventListener('blur', cancelPlayPressOnBlur));
 
 const renderMsg = ref(''),
   renderProgress = ref<number>(),
@@ -441,11 +496,14 @@ function stopTaskPolling() {
 }
 
 watch(step, (s) => {
+  clearPlayPress();
   if (s === 'render') startTaskPolling();
   else stopTaskPolling();
 });
 
 onUnmounted(() => {
+  clearPlayPress();
+  window.removeEventListener('blur', cancelPlayPressOnBlur);
   disposed = true;
   stopTaskPolling();
   if (unlistenDrag) {
@@ -552,11 +610,15 @@ function resetAndGoChoose() {
       </div>
 
       <div class="bar-right">
-        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="playChart" :title="t('play')" :aria-label="t('play')">
+        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'"
+          :disabled="previewRunning" @click="clickPlay"
+          @pointerdown="beginPlayPress" @pointerup="endPlayPress" @pointercancel="cancelPlayPress"
+          @lostpointercapture="cancelPlayPress" @pointermove="movePlayPress"
+          :title="mobile ? t('play-fps-hint') : t('play')" :aria-label="t('play')">
           <v-icon icon="mdi-gamepad-variant" size="18" />
           <span>{{ t('play') }}</span>
         </button>
-        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" @click="previewChart" :title="t('preview')" :aria-label="t('preview')">
+        <button class="bar-btn bar-btn-tonal" v-if="step === 'options'" :disabled="previewRunning" @click="previewChart" :title="t('preview')" :aria-label="t('preview')">
           <v-icon icon="mdi-eye" size="18" />
           <span>{{ t('preview') }}</span>
         </button>

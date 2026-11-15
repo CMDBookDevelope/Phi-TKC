@@ -23,9 +23,12 @@ public func checkNativeBridge(_ bytes: UnsafeMutablePointer<UInt8>?, _ capacity:
     phi_tkc_render_lifecycle(1)
     phi_tkc_preview_active(session, 1)
     phi_tkc_preview_touch(session, 2, 0, 0.5, 0.5, 1.0)
+    phi_tkc_preview_set_refresh_rate(session, 120)
+    phi_tkc_preview_frame_tick(session)
+    let fps: Float = phi_tkc_preview_fps(session)
     let result = phi_tkc_preview_read_frame(session, bytes, numericCast(capacity))
     phi_tkc_preview_close(session)
-    return result
+    return result + Int32(fps)
 }
 SWIFT
 xcrun swiftc -sdk "$sdk_root" -target arm64-apple-ios14.0-simulator \
@@ -37,7 +40,8 @@ import sys
 from pathlib import Path
 
 ir = Path(sys.argv[1]).read_text()
-symbols = ["render_lifecycle", "preview_read_frame", "preview_touch", "preview_active", "preview_close"]
+symbols = ["render_lifecycle", "preview_read_frame", "preview_touch", "preview_active", "preview_close",
+           "preview_fps", "preview_set_refresh_rate", "preview_frame_tick"]
 sources = "\n".join(path.read_text() for path in Path(sys.argv[2]).glob("*.swift"))
 for suffix in symbols:
     symbol = "phi_tkc_" + suffix
@@ -46,7 +50,7 @@ for suffix in symbols:
     calls = [line for line in ir.splitlines() if re.search(r"\bcall\b.*@" + symbol + r"\(", line)]
     assert declarations and calls, f"Missing native declaration or call: {symbol}"
     assert all(not re.search(r"\b(?:swiftcc|swifttailcc)\b", line) for line in declarations + calls), f"Swift calling convention: {symbol}"
-print("All five Swift-to-Rust calls use the platform C calling convention")
+print(f"All {len(symbols)} Swift-to-Rust calls use the platform C calling convention")
 PY
 cd "$plugin_root"
 xcrun xcodebuild \

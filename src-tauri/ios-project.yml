@@ -2,7 +2,8 @@
 # tauri.conf.json -> bundle.iOS.template (resolved relative to src-tauri/).
 #
 # It is a verbatim copy of the template shipped with @tauri-apps/cli 2.11.4
-# (crates/tauri-cli/templates/mobile/ios/project.yml) plus one addition: the
+# (crates/tauri-cli/templates/mobile/ios/project.yml) plus app permissions,
+# ProMotion opt-in, and native archive linkage. The
 # Rust code is built as a static library, so the native libraries that the
 # FFmpeg static archives depend on are not inherited from Cargo's link
 # directives.  `-lbz2 -liconv -lz` covers the Matroska demuxer (BZ2/zlib) and
@@ -57,6 +58,7 @@ targets:
       path: {{app.name}}_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
+        CADisableMinimumFrameDurationOnPhone: true
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
         UISupportedInterfaceOrientations:

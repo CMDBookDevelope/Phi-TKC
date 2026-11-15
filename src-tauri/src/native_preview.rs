@@ -21,8 +21,8 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        Arc, Condvar, Mutex, OnceLock,
     },
     time::{Duration, Instant},
 };
@@ -66,7 +66,68 @@ struct Session {
     frame: Mutex<Option<Vec<u8>>>,
     touches: Mutex<VecDeque<macroquad::input::Touch>>,
     reset_touches: AtomicBool,
+    fps: AtomicU32,
+    refresh_rate: AtomicU32,
+    display_tick: Mutex<bool>,
+    display_wake: Condvar,
     result: Mutex<Option<Result<()>>>,
+}
+
+impl Session {
+    fn close(&self) {
+        let mut pending = self.display_tick.lock().unwrap();
+        self.closed.store(true, Ordering::Release);
+        *pending = false;
+        self.display_wake.notify_all();
+    }
+
+    // Coalesce display callbacks into one pending render. An overloaded preview
+    // never queues obsolete frames or renders faster than its Apple display.
+    #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+    fn wait_for_display_tick(&self) -> bool {
+        let mut pending = self.display_tick.lock().unwrap();
+        while !*pending
+            && self.active.load(Ordering::Acquire)
+            && !self.closed.load(Ordering::Acquire)
+        {
+            let rate = self.refresh_rate.load(Ordering::Relaxed).clamp(1, 120);
+            let wait = Duration::from_secs_f64(2. / rate as f64);
+            pending = self.display_wake.wait_timeout(pending, wait).unwrap().0;
+        }
+        let ready =
+            *pending && self.active.load(Ordering::Acquire) && !self.closed.load(Ordering::Acquire);
+        *pending = false;
+        ready
+    }
+}
+
+struct PreviewFps {
+    started: Instant,
+    frames: u32,
+}
+impl PreviewFps {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            frames: 0,
+        }
+    }
+    fn reset(&mut self, session: &Session) {
+        self.started = Instant::now();
+        self.frames = 0;
+        session.fps.store(0f32.to_bits(), Ordering::Relaxed);
+    }
+    fn rendered(&mut self, session: &Session) {
+        self.frames += 1;
+        let elapsed = self.started.elapsed().as_secs_f32();
+        if elapsed >= 0.5 {
+            session
+                .fps
+                .store((self.frames as f32 / elapsed).to_bits(), Ordering::Relaxed);
+            self.started = Instant::now();
+            self.frames = 0;
+        }
+    }
 }
 static SESSION: OnceLock<Mutex<Option<Arc<Session>>>> = OnceLock::new();
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -81,7 +142,12 @@ fn current(id: u64) -> Option<Arc<Session>> {
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn start(app: tauri::AppHandle, params: RenderParams, asset_dir: PathBuf) -> Result<()> {
+pub async fn start(
+    app: tauri::AppHandle,
+    params: RenderParams,
+    asset_dir: PathBuf,
+    show_fps: bool,
+) -> Result<()> {
     let guard =
         NativeGraphicsGuard::try_acquire().context("请等待当前渲染或预览结束后再打开预览／游玩")?;
     let (width, height) = preview_size(params.config.resolution)?;
@@ -93,6 +159,10 @@ pub async fn start(app: tauri::AppHandle, params: RenderParams, asset_dir: PathB
         frame: Mutex::new(None),
         touches: Mutex::new(VecDeque::new()),
         reset_touches: AtomicBool::new(false),
+        fps: AtomicU32::new(0f32.to_bits()),
+        refresh_rate: AtomicU32::new(60),
+        display_tick: Mutex::new(false),
+        display_wake: Condvar::new(),
         result: Mutex::new(None),
     });
     *SESSION.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(Arc::clone(&session));
@@ -127,9 +197,9 @@ pub async fn start(app: tauri::AppHandle, params: RenderParams, asset_dir: PathB
         // Native invocation resolves when the full-screen view is dismissed.
         let shown = app
             .state::<tauri_plugin_chart_picker::ChartPicker<tauri::Wry>>()
-            .preview(session.id, width, height)
+            .preview(session.id, width, height, show_fps)
             .map_err(|error| anyhow::anyhow!(error.to_string()));
-        session.closed.store(true, Ordering::Release);
+        session.close();
         let joined = worker
             .join()
             .map_err(|_| anyhow::anyhow!("Preview thread did not shut down"));
@@ -270,8 +340,11 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
     main.top_level = false;
     main.viewport = Some((0, 0, width as i32, height as i32));
     let mut paused = false;
+    let mut fps = PreviewFps::new();
+    #[cfg(target_os = "android")]
     let frame_time = Duration::from_secs_f64(1.0 / 60.0);
     while !session.closed.load(Ordering::Acquire) {
+        #[cfg(target_os = "android")]
         let began = Instant::now();
         #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
         {
@@ -281,6 +354,7 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
                 if !paused {
                     main.pause()?;
                     paused = true;
+                    fps.reset(&session);
                 }
                 finish_preview_gpu()
             });
@@ -300,12 +374,17 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
             session.touches.lock().unwrap().clear();
             main.pause()?;
             paused = true;
+            fps.reset(&session);
         } else if active && paused {
             main.resume()?;
             paused = false;
         }
         if paused {
             std::thread::sleep(Duration::from_millis(25));
+            continue;
+        }
+        #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+        if !session.wait_for_display_tick() {
             continue;
         }
         let mut touches = session.touches.lock().unwrap();
@@ -340,9 +419,11 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
             pixel[3] = 255;
         }
         *session.frame.lock().unwrap() = Some(image.bytes);
+        fps.rendered(&session);
         if main.should_exit() {
             break;
         }
+        #[cfg(target_os = "android")]
         if let Some(wait) = frame_time.checked_sub(began.elapsed()) {
             std::thread::sleep(wait);
         }
@@ -404,13 +485,43 @@ pub unsafe extern "C" fn phi_tkc_preview_read_frame(
 #[no_mangle]
 pub extern "C" fn phi_tkc_preview_close(id: u64) {
     if let Some(session) = current(id) {
-        session.closed.store(true, Ordering::Release);
+        session.close();
     }
 }
 #[no_mangle]
 pub extern "C" fn phi_tkc_preview_active(id: u64, active: i32) {
     if let Some(session) = current(id) {
+        let mut pending = session.display_tick.lock().unwrap();
         session.active.store(active != 0, Ordering::Release);
+        if active == 0 {
+            *pending = false;
+        }
+        session.display_wake.notify_all();
+    }
+}
+#[no_mangle]
+pub extern "C" fn phi_tkc_preview_fps(id: u64) -> f32 {
+    current(id).map_or(0., |session| {
+        f32::from_bits(session.fps.load(Ordering::Relaxed))
+    })
+}
+#[no_mangle]
+pub extern "C" fn phi_tkc_preview_set_refresh_rate(id: u64, rate: u32) {
+    if let Some(session) = current(id) {
+        session
+            .refresh_rate
+            .store(rate.clamp(1, 120), Ordering::Relaxed);
+        session.display_wake.notify_all();
+    }
+}
+#[no_mangle]
+pub extern "C" fn phi_tkc_preview_frame_tick(id: u64) {
+    if let Some(session) = current(id) {
+        let mut pending = session.display_tick.lock().unwrap();
+        if session.active.load(Ordering::Acquire) && !session.closed.load(Ordering::Acquire) {
+            *pending = true;
+            session.display_wake.notify_one();
+        }
     }
 }
 #[no_mangle]
@@ -463,6 +574,14 @@ mod android {
         sys::{jfloat, jint, jlong},
         JNIEnv,
     };
+    #[no_mangle]
+    pub extern "system" fn Java_com_cnmdbook_chartpicker_PreviewBridge_fps(
+        _: JNIEnv,
+        _: JObject,
+        id: jlong,
+    ) -> jfloat {
+        phi_tkc_preview_fps(id as u64)
+    }
     #[no_mangle]
     pub unsafe extern "system" fn Java_com_cnmdbook_chartpicker_PreviewBridge_readFrame(
         env: JNIEnv,
