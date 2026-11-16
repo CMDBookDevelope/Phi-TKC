@@ -38,6 +38,15 @@ fn read_rgba(target: RenderTarget, width: u32, height: u32) -> Vec<u8> {
     texture.read_pixels(gl.quad_context, &mut bytes);
     pass.delete(gl.quad_context);
     texture.delete(gl.quad_context);
+    // The Metal shader translator preserves OpenGL's bottom-first target
+    // rows. Match the production Apple export's flip_y=true before treating
+    // the prefix as the game rectangle and the suffix as its appended strip.
+    let row_bytes = width as usize * 4;
+    for y in 0..height as usize / 2 {
+        let opposite = (height as usize - 1 - y) * row_bytes;
+        let (first, last) = bytes.split_at_mut(opposite);
+        first[y * row_bytes..(y + 1) * row_bytes].swap_with_slice(&mut last[..row_bytes]);
+    }
     bytes
 }
 
@@ -148,12 +157,10 @@ fn verify_composite(resources_dropped: Arc<AtomicBool>) -> Result<()> {
         let i = ((y * WIDTH + x) * 4) as usize;
         centers.push([original[i], original[i + 1], original[i + 2]]);
     }
-    centers.sort_unstable();
-    let mut expected = vec![[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
-    expected.sort_unstable();
+    let expected = vec![[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
     ensure!(
         centers == expected,
-        "MSAA test source did not contain the four expected RGB quadrants: {centers:?}"
+        "MSAA test source did not contain the four RGB quadrants in top-first order: {centers:?}"
     );
 
     let mut passes = Vec::new();
