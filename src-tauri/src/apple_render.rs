@@ -143,7 +143,7 @@ async fn render_async(
     crate::apple_platform::debug_log("render: chart loaded");
     let rhythm_strip = if params.config.rhythm_analysis {
         let cover = chart_fs.load_file(&info.illustration).await?;
-        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?)
+        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?.with_speed(config.rhythm_speed))
     } else { None };
 
     let music = AudioClip::new(

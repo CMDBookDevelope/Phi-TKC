@@ -59,6 +59,7 @@
     rhythm-analysis: Rhythm Analysis
     rhythm-off: Off
     rhythm-beats-only: BPM and beat guides only
+    rhythm-speed: Speed
 
     ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and put it in the specific folder.
     remote-submitted: 'Sent to the render server (job {id})'
@@ -123,6 +124,7 @@
     rhythm-analysis: 节奏解析
     rhythm-off: 关闭
     rhythm-beats-only: 仅 BPM 与逐拍参考线
+    rhythm-speed: 流速
 
     ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并放置在指定文件夹内。
     remote-submitted: 已提交到渲染服务器（任务 {id}）
@@ -138,7 +140,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { toastError, toast, anyFilter, isString, RULES } from './common';
 import type { ChartInfo, RenderConfig, Task } from './model';
-import { rhythmNoteNames, rhythmOutputResolution } from './rhythmConfig';
+import { rhythmNoteNames, rhythmOutputResolution, withRhythmDefaults } from './rhythmConfig';
 import { VForm } from 'vuetify/components';
 import ConfigView from './components/ConfigView.vue';
 import RenderProgressBar from './components/RenderProgressBar.vue';
@@ -802,6 +804,10 @@ function resetAndGoChoose() {
               <div class="info-row" v-if="submittedConfig">
                 <span class="info-label">{{ t('rhythm-analysis') }}</span>
                 <span class="info-value">{{ submittedRhythm }}</span>
+              </div>
+              <div class="info-row" v-if="submittedConfig?.rhythmAnalysis">
+                <span class="info-label">{{ t('rhythm-speed') }}</span>
+                <span class="info-value">{{ withRhythmDefaults(submittedConfig).rhythmSpeed }}×</span>
               </div>
             </div>
             <div v-if="renderProgress !== undefined" class="render-progress">

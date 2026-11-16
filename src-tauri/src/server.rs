@@ -594,6 +594,10 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
         Some(posted) => posted.config.clone(),
         None => build_config(&fields, respack.as_deref(), avatar.as_deref()),
     };
+    if let Err(error) = config.validate_rhythm_speed() {
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
+    }
     // Paths in the posted config point at the phone's filesystem; the uploaded
     // copies in this job directory are the ones the renderer can read.
     if let Some(path) = respack.as_deref() {
@@ -726,6 +730,9 @@ fn build_config(
     config.rhythm_drag = flag("rhythm-drag", false);
     config.rhythm_hold = flag("rhythm-hold", true);
     config.rhythm_flick = flag("rhythm-flick", false);
+    config.rhythm_speed = text("rhythm-speed")
+        .map(|value| value.parse::<f32>().unwrap_or(f32::NAN))
+        .unwrap_or(1.0);
     config.chart_debug = flag("chart-debug", false);
     config.flid_x = flag("flid-x", false);
     config.chart_ratio = number("chart-ratio").unwrap_or(1.0);
@@ -1003,6 +1010,7 @@ mod tests {
         assert!(!config.rhythm_drag);
         assert!(config.rhythm_hold);
         assert!(!config.rhythm_flick);
+        assert_eq!(config.rhythm_speed, 1.0);
     }
 
     #[test]
@@ -1040,5 +1048,54 @@ mod tests {
             !config.rhythm_tap && config.rhythm_drag && !config.rhythm_hold && config.rhythm_flick
         );
         assert_eq!(config.resolution, (320, 180));
+    }
+
+    #[test]
+    fn rhythm_flow_speed_is_independent_of_playback_speed() {
+        let fields = HashMap::from([
+            ("rhythm-analysis".into(), "true".into()),
+            ("rhythm-speed".into(), "2.5".into()),
+            ("speed".into(), "0.75".into()),
+        ]);
+        let config = build_config(&fields, None, None);
+        config.validate_rhythm_speed().unwrap();
+        let renderer = config.to_config();
+        assert_eq!(renderer.rhythm_speed, 2.5);
+        assert_eq!(renderer.speed, 0.75);
+        assert_eq!(config.canvas_resolution().unwrap(), (1920, 1080));
+        assert_eq!(config.output_resolution().unwrap(), (1920, 1272));
+    }
+
+    #[test]
+    fn rhythm_flow_speed_rejects_invalid_values_and_accepts_bounds() {
+        for value in ["bad", "NaN", "inf", "-1", "0", "0.01", "10.1"] {
+            let fields = HashMap::from([
+                ("rhythm-analysis".into(), "true".into()),
+                ("rhythm-speed".into(), value.into()),
+            ]);
+            assert!(build_config(&fields, None, None).validate_rhythm_speed().is_err(), "accepted {value}");
+        }
+        for value in ["0.1", "1", "10"] {
+            let fields = HashMap::from([
+                ("rhythm-analysis".into(), "true".into()),
+                ("rhythm-speed".into(), value.into()),
+            ]);
+            assert!(build_config(&fields, None, None).validate_rhythm_speed().is_ok(), "rejected {value}");
+        }
+    }
+
+    #[test]
+    fn rhythm_flow_speed_round_trips_and_old_configs_default_to_one() {
+        let config = build_config(&HashMap::from([
+            ("rhythm-analysis".into(), "true".into()),
+            ("rhythm-speed".into(), "3".into()),
+        ]), None, None);
+        let mut json = serde_json::to_value(&config).unwrap();
+        assert_eq!(json["rhythmSpeed"], 3.0);
+        let loaded: crate::render::RenderConfig = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(loaded.rhythm_speed, 3.0);
+        json.as_object_mut().unwrap().remove("rhythmSpeed");
+        let legacy: crate::render::RenderConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(legacy.rhythm_speed, 1.0);
     }
 }

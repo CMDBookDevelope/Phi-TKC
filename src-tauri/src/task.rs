@@ -238,13 +238,13 @@ impl Task {
                         Ok(target) => target,
                         Err(error) => {
                             *self.status.lock().await = TaskStatus::Failed {
-                                error: format!("无法保存视频：{error:#}\n\n{log}"),
+                                error: format!("无法保存到相册。原视频保留在：{}\n\n{error:#}\n\n{log}", self.output.display()),
                             };
                             return Ok(());
                         }
                     };
-                    // Scoped storage may retain the private output. Never delete
-                    // the only copy after the publisher returns the source path.
+                    // iOS may retain the private output. Android returns a media
+                    // URI only after publishing the complete video successfully.
                     if PathBuf::from(&target) != self.output {
                         let _ = tokio::fs::remove_file(&self.output).await;
                     }

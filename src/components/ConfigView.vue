@@ -5,8 +5,11 @@ en:
   rhythm-description: 'Append a BPM metronome and a scrolling note timeline, with colors from the chart artwork.'
   rhythm-note-types: Note types to analyze
   rhythm-empty: Only BPM and beat guides will be shown.
+  rhythm-speed: Speed
+  rhythm-speed-hint: 'Higher speed moves the timeline faster and spreads notes farther apart. Only the bottom strip changes; BPM timing and chart playback speed stay the same.'
+  rhythm-speed-invalid: Enter a speed from 0.1 to 10.
   rhythm-output: 'Output: {width} × {height}'
-  rhythm-canvas: 'Chart canvas: {width} × {height}; bottom strip: {strip}px (width / 7, rounded to an even height).'
+  rhythm-canvas: 'Chart canvas: {width} × {height}; bottom strip: {strip}px (width / 10, rounded to an even height).'
   ffmpeg-preset: Preset
   video-codec: Encoder
   encoder-select: Hardware Encoder
@@ -112,8 +115,11 @@ zh-CN:
   rhythm-description: 在底部延伸 BPM 节拍器与滚动音符时间线，并从曲绘提取配色。
   rhythm-note-types: 解析音符类型
   rhythm-empty: 仅显示 BPM 与逐拍参考线。
+  rhythm-speed: 流速
+  rhythm-speed-hint: 流速越高，时间线移动越快，音符间距越大。仅影响底栏，不改变 BPM 节拍时间或谱面播放速度。
+  rhythm-speed-invalid: 请输入 0.1 到 10 之间的流速。
   rhythm-output: '视频输出：{width} × {height}'
-  rhythm-canvas: '谱面画面：{width} × {height}；底栏：{strip}px（宽度的 1/7，取最近偶数）。'
+  rhythm-canvas: '谱面画面：{width} × {height}；底栏：{strip}px（宽度的 1/10，取最近偶数）。'
   ffmpeg-preset: 编码预设
   video-codec: 编码器
   encoder-select: 硬件编码器
@@ -224,7 +230,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { VForm } from 'vuetify/components';
 import { toast, anyFilter, toastError, RULES } from '@/common';
 import type { RenderConfig } from '@/model';
-import { RHYTHM_DEFAULTS, withRhythmDefaults } from '@/rhythmConfig';
+import { RHYTHM_DEFAULTS, RHYTHM_SPEED_MIN, RHYTHM_SPEED_MAX, isRhythmSpeed, withRhythmDefaults } from '@/rhythmConfig';
 import TipSwitch from './TipSwitch.vue';
 const props = defineProps<{ initialConfig?: RenderConfig }>();
 
@@ -293,13 +299,15 @@ const categories = [
 
 const resolution = ref('1920x1080');
 const rhythmAnalysis = ref(RHYTHM_DEFAULTS.rhythmAnalysis);
+const rhythmSpeed = ref(String(RHYTHM_DEFAULTS.rhythmSpeed));
+const rhythmSpeedRule = (value: unknown) => isRhythmSpeed(value) || t('rhythm-speed-invalid');
 const rhythmNotes = ref(['tap', 'hold']);
 const rhythmNoteTypes = ['tap', 'drag', 'hold', 'flick'];
 const rhythmDimensions = computed(() => {
   if (typeof resolution.value !== 'string') return null;
   const [width, height] = resolution.value.split(/x/i).map(Number);
   if (![width, height].every((value) => Number.isInteger(value) && value >= 16 && value % 2 === 0)) return null;
-  const strip = Math.round(width / 14) * 2;
+  const strip = Math.round(width / 20) * 2;
   return { width, height, strip, outputHeight: height + strip };
 });
 function toggleRhythmNote(kind: string) {
@@ -548,6 +556,10 @@ async function buildConfig(): Promise<RenderConfig | null> {
     toast(t('has-error'), 'error');
     return null;
   }
+  if (!isRhythmSpeed(rhythmSpeed.value)) {
+    toast(t('rhythm-speed-invalid'), 'error');
+    return null;
+  }
   const [w, h] = resolution.value.split(/x/i).map(Number);
   if (!Number.isInteger(w) || !Number.isInteger(h) || w < 16 || h < 16 || w % 2 !== 0 || h % 2 !== 0) {
     toast(t('rules.resolution'), 'error');
@@ -561,6 +573,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
     rhythmDrag: rhythmNotes.value.includes('drag'),
     rhythmHold: rhythmNotes.value.includes('hold'),
     rhythmFlick: rhythmNotes.value.includes('flick'),
+    rhythmSpeed: Number(rhythmSpeed.value),
     ffmpegPreset: FFMPEG_PRESET_VALUES[ffmpegPreset.value] ?? ffmpegPreset.value,
     endingLength: parseFloat(endingLength.value),
     disableLoading: disableLoading.value,
@@ -617,6 +630,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
 function applyConfig(c: RenderConfig) {
   const rhythm = withRhythmDefaults(c);
   rhythmAnalysis.value = rhythm.rhythmAnalysis;
+  rhythmSpeed.value = String(rhythm.rhythmSpeed);
   rhythmNotes.value = [
     rhythm.rhythmTap ? 'tap' : '',
     rhythm.rhythmDrag ? 'drag' : '',
@@ -800,6 +814,11 @@ async function replacePreset() {
                   </button>
                 </div>
                 <p v-if="!rhythmNotes.length" class="field-hint">{{ t('rhythm-empty') }}</p>
+                <v-text-field v-model="rhythmSpeed" class="rhythm-speed" type="number" inputmode="decimal"
+                  :min="RHYTHM_SPEED_MIN" :max="RHYTHM_SPEED_MAX" step="any" suffix="×"
+                  :label="t('rhythm-speed')" :hint="t('rhythm-speed-hint')" persistent-hint
+                  :rules="[rhythmSpeedRule]"
+                  density="compact" variant="outlined" />
                 <div v-if="rhythmDimensions" class="rhythm-size" aria-live="polite">
                   <span class="rhythm-output">{{ t('rhythm-output', { width: rhythmDimensions.width, height: rhythmDimensions.outputHeight }) }}</span>
                   <p class="field-hint">{{ t('rhythm-canvas', rhythmDimensions) }}</p>

@@ -1,6 +1,7 @@
 <i18n>
 en:
   title: Batch Render
+  rhythm-speed-invalid: Enter a speed from 0.1 to 10.
   chart-file: Chart file
   select-charts: Select Charts
   select-preset: Select Preset
@@ -74,6 +75,7 @@ en:
   bulk-edit-hint: Leave fields blank to keep their original values.
 zh-CN:
   title: 批量渲染
+  rhythm-speed-invalid: 请输入 0.1 到 10 之间的流速。
   chart-file: 谱面文件
   select-charts: 选择谱面
   select-preset: 选择预设
@@ -157,7 +159,7 @@ import moment from 'moment';
 
 import { toast, toastError, RULES } from './common';
 import type { ChartInfo, RenderConfig, Task } from './model';
-import { RHYTHM_DEFAULTS, withRhythmDefaults } from './rhythmConfig';
+import { RHYTHM_DEFAULTS, isRhythmSpeed, withRhythmDefaults } from './rhythmConfig';
 import ConfigView from '@/components/ConfigView.vue';
 import RenderProgressBar from '@/components/RenderProgressBar.vue';
 
@@ -424,7 +426,9 @@ async function buildRenderParams(requireFfmpeg = true) {
   let config = selectedPreset.value === 'default' ? defaultConfig.value : ((await invoke('get_presets')) as Record<string, RenderConfig>)[selectedPreset.value];
   if (!config) config = defaultConfig.value;
   if (!config.resolution) throw new Error('Resolution missing');
-  return withRhythmDefaults(config);
+  const settings = withRhythmDefaults(config);
+  if (!isRhythmSpeed(settings.rhythmSpeed)) throw new Error(t('rhythm-speed-invalid'));
+  return settings;
 }
 
 async function saveConfig() {

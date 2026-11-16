@@ -184,6 +184,8 @@
   }
   .rhythm-choice input { accent-color: var(--main-color); width: 18px; height: 18px; }
   .rhythm-choice input:focus-visible { outline: 2px solid var(--main-color); outline-offset: 3px; }
+  .rhythm-speed { display: block; margin-top: 14px; }
+  .rhythm-speed input { width: 100%; margin-top: 6px; }
   body.is-mobile .rhythm-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   /* ---- Jobs ---- */
@@ -316,6 +318,10 @@
               <label class="rhythm-choice"><input type="checkbox" name="rhythm-flick" /> Flick</label>
             </div>
             <p id="rhythmEmpty" class="hint" hidden>仅显示 BPM 与逐拍参考线。</p>
+            <label class="rhythm-speed"><span>流速 / Speed</span>
+              <input type="number" name="rhythm-speed" min="0.1" max="10" step="any" value="1.0" required inputmode="decimal" aria-describedby="rhythmSpeedHint" />
+            </label>
+            <p id="rhythmSpeedHint" class="hint">流速越高，时间线移动越快，音符间距越大。仅影响底栏，不改变 BPM 节拍时间或谱面播放速度。</p>
           </div>
           <p id="rhythmOutput" class="hint" role="status"></p>
         </section>
@@ -795,14 +801,15 @@ import { extractMainColor } from '/theme-color.js';
   const fileLabel = $('fileLabel');
   const form = $('form');
   const rhythmKeys = ['rhythm-analysis', 'rhythm-tap', 'rhythm-drag', 'rhythm-hold', 'rhythm-flick'];
+  const rhythmSpeedInput = form.elements.namedItem('rhythm-speed');
   function updateRhythmOptions() {
     const enabled = form.elements.namedItem('rhythm-analysis').checked;
     $('rhythmOptions').hidden = !enabled;
     $('rhythmEmpty').hidden = rhythmKeys.slice(1).some(key => form.elements.namedItem(key).checked);
     const [width, height] = form.elements.namedItem('resolution').value.split(/x/i).map(Number);
-    const strip = enabled ? Math.round(width / 14) * 2 : 0;
+    const strip = enabled ? Math.round(width / 20) * 2 : 0;
     $('rhythmOutput').textContent = `视频输出：${width} × ${height + strip}` + (enabled
-      ? `；谱面画面：${width} × ${height}；底栏：${strip}px（宽度的 1/7，取最近偶数）。`
+      ? `；谱面画面：${width} × ${height}；底栏：${strip}px（宽度的 1/10，取最近偶数）。`
       : '');
   }
   [...rhythmKeys, 'resolution'].forEach(key => form.elements.namedItem(key).addEventListener('change', updateRhythmOptions));
@@ -823,11 +830,17 @@ import { extractMainColor } from '/theme-color.js';
   $('form').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!fileInput.files.length) { $('formHint').textContent = '请先选择谱面文件'; return; }
+    const rhythmSpeed = Number(rhythmSpeedInput.value);
+    if (!rhythmSpeedInput.value.trim() || !Number.isFinite(rhythmSpeed) || rhythmSpeed < 0.1 || rhythmSpeed > 10) {
+      $('formHint').textContent = '请输入 0.1 到 10 之间的流速。';
+      return;
+    }
 
     const body = new FormData($('form'));
     // Unchecked checkboxes are absent from FormData. Send explicit values so
     // disabling Tap/Hold overrides their compatibility defaults on the server.
     for (const key of rhythmKeys) body.set(key, form.elements.namedItem(key).checked ? 'true' : 'false');
+    body.set('rhythm-speed', String(rhythmSpeed));
     // Empty <input type=file> still produce a zero-byte part; drop those so the
     // server does not try to open an empty resource pack / avatar.
     for (const key of ['avatar', 'respack']) {

@@ -459,7 +459,7 @@ async fn parse_chart(path: &Path) -> Result<ChartInfo, InvokeError> {
 
 #[tauri::command]
 async fn preview_chart(app: tauri::AppHandle, mut params: RenderParams, show_fps: Option<bool>) -> Result<(), InvokeError> {
-    prepare_platform_assets(app.clone()).await?;
+    prepare_platform_assets(app.clone(), false).await?;
     wrap_async(async move {
         params.path = localize_chart_path(&params.path)?;
         #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -493,7 +493,7 @@ async fn preview_chart(app: tauri::AppHandle, mut params: RenderParams, show_fps
 }
 #[tauri::command]
 async fn post_render(app: tauri::AppHandle, queue: State<'_, TaskQueue>, mut params: RenderParams, output_path: Option<String>) -> Result<u32, InvokeError> {
-    prepare_platform_assets(app).await?;
+    prepare_platform_assets(app, true).await?;
     wrap_async(async move {
         params.path = localize_chart_path(&params.path)?;
         // Mobile output lives in the app's accessible output directory. A stale
@@ -551,7 +551,7 @@ async fn batch_add_tasks(
     queue: State<'_, TaskQueue>,
     tasks: Vec<(String, String, Option<String>)> // (path, preset_name, output_path)
 ) -> Result<(), InvokeError> {
-    prepare_platform_assets(app).await?;
+    prepare_platform_assets(app, true).await?;
     wrap_async(async move {
         for (path, preset_name, output_path) in tasks {
             let mut presets = get_presets().await.map_err(|e| anyhow::anyhow!("Failed to get presets: {:?}", e))?;
@@ -597,17 +597,17 @@ pub fn create_default_render_config() -> RenderConfig {
     RenderConfig::default()
 }
 
-async fn prepare_platform_assets(app: tauri::AppHandle) -> Result<(), InvokeError> {
+async fn prepare_platform_assets(app: tauri::AppHandle, for_render: bool) -> Result<(), InvokeError> {
     #[cfg(target_os = "android")]
     {
         let path = tokio::task::spawn_blocking(move || {
-            app.state::<tauri_plugin_chart_picker::ChartPicker<tauri::Wry>>().assets()
+            app.state::<tauri_plugin_chart_picker::ChartPicker<tauri::Wry>>().assets(for_render)
                 .map_err(|error| InvokeError::from(error.to_string()))
         }).await.map_err(|error| InvokeError::from(error.to_string()))??;
         ASSET_PATH.set(PathBuf::from(path)).ok();
     }
     #[cfg(not(target_os = "android"))]
-    let _ = app;
+    let _ = (app, for_render);
     Ok(())
 }
 

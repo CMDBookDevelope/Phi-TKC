@@ -121,6 +121,8 @@ pub struct RenderConfig {
     pub rhythm_drag: bool,
     pub rhythm_hold: bool,
     pub rhythm_flick: bool,
+    /// Rhythm timeline spacing and movement, independent of chart playback.
+    pub rhythm_speed: f32,
 
     pub ui_score: bool,
     pub ui_combo: bool,
@@ -196,6 +198,7 @@ impl Default for RenderConfig {
             rhythm_drag: false,
             rhythm_hold: true,
             rhythm_flick: false,
+            rhythm_speed: 1.0,
 
             ffmpeg_thread: false,
 
@@ -207,9 +210,17 @@ impl Default for RenderConfig {
 impl RenderConfig {
     /// Keep the requested canvas intact; encoders require even dimensions.
     pub fn output_resolution(&self) -> Result<(u32, u32)> {
+        self.validate_rhythm_speed()?;
         let (width, height) = self.canvas_resolution()?;
         let layout = RhythmLayout::new(width, height, self.rhythm_analysis)?;
         Ok((width, layout.output_height))
+    }
+
+    pub fn validate_rhythm_speed(&self) -> Result<()> {
+        if self.rhythm_analysis && (!self.rhythm_speed.is_finite() || !(0.1..=10.0).contains(&self.rhythm_speed)) {
+            bail!("rhythm speed must be a finite number between 0.1 and 10");
+        }
+        Ok(())
     }
 
     pub fn canvas_resolution(&self) -> Result<(u32, u32)> {
@@ -269,6 +280,7 @@ impl RenderConfig {
             rhythm_drag: self.rhythm_drag,
             rhythm_hold: self.rhythm_hold,
             rhythm_flick: self.rhythm_flick,
+            rhythm_speed: self.rhythm_speed,
             ..Default::default()
         }
     }
@@ -1027,7 +1039,7 @@ async fn render_impl(
         .with_context(|| tl!("load-chart-failed"))?;
     let rhythm_strip = if params.config.rhythm_analysis {
         let cover = fs.load_file(&info.illustration).await?;
-        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?)
+        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?.with_speed(config.rhythm_speed))
     } else {
         None
     };
@@ -3169,6 +3181,9 @@ pub struct CliArgs {
     /// Note kinds to analyze (comma separated: tap,drag,hold,flick).
     #[arg(long, default_value = "tap,hold")]
     pub rhythm_notes: String,
+    /// Rhythm timeline flow speed (0.1..10); does not change playback or BPM.
+    #[arg(long, default_value_t = 1.0)]
+    pub rhythm_speed: f32,
 }
 
 /// Enable/disable the requested UI elements.
@@ -3264,6 +3279,7 @@ pub async fn render_cli(args: CliArgs) -> Result<()> {
         height.parse().context("invalid resolution height")?,
     );
     config.rhythm_analysis = args.rhythm_analysis;
+    config.rhythm_speed = args.rhythm_speed;
     if config.rhythm_analysis {
         config.rhythm_tap = false;
         config.rhythm_drag = false;

@@ -1,21 +1,30 @@
 package com.cnmdbook.chartpicker
 
 import android.app.Activity
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.activity.result.ActivityResult
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
+import app.tauri.annotation.Permission
+import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
+import app.tauri.PermissionState
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.File
 import java.util.concurrent.Executors
 
-@TauriPlugin
+@TauriPlugin(permissions = [Permission(alias = "legacyVideoStorage", strings = [Manifest.permission.WRITE_EXTERNAL_STORAGE])])
 class ChartPickerPlugin(private val activity: Activity) : Plugin(activity) {
+    init {
+        VideoPublisher.initialize(activity.applicationContext)
+    }
+
     private val importer = Executors.newSingleThreadExecutor()
     private var preview: PreviewDialog? = null
 
@@ -49,6 +58,24 @@ class ChartPickerPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun prepareAssets(invoke: Invoke) {
+        if (invoke.getArgs().optBoolean("saveVideo", false) && Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+            getPermissionState("legacyVideoStorage") != PermissionState.GRANTED) {
+            requestPermissionForAlias("legacyVideoStorage", invoke, "videoStoragePermission")
+            return
+        }
+        copyAssets(invoke)
+    }
+
+    @PermissionCallback
+    fun videoStoragePermission(invoke: Invoke) {
+        if (getPermissionState("legacyVideoStorage") == PermissionState.GRANTED) {
+            copyAssets(invoke)
+        } else {
+            invoke.reject("Storage permission is required to save rendered videos on Android 9 and earlier.")
+        }
+    }
+
+    private fun copyAssets(invoke: Invoke) {
         importer.execute {
             try {
                 val version = activity.packageManager.getPackageInfo(activity.packageName, 0).lastUpdateTime

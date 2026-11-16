@@ -346,7 +346,7 @@ async fn render_async(
         .collect();
     let rhythm_strip = if params.config.rhythm_analysis {
         let cover = chart_fs.load_file(&info.illustration).await?;
-        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?)
+        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?.with_speed(config.rhythm_speed))
     } else { None };
     let rhythm = RhythmComposite::new(game_width, game_height, rhythm_strip, 2)?;
     let mst_slot = Rc::new(Cell::new(0usize));

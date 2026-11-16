@@ -31,13 +31,13 @@ impl<R: Runtime> ChartPicker<R> {
             .run_mobile_plugin("saveVideo", serde_json::json!({ "path": path }))
     }
     #[cfg(target_os = "android")]
-    pub fn assets(&self) -> Result<String, tauri::plugin::mobile::PluginInvokeError> {
+    pub fn assets(&self, for_render: bool) -> Result<String, tauri::plugin::mobile::PluginInvokeError> {
         #[derive(serde::Deserialize)]
         struct Response {
             path: String,
         }
         self.0
-            .run_mobile_plugin::<Response>("prepareAssets", serde_json::json!({}))
+            .run_mobile_plugin::<Response>("prepareAssets", serde_json::json!({ "saveVideo": for_render }))
             .map(|response| response.path)
     }
 

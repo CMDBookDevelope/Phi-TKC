@@ -1,11 +1,7 @@
 //! Android-side helpers for the in-process renderer.
 //!
-//! The upstream `Winamin/Phi-TK` android branch routes chart picking and video
-//! publishing through a Tauri mobile plugin. Phi-TKC keeps those out of the
-//! render path: a render never depends on the WebView bridge, so this module
-//! only provides logcat/file logging and plain path handling. Files picked by
-//! the Tauri dialog plugin arrive as normal filesystem paths (the Android
-//! content resolver is handled by the plugin), which is all the renderer needs.
+//! Chart imports and finished videos use Android's ContentResolver through JNI.
+//! Publishing runs on the native worker, independently of the WebView bridge.
 use anyhow::{Context, Result};
 use std::{
     io::Write,
@@ -102,43 +98,52 @@ pub fn resolve(path: &Path) -> Result<PathBuf> {
     import_content_uri(&text)
 }
 
-/// The process' `JavaVM`.
-///
-/// `ndk-context` is never initialised by Tauri (asking it panics), and defining
-/// `JNI_OnLoad` collides with the one Tauri already exports. The JNI invocation
-/// API is still reachable through `JNI_GetCreatedJavaVMs`, which ART exports.
+/// Registered by the Android plugin before any import or render can start.
+/// A global application reference stays valid on attached native workers.
+#[cfg(target_os = "android")]
+struct AndroidContext {
+    vm: jni::JavaVM,
+    application: jni::objects::GlobalRef,
+}
+
+#[cfg(target_os = "android")]
+static ANDROID_CONTEXT: std::sync::OnceLock<AndroidContext> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "android")]
+fn android_context() -> Result<&'static AndroidContext> {
+    ANDROID_CONTEXT.get().context("Android media bridge has not been initialized")
+}
+
 #[cfg(target_os = "android")]
 fn java_vm() -> Result<&'static jni::JavaVM> {
-    use std::sync::OnceLock;
-    static JVM: OnceLock<&'static jni::JavaVM> = OnceLock::new();
-    if let Some(vm) = JVM.get() {
-        return Ok(*vm);
-    }
-    unsafe {
-        let name = b"JNI_GetCreatedJavaVMs\0";
-        let symbol = libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr() as *const _);
-        anyhow::ensure!(!symbol.is_null(), "JNI_GetCreatedJavaVMs is not available");
-        let get_vms: unsafe extern "system" fn(
-            *mut *mut jni::sys::JavaVM,
-            jni::sys::jsize,
-            *mut jni::sys::jsize,
-        ) -> jni::sys::jint = std::mem::transmute(symbol);
-        let mut vm: *mut jni::sys::JavaVM = std::ptr::null_mut();
-        let mut count: jni::sys::jsize = 0;
-        let rc = get_vms(&mut vm, 1, &mut count);
-        anyhow::ensure!(rc == 0 && count == 1 && !vm.is_null(), "no JavaVM in this process");
-        let vm: &'static jni::JavaVM = Box::leak(Box::new(jni::JavaVM::from_raw(vm)?));
-        let _ = JVM.set(vm);
-        Ok(vm)
+    Ok(&android_context()?.vm)
+}
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_com_cnmdbook_chartpicker_VideoPublisher_initialize(
+    mut env: jni::JNIEnv,
+    _class: jni::objects::JClass,
+    application: jni::objects::JObject,
+) {
+    let result = (|| -> Result<()> {
+        anyhow::ensure!(!application.is_null(), "no Android application context");
+        let context = AndroidContext {
+            vm: env.get_java_vm()?,
+            application: env.new_global_ref(application)?,
+        };
+        let _ = ANDROID_CONTEXT.set(context);
+        Ok(())
+    })();
+    if let Err(error) = result {
+        debug_log(&format!("media bridge initialization failed: {error:#}"));
+        let _ = env.throw_new("java/lang/IllegalStateException", format!("Cannot initialize Android media bridge: {error:#}"));
     }
 }
 
 #[cfg(target_os = "android")]
 fn import_content_uri(uri: &str) -> Result<PathBuf> {
-    use jni::{
-        objects::{JObject, JValue},
-        JavaVM,
-    };
+    use jni::objects::{JObject, JValue};
     use std::{
         hash::{Hash, Hasher},
         io::Read,
@@ -152,18 +157,7 @@ fn import_content_uri(uri: &str) -> Result<PathBuf> {
     let vm = java_vm()?;
     let mut env = vm.attach_current_thread()?;
 
-    // `ActivityThread.currentApplication()` is a hidden but stable entry point;
-    // hidden-API restrictions apply to Java reflection, not to JNI calls, and it
-    // saves us from having to be handed the Activity by Tauri.
-    let app = env
-        .call_static_method(
-            "android/app/ActivityThread",
-            "currentApplication",
-            "()Landroid/app/Application;",
-            &[],
-        )?
-        .l()?;
-    anyhow::ensure!(!app.is_null(), "no Android application context");
+    let app = android_context()?.application.as_obj();
 
     // ParcelFileDescriptor.detachFd() hands us a raw fd, which is far simpler
     // (and cheaper) than streaming a Java InputStream through JNI byte arrays.
@@ -217,24 +211,54 @@ fn import_content_uri(uri: &str) -> Result<PathBuf> {
     anyhow::bail!("content URIs are only used on Android: {uri}")
 }
 
-/// Move the finished video somewhere the user can find it.
-///
-/// The desktop version just writes next to the chosen output path; on Android
-/// the app-private directory is not browsable, so try the public Movies folder
-/// and fall back to the source path when scoped storage forbids it.
+/// Publish the finished video into Android's media library. Only a completed
+/// media transaction returns success; failures retain the private source file.
 pub fn publish_video(source: &Path, display_name: &str) -> Result<String> {
     anyhow::ensure!(source.is_file(), "the rendered video is missing");
-    let movies = Path::new("/storage/emulated/0/Movies");
-    if movies.is_dir() {
-        let name = if display_name.to_ascii_lowercase().ends_with(".mp4") {
-            display_name.to_owned()
-        } else {
-            format!("{display_name}.mp4")
-        };
-        let target = movies.join(name);
-        if std::fs::copy(source, &target).is_ok() {
-            return Ok(target.to_string_lossy().into_owned());
-        }
+    #[cfg(target_os = "android")]
+    {
+        publish_to_media_store(source, display_name)
+            .with_context(|| format!("Failed to save to the media library; original video: {}", source.display()))
     }
-    Ok(source.to_string_lossy().into_owned())
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = display_name;
+        Ok(source.to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(target_os = "android")]
+fn publish_to_media_store(source: &Path, display_name: &str) -> Result<String> {
+    use jni::objects::{JClass, JObject, JString, JValue};
+
+    let mut env = java_vm()?.attach_current_thread()?;
+    let result = (|| -> Result<String> {
+        let app = android_context()?.application.as_obj();
+        // JNI FindClass on an attached native thread uses the system loader.
+        // Resolve the packaged publisher with the application's loader instead.
+        let loader = env.call_method(&app, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?.l()?;
+        let class_name = JObject::from(env.new_string("com.cnmdbook.chartpicker.VideoPublisher")?);
+        let class = JClass::from(env.call_method(
+            &loader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;", &[JValue::Object(&class_name)],
+        )?.l()?);
+        let source_text = JObject::from(env.new_string(source.to_string_lossy().as_ref())?);
+        let name_text = JObject::from(env.new_string(display_name)?);
+        let uri = JString::from(env.call_static_method(
+            class, "publishVideo", "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            &[JValue::Object(&app), JValue::Object(&source_text), JValue::Object(&name_text)],
+        )?.l()?);
+        let uri: String = env.get_string(&uri)?.into();
+        anyhow::ensure!(uri.starts_with("content://"), "media publisher returned no content URI");
+        debug_log(&format!("gallery published: {uri}"));
+        Ok(uri)
+    })();
+    if result.is_err() && env.exception_check().unwrap_or(false) {
+        let exception = env.exception_occurred()?;
+        env.exception_clear()?;
+        let message = env.call_method(exception, "toString", "()Ljava/lang/String;", &[])?.l()?;
+        let message = JString::from(message);
+        let message: String = env.get_string(&message)?.into();
+        anyhow::bail!("Android media publisher: {message}");
+    }
+    result
 }

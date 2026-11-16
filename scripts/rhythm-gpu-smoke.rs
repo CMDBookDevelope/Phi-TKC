@@ -16,7 +16,7 @@ use std::{
 
 const WIDTH: u32 = 320;
 const GAME_HEIGHT: u32 = 180;
-const OUTPUT_HEIGHT: u32 = 226;
+const OUTPUT_HEIGHT: u32 = 212;
 
 /// The production target can be RGB8. Copy through a real RGBA8 render pass
 /// before readback so RGB channels are never reinterpreted as RGBA pixels.
