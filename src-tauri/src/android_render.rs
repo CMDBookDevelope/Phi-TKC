@@ -14,7 +14,7 @@ use macroquad::{
 };
 use prpr::{
     config::Mods,
-    core::MSRenderTarget,
+    core::{MSRenderTarget, RhythmComposite, RhythmNoteSelection, RhythmStrip},
     fs,
     scene::{GameMode, GameScene, LoadingScene},
     time::TimeManager,
@@ -119,6 +119,7 @@ async fn render_async(
     };
     check_cancel()?;
     let params = request.params;
+    let (game_width, game_height) = params.config.canvas_resolution()?;
     let path = params.path.clone();
     let font = FontArc::try_from_vec(load_file("font.ttf").await?)?;
     let mut painter = TextPainter::new(font);
@@ -341,8 +342,13 @@ async fn render_async(
         .map(|_| YuvTarget::new(vw, vh))
         .collect::<Result<Vec<_>>>()?;
     let msts: Vec<Rc<MSRenderTarget>> = (0..2)
-        .map(|_| Rc::new(MSRenderTarget::new((vw, vh), params.config.sample_count)))
+        .map(|_| Rc::new(MSRenderTarget::new((game_width, game_height), params.config.sample_count)))
         .collect();
+    let rhythm_strip = if params.config.rhythm_analysis {
+        let cover = chart_fs.load_file(&info.illustration).await?;
+        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?)
+    } else { None };
+    let rhythm = RhythmComposite::new(game_width, game_height, rhythm_strip, 2)?;
     let mst_slot = Rc::new(Cell::new(0usize));
     let my_time: Rc<RefCell<f64>> = Rc::new(RefCell::new(0.));
     let tm = TimeManager::manual(Box::new({
@@ -387,7 +393,7 @@ async fn render_async(
     )
     .await?;
     main.top_level = false;
-    main.viewport = Some((0, 0, vw as _, vh as _));
+    main.viewport = Some((0, 0, game_width as _, game_height as _));
 
     *my_time.borrow_mut() = 0.;
     main.update()?;
@@ -531,12 +537,14 @@ async fn render_async(
         }
         let scene_start = Instant::now();
         main.render(&mut painter)?;
+        let rendered = rhythm.compose(frame_slot, &msts[frame_slot],
+            main.scenes.last().and_then(|scene| scene.chart_time()), &mut painter);
         scene_render_time += scene_start.elapsed().as_secs_f64();
 
         let read_slot = free_slots.pop().context("NV12 readback ring exhausted")?;
         let yuv = &yuvs[frame_slot];
         let convert_start = Instant::now();
-        yuv.convert(&msts[frame_slot].output());
+        yuv.convert(&rendered);
         yuv_convert_time += convert_start.elapsed().as_secs_f64();
         let submit_start = Instant::now();
         context.record_yuv_copy_to_staging(

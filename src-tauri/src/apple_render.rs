@@ -12,7 +12,7 @@ use macroquad::{
 };
 use prpr::{
     config::Mods,
-    core::MSRenderTarget,
+    core::{MSRenderTarget, RhythmComposite, RhythmNoteSelection, RhythmStrip},
     fs,
     scene::{GameMode, GameScene, LoadingScene},
     time::TimeManager,
@@ -112,6 +112,7 @@ async fn render_async(
     let check_cancel = || check_canceled(&request.request_cancel);
     activity.checkpoint(check_cancel, finish_gpu)?;
     let params = request.params;
+    let (game_width, game_height) = params.config.canvas_resolution()?;
     let path = params.path.clone();
     let font = FontArc::try_from_vec(load_file("font.ttf").await?)?;
     let mut painter = TextPainter::new(font);
@@ -140,6 +141,10 @@ async fn render_async(
         .await
         .context("failed to load the chart")?;
     crate::apple_platform::debug_log("render: chart loaded");
+    let rhythm_strip = if params.config.rhythm_analysis {
+        let cover = chart_fs.load_file(&info.illustration).await?;
+        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?)
+    } else { None };
 
     let music = AudioClip::new(
         chart_fs
@@ -302,7 +307,8 @@ async fn render_async(
         bitrate,
         sample_rate as u32,
     )?;
-    let target = Rc::new(MSRenderTarget::new((vw, vh), params.config.sample_count));
+    let target = Rc::new(MSRenderTarget::new((game_width, game_height), params.config.sample_count));
+    let rhythm = RhythmComposite::new(game_width, game_height, rhythm_strip, 1)?;
     initialize_render_target(
         miniquad_context()
             .metal_context()
@@ -336,7 +342,7 @@ async fn render_async(
     )
     .await?;
     main.top_level = false;
-    main.viewport = Some((0, 0, vw as i32, vh as i32));
+    main.viewport = Some((0, 0, game_width as i32, game_height as i32));
     main.update()?;
     let skip = (ss * fps_f64 - 1e-6).ceil().max(0.) as u64;
     let frames = (video_length * fps_f64).ceil() as u64;
@@ -375,8 +381,10 @@ async fn render_async(
                 .quad_gl
                 .render_pass(Some(target.input().render_pass));
             main.render(&mut painter)?;
+            let rendered = rhythm.compose(0, &target,
+                main.scenes.last().and_then(|scene| scene.chart_time()), &mut painter);
             unsafe { get_internal_gl() }.flush();
-            let texture = target.output().texture.raw_miniquad_texture_handle();
+            let texture = rendered.texture.raw_miniquad_texture_handle();
             let output_index = frame - skip;
             gpu_frames.drain_ready(&mut encoder, pcm16)?;
             if gpu_frames.at_capacity() {

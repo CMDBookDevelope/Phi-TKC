@@ -1,6 +1,12 @@
 <i18n>
 en:
   resolution: Resolution
+  rhythm-analysis: Rhythm Analysis
+  rhythm-description: 'Append a BPM metronome and a scrolling note timeline, with colors from the chart artwork.'
+  rhythm-note-types: Note types to analyze
+  rhythm-empty: Only BPM and beat guides will be shown.
+  rhythm-output: 'Output: {width} × {height}'
+  rhythm-canvas: 'Chart canvas: {width} × {height}; bottom strip: {strip}px (width / 7, rounded to an even height).'
   ffmpeg-preset: Preset
   video-codec: Encoder
   encoder-select: Hardware Encoder
@@ -102,6 +108,12 @@ en:
 
 zh-CN:
   resolution: 分辨率
+  rhythm-analysis: 节奏解析模式
+  rhythm-description: 在底部延伸 BPM 节拍器与滚动音符时间线，并从曲绘提取配色。
+  rhythm-note-types: 解析音符类型
+  rhythm-empty: 仅显示 BPM 与逐拍参考线。
+  rhythm-output: '视频输出：{width} × {height}'
+  rhythm-canvas: '谱面画面：{width} × {height}；底栏：{strip}px（宽度的 1/7，取最近偶数）。'
   ffmpeg-preset: 编码预设
   video-codec: 编码器
   encoder-select: 硬件编码器
@@ -212,7 +224,9 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { VForm } from 'vuetify/components';
 import { toast, anyFilter, toastError, RULES } from '@/common';
 import type { RenderConfig } from '@/model';
+import { RHYTHM_DEFAULTS, withRhythmDefaults } from '@/rhythmConfig';
 import TipSwitch from './TipSwitch.vue';
+const props = defineProps<{ initialConfig?: RenderConfig }>();
 
 // Phi-TKC's preset list, plus the 1920x1080 default (which was missing from it).
 const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2132', '2388x1668', '1600x1080', '7680x5760'];
@@ -278,6 +292,21 @@ const categories = [
 ];
 
 const resolution = ref('1920x1080');
+const rhythmAnalysis = ref(RHYTHM_DEFAULTS.rhythmAnalysis);
+const rhythmNotes = ref(['tap', 'hold']);
+const rhythmNoteTypes = ['tap', 'drag', 'hold', 'flick'];
+const rhythmDimensions = computed(() => {
+  if (typeof resolution.value !== 'string') return null;
+  const [width, height] = resolution.value.split(/x/i).map(Number);
+  if (![width, height].every((value) => Number.isInteger(value) && value >= 16 && value % 2 === 0)) return null;
+  const strip = Math.round(width / 14) * 2;
+  return { width, height, strip, outputHeight: height + strip };
+});
+function toggleRhythmNote(kind: string) {
+  rhythmNotes.value = rhythmNotes.value.includes(kind)
+    ? rhythmNotes.value.filter((value) => value !== kind)
+    : [...rhythmNotes.value, kind];
+}
 const fps = ref('60');
 const sampleCount = ref(4);
 const FALLBACK_MSAA_COUNTS = [1, 2, 4, 8];
@@ -412,6 +441,7 @@ const DEFAULT_PRESET: Preset = {
   name: t('default-preset'),
   key: 'default',
   config: {
+    ...RHYTHM_DEFAULTS,
     resolution: [1920, 1080],
     ffmpegPreset: 'medium',
     endingLength: -2.0,
@@ -493,8 +523,12 @@ async function updatePresets() {
 async function initConfig() {
   await updateRespacks();
   await updatePresets();
+  if (props.initialConfig) applyConfig(props.initialConfig);
 }
 void initConfig();
+watch(() => props.initialConfig, (config) => {
+  if (config) applyConfig(config);
+});
 
 async function chooseAvatar() {
   const file = await open({ filters: [{ name: 'Image', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] }, anyFilter()] });
@@ -522,6 +556,11 @@ async function buildConfig(): Promise<RenderConfig | null> {
   const challengeIndex = t('challenge-colors').split(',').indexOf(challengeColor.value);
   return {
     resolution: [w, h],
+    rhythmAnalysis: rhythmAnalysis.value,
+    rhythmTap: rhythmNotes.value.includes('tap'),
+    rhythmDrag: rhythmNotes.value.includes('drag'),
+    rhythmHold: rhythmNotes.value.includes('hold'),
+    rhythmFlick: rhythmNotes.value.includes('flick'),
     ffmpegPreset: FFMPEG_PRESET_VALUES[ffmpegPreset.value] ?? ffmpegPreset.value,
     endingLength: parseFloat(endingLength.value),
     disableLoading: disableLoading.value,
@@ -576,6 +615,14 @@ async function buildConfig(): Promise<RenderConfig | null> {
 }
 
 function applyConfig(c: RenderConfig) {
+  const rhythm = withRhythmDefaults(c);
+  rhythmAnalysis.value = rhythm.rhythmAnalysis;
+  rhythmNotes.value = [
+    rhythm.rhythmTap ? 'tap' : '',
+    rhythm.rhythmDrag ? 'drag' : '',
+    rhythm.rhythmHold ? 'hold' : '',
+    rhythm.rhythmFlick ? 'flick' : '',
+  ].filter(Boolean);
   resolution.value = c.resolution.join('x');
   ffmpegPreset.value = FFMPEG_PRESETS.some((x) => x.value === c.ffmpegPreset) ? c.ffmpegPreset : c.ffmpegPreset?.split(' ')[0] || 'medium';
   endingLength.value = String(c.endingLength);
@@ -665,6 +712,7 @@ async function confirmCreatePreset() {
     await invoke('add_preset', { name, config: pendingPresetConfig });
     await updatePresets();
     preset.value = presets.value.find((x) => x.key === name) || presets.value[0];
+    applyConfig(preset.value.config);
     toast(t('preset-created'), 'success');
     presetNameDialog.value = false;
     pendingPresetConfig = null;
@@ -736,6 +784,26 @@ async function replacePreset() {
                   persistent-hint
                   density="compact"
                   variant="outlined" />
+              </div>
+            </div>
+            <div class="md3-card glass fluent-glass rhythm-card" v-glass>
+              <TipSwitch v-model="rhythmAnalysis" :label="t('rhythm-analysis')" density="compact" color="primary" hide-details />
+              <p class="rhythm-description">{{ t('rhythm-description') }}</p>
+              <div v-if="rhythmAnalysis" class="rhythm-options">
+                <div class="card-label">{{ t('rhythm-note-types') }}</div>
+                <div class="rhythm-note-grid" role="group" :aria-label="t('rhythm-note-types')">
+                  <button v-for="kind in rhythmNoteTypes" :key="kind" type="button" class="ui-chip rhythm-note-chip"
+                    :class="{ 'is-on': rhythmNotes.includes(kind) }" :aria-pressed="rhythmNotes.includes(kind)"
+                    @click="toggleRhythmNote(kind)">
+                    <v-icon :icon="rhythmNotes.includes(kind) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline'" size="16" />
+                    <span>{{ kind[0].toUpperCase() + kind.slice(1) }}</span>
+                  </button>
+                </div>
+                <p v-if="!rhythmNotes.length" class="field-hint">{{ t('rhythm-empty') }}</p>
+                <div v-if="rhythmDimensions" class="rhythm-size" aria-live="polite">
+                  <span class="rhythm-output">{{ t('rhythm-output', { width: rhythmDimensions.width, height: rhythmDimensions.outputHeight }) }}</span>
+                  <p class="field-hint">{{ t('rhythm-canvas', rhythmDimensions) }}</p>
+                </div>
               </div>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
@@ -1214,5 +1282,46 @@ async function replacePreset() {
   margin: 8px 2px 0;
   font-size: 0.75rem;
   opacity: 0.65;
+}
+.rhythm-description {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(var(--main-color-rgb), 0.65);
+}
+.rhythm-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rhythm-note-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.rhythm-note-chip {
+  justify-content: center;
+  min-height: 42px;
+  font-family: inherit;
+}
+.rhythm-note-chip:focus-visible {
+  outline: 2px solid var(--main-color);
+  outline-offset: 2px;
+}
+.rhythm-size {
+  padding: 12px;
+  border: 1px solid rgba(var(--main-color-rgb), 0.16);
+  border-radius: 12px;
+  background: rgba(var(--main-color-rgb), 0.06);
+}
+.rhythm-output {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--main-color);
+}
+@media (max-width: 600px) {
+  .rhythm-note-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>

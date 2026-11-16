@@ -173,6 +173,18 @@
 
   .actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
   .hint { font-size: .72rem; opacity: .6; line-height: 1.6; }
+  .rhythm-panel { padding: 14px; margin-top: 16px; border-radius: 14px; }
+  .rhythm-panel .row { padding-top: 0; }
+  .rhythm-options[hidden] { display: none; }
+  .rhythm-choices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .rhythm-choice {
+    display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px;
+    padding: 6px 10px; border: 1px solid rgba(var(--main-color-rgb), .24); border-radius: 11px;
+    background: rgba(var(--main-color-rgb), .06); font-size: .82rem; cursor: pointer;
+  }
+  .rhythm-choice input { accent-color: var(--main-color); width: 18px; height: 18px; }
+  .rhythm-choice input:focus-visible { outline: 2px solid var(--main-color); outline-offset: 3px; }
+  body.is-mobile .rhythm-choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   /* ---- Jobs ---- */
   .bar { height: 7px; border-radius: 999px; background: rgba(255,255,255,.10); overflow: hidden; margin: 9px 0 7px; }
@@ -291,6 +303,22 @@
             <select name="format"><option value="mp4">mp4</option><option value="mov">mov</option></select>
           </label>
         </div>
+
+        <section class="rhythm-panel clear-glass">
+          <div class="row"><span id="rhythmAnalysisLabel">节奏解析模式</span><label class="switch"><input type="checkbox" name="rhythm-analysis" role="switch" aria-labelledby="rhythmAnalysisLabel" /><i></i></label></div>
+          <p class="hint">在底部延伸 BPM 节拍器与滚动音符时间线，并从曲绘提取配色。</p>
+          <div id="rhythmOptions" class="rhythm-options" hidden>
+            <p class="hint" id="rhythmTypesLabel">解析音符类型</p>
+            <div class="rhythm-choices" role="group" aria-labelledby="rhythmTypesLabel">
+              <label class="rhythm-choice"><input type="checkbox" name="rhythm-tap" checked /> Tap</label>
+              <label class="rhythm-choice"><input type="checkbox" name="rhythm-drag" /> Drag</label>
+              <label class="rhythm-choice"><input type="checkbox" name="rhythm-hold" checked /> Hold</label>
+              <label class="rhythm-choice"><input type="checkbox" name="rhythm-flick" /> Flick</label>
+            </div>
+            <p id="rhythmEmpty" class="hint" hidden>仅显示 BPM 与逐拍参考线。</p>
+          </div>
+          <p id="rhythmOutput" class="hint" role="status"></p>
+        </section>
 
         <h2>画面</h2>
         <div class="grid">
@@ -765,6 +793,20 @@ import { extractMainColor } from '/theme-color.js';
   const fileInput = $('file');
   const drop = $('drop');
   const fileLabel = $('fileLabel');
+  const form = $('form');
+  const rhythmKeys = ['rhythm-analysis', 'rhythm-tap', 'rhythm-drag', 'rhythm-hold', 'rhythm-flick'];
+  function updateRhythmOptions() {
+    const enabled = form.elements.namedItem('rhythm-analysis').checked;
+    $('rhythmOptions').hidden = !enabled;
+    $('rhythmEmpty').hidden = rhythmKeys.slice(1).some(key => form.elements.namedItem(key).checked);
+    const [width, height] = form.elements.namedItem('resolution').value.split(/x/i).map(Number);
+    const strip = enabled ? Math.round(width / 14) * 2 : 0;
+    $('rhythmOutput').textContent = `视频输出：${width} × ${height + strip}` + (enabled
+      ? `；谱面画面：${width} × ${height}；底栏：${strip}px（宽度的 1/7，取最近偶数）。`
+      : '');
+  }
+  [...rhythmKeys, 'resolution'].forEach(key => form.elements.namedItem(key).addEventListener('change', updateRhythmOptions));
+  updateRhythmOptions();
   fileInput.addEventListener('change', () => {
     const f = fileInput.files[0];
     fileLabel.textContent = f ? `${f.name} · ${(f.size / 1048576).toFixed(1)} MB` : '.pez / .zip / .pgr / .rpe';
@@ -783,6 +825,9 @@ import { extractMainColor } from '/theme-color.js';
     if (!fileInput.files.length) { $('formHint').textContent = '请先选择谱面文件'; return; }
 
     const body = new FormData($('form'));
+    // Unchecked checkboxes are absent from FormData. Send explicit values so
+    // disabling Tap/Hold overrides their compatibility defaults on the server.
+    for (const key of rhythmKeys) body.set(key, form.elements.namedItem(key).checked ? 'true' : 'false');
     // Empty <input type=file> still produce a zero-byte part; drop those so the
     // server does not try to open an empty resource pack / avatar.
     for (const key of ['avatar', 'respack']) {

@@ -35,6 +35,13 @@ mod apple_render;
 ))]
 #[path = "../../scripts/apple-gpu-smoke.rs"]
 mod apple_gpu_smoke;
+#[cfg(all(
+    test,
+    feature = "apple-render-check",
+    any(target_os = "macos", target_os = "ios")
+))]
+#[path = "../../scripts/rhythm-gpu-smoke.rs"]
+mod rhythm_gpu_smoke;
 mod vulkan_encode;
 mod vulkan_readback;
 mod vulkan_video;

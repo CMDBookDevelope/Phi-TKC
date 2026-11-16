@@ -157,6 +157,7 @@ import moment from 'moment';
 
 import { toast, toastError, RULES } from './common';
 import type { ChartInfo, RenderConfig, Task } from './model';
+import { RHYTHM_DEFAULTS, withRhythmDefaults } from './rhythmConfig';
 import ConfigView from '@/components/ConfigView.vue';
 import RenderProgressBar from '@/components/RenderProgressBar.vue';
 
@@ -234,12 +235,13 @@ function loadDefaultConfig(): RenderConfig {
   const savedConfig = localStorage.getItem('defaultRenderConfig');
   if (savedConfig) {
     try {
-      return JSON.parse(savedConfig) as RenderConfig;
+      return withRhythmDefaults(JSON.parse(savedConfig) as RenderConfig);
     } catch (e) {
       console.error('Failed to parse saved config', e);
     }
   }
   return {
+    ...RHYTHM_DEFAULTS,
     resolution: [1920, 1080],
     ffmpegPreset: 'medium p4 balanced',
     endingLength: -2.0,
@@ -422,7 +424,7 @@ async function buildRenderParams(requireFfmpeg = true) {
   let config = selectedPreset.value === 'default' ? defaultConfig.value : ((await invoke('get_presets')) as Record<string, RenderConfig>)[selectedPreset.value];
   if (!config) config = defaultConfig.value;
   if (!config.resolution) throw new Error('Resolution missing');
-  return config;
+  return withRhythmDefaults(config);
 }
 
 async function saveConfig() {
@@ -839,7 +841,7 @@ watch(
           <v-btn icon="mdi-close" variant="text" @click="configDialog = false" />
         </v-toolbar>
         <v-card-text class="pa-0 h-100">
-          <ConfigView ref="configViewRef" />
+          <ConfigView ref="configViewRef" :initial-config="defaultConfig" />
         </v-card-text>
         <v-card-actions class="pa-4 border-t">
           <v-spacer />

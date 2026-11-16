@@ -721,6 +721,11 @@ fn build_config(
     config.bar = flag("bar", false);
     config.score_aim = flag("score-aim", false);
     config.block_area_ui = flag("ui-above-ba", false);
+    config.rhythm_analysis = flag("rhythm-analysis", false);
+    config.rhythm_tap = flag("rhythm-tap", true);
+    config.rhythm_drag = flag("rhythm-drag", false);
+    config.rhythm_hold = flag("rhythm-hold", true);
+    config.rhythm_flick = flag("rhythm-flick", false);
     config.chart_debug = flag("chart-debug", false);
     config.flid_x = flag("flid-x", false);
     config.chart_ratio = number("chart-ratio").unwrap_or(1.0);
@@ -983,4 +988,57 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_config;
+    use std::collections::HashMap;
+
+    #[test]
+    fn rhythm_multipart_missing_fields_keeps_legacy_defaults() {
+        let config = build_config(&HashMap::new(), None, None);
+        assert!(!config.rhythm_analysis);
+        assert!(config.rhythm_tap);
+        assert!(!config.rhythm_drag);
+        assert!(config.rhythm_hold);
+        assert!(!config.rhythm_flick);
+    }
+
+    #[test]
+    fn rhythm_multipart_explicit_false_deselects_default_notes() {
+        let fields = HashMap::from([
+            ("rhythm-analysis".into(), "true".into()),
+            ("rhythm-tap".into(), "false".into()),
+            ("rhythm-drag".into(), "false".into()),
+            ("rhythm-hold".into(), "false".into()),
+            ("rhythm-flick".into(), "false".into()),
+        ]);
+        let config = build_config(&fields, None, None);
+        assert!(config.rhythm_analysis);
+        assert!(
+            !config.rhythm_tap
+                && !config.rhythm_drag
+                && !config.rhythm_hold
+                && !config.rhythm_flick
+        );
+    }
+
+    #[test]
+    fn rhythm_multipart_selection_keeps_original_chart_resolution() {
+        let fields = HashMap::from([
+            ("resolution".into(), "320x180".into()),
+            ("rhythm-analysis".into(), "on".into()),
+            ("rhythm-tap".into(), "0".into()),
+            ("rhythm-drag".into(), "yes".into()),
+            ("rhythm-hold".into(), "false".into()),
+            ("rhythm-flick".into(), "1".into()),
+        ]);
+        let config = build_config(&fields, None, None);
+        assert!(config.rhythm_analysis);
+        assert!(
+            !config.rhythm_tap && config.rhythm_drag && !config.rhythm_hold && config.rhythm_flick
+        );
+        assert_eq!(config.resolution, (320, 180));
+    }
 }

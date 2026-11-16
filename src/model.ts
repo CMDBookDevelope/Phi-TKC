@@ -57,6 +57,11 @@ export interface RenderConfig {
   disableLoading: boolean;
   chartDebug: boolean;
   blockAreaUi: boolean;
+  rhythmAnalysis?: boolean;
+  rhythmTap?: boolean;
+  rhythmDrag?: boolean;
+  rhythmHold?: boolean;
+  rhythmFlick?: boolean;
   flidX: boolean;
   showProgressText: boolean;
   showTimeText: boolean;

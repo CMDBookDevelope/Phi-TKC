@@ -55,6 +55,10 @@
     render-canceled: Render canceled
     render-failed: Render failed — see the task list for details
     duration: Duration
+    output-resolution: Video resolution
+    rhythm-analysis: Rhythm Analysis
+    rhythm-off: Off
+    rhythm-beats-only: BPM and beat guides only
 
     ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and put it in the specific folder.
     remote-submitted: 'Sent to the render server (job {id})'
@@ -115,6 +119,10 @@
     render-canceled: 渲染已取消
     render-failed: 渲染失败，详情请查看任务列表
     duration: 耗时
+    output-resolution: 视频分辨率
+    rhythm-analysis: 节奏解析
+    rhythm-off: 关闭
+    rhythm-beats-only: 仅 BPM 与逐拍参考线
 
     ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并放置在指定文件夹内。
     remote-submitted: 已提交到渲染服务器（任务 {id}）
@@ -129,7 +137,8 @@ import { useLayout } from 'vuetify';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { toastError, toast, anyFilter, isString, RULES } from './common';
-import type { ChartInfo, Task } from './model';
+import type { ChartInfo, RenderConfig, Task } from './model';
+import { rhythmNoteNames, rhythmOutputResolution } from './rhythmConfig';
 import { VForm } from 'vuetify/components';
 import ConfigView from './components/ConfigView.vue';
 import RenderProgressBar from './components/RenderProgressBar.vue';
@@ -165,6 +174,12 @@ const chartInfo = ref<ChartInfo>();
 const pstBackgroundDim = ref(0);
 let chartPath = '';
 let renderTaskId: number | null = null;
+const submittedConfig = ref<RenderConfig>();
+const submittedResolution = computed(() => submittedConfig.value ? rhythmOutputResolution(submittedConfig.value).join(' × ') : '');
+const submittedRhythm = computed(() => {
+  if (!submittedConfig.value?.rhythmAnalysis) return t('rhythm-off');
+  return rhythmNoteNames(submittedConfig.value).join(' + ') || t('rhythm-beats-only');
+});
 
 const choosingChart = ref(false),
   parsingChart = ref(false);
@@ -307,6 +322,7 @@ async function postRender(): Promise<boolean | 'remote'> {
     }
     const outputPath = localStorage.getItem('outputPath');
     renderTaskId = await invoke<number>('post_render', { params, outputPath: outputPath || null });
+    submittedConfig.value = { ...params.config };
     return true;
   } catch (e) {
     toastError(e);
@@ -582,6 +598,7 @@ function resetAndGoChoose() {
   chartInfo.value = undefined;
   chartPath = '';
   renderTaskId = null;
+  submittedConfig.value = undefined;
   renderCover.value = null;
   renderProgress.value = undefined;
   renderDuration.value = undefined;
@@ -777,6 +794,14 @@ function resetAndGoChoose() {
               <div class="info-row" v-if="renderDuration !== undefined">
                 <span class="info-label">{{ t('duration') }}</span
                 ><span class="info-value">{{ formatDuration(renderDuration) }}</span>
+              </div>
+              <div class="info-row" v-if="submittedConfig">
+                <span class="info-label">{{ t('output-resolution') }}</span>
+                <span class="info-value">{{ submittedResolution }}</span>
+              </div>
+              <div class="info-row" v-if="submittedConfig">
+                <span class="info-label">{{ t('rhythm-analysis') }}</span>
+                <span class="info-value">{{ submittedRhythm }}</span>
               </div>
             </div>
             <div v-if="renderProgress !== undefined" class="render-progress">

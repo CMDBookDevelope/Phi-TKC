@@ -13,7 +13,7 @@ use term_size::dimensions;
 use macroquad::{miniquad::{MipmapFilter, RenderPass as MQRenderPass, Texture, TextureFormat, TextureParams, TextureWrap}, prelude::*, window::miniquad_context};
 use prpr::{
     config::{ChallengeModeColor, Config, Mods},
-    core::{MSRenderTarget},
+    core::{MSRenderTarget, RhythmComposite, RhythmLayout, RhythmNoteSelection, RhythmStrip},
     ext::SafeTexture,
     fs,
     info::ChartInfo,
@@ -42,6 +42,26 @@ use std::{ffi::OsStr, fmt::Write as _};
 use tempfile::NamedTempFile;
 
 const POOL_TARGET_BYTES: usize = 256 << 20;
+
+/// RGB8 game targets must be copied before a four-channel encoder readback.
+struct RgbaReadback(RenderTarget);
+
+impl RgbaReadback {
+    fn new(width: u32, height: u32) -> Self {
+        let context = miniquad_context();
+        let texture = Texture::new_render_texture(context, TextureParams {
+            width, height, format: TextureFormat::RGBA8, ..Default::default()
+        });
+        let render_pass = MQRenderPass::new(context, texture, None);
+        Self(RenderTarget { texture: Texture2D::from_miniquad_texture(texture), render_pass })
+    }
+}
+
+impl Drop for RgbaReadback {
+    fn drop(&mut self) {
+        self.0.delete();
+    }
+}
 
 #[derive(Deserialize, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -96,6 +116,11 @@ pub struct RenderConfig {
     pub score_aim: bool,
     /// Draw the HUD above 噪域 (`blockAreaList`) instead of under it.
     pub block_area_ui: bool,
+    pub rhythm_analysis: bool,
+    pub rhythm_tap: bool,
+    pub rhythm_drag: bool,
+    pub rhythm_hold: bool,
+    pub rhythm_flick: bool,
 
     pub ui_score: bool,
     pub ui_combo: bool,
@@ -166,6 +191,11 @@ impl Default for RenderConfig {
             bar: false,
             score_aim: false,
             block_area_ui: false,
+            rhythm_analysis: false,
+            rhythm_tap: true,
+            rhythm_drag: false,
+            rhythm_hold: true,
+            rhythm_flick: false,
 
             ffmpeg_thread: false,
 
@@ -177,6 +207,12 @@ impl Default for RenderConfig {
 impl RenderConfig {
     /// Keep the requested canvas intact; encoders require even dimensions.
     pub fn output_resolution(&self) -> Result<(u32, u32)> {
+        let (width, height) = self.canvas_resolution()?;
+        let layout = RhythmLayout::new(width, height, self.rhythm_analysis)?;
+        Ok((width, layout.output_height))
+    }
+
+    pub fn canvas_resolution(&self) -> Result<(u32, u32)> {
         let (width, height) = self.resolution;
         if width < 16 || height < 16 || width > i32::MAX as u32 || height > i32::MAX as u32 {
             bail!("resolution must be at least 16x16 and fit the renderer viewport (got {width}x{height})");
@@ -228,6 +264,11 @@ impl RenderConfig {
             bar: self.bar,
             score_aim: self.score_aim,
             block_area_ui: self.block_area_ui,
+            rhythm_analysis: self.rhythm_analysis,
+            rhythm_tap: self.rhythm_tap,
+            rhythm_drag: self.rhythm_drag,
+            rhythm_hold: self.rhythm_hold,
+            rhythm_flick: self.rhythm_flick,
             ..Default::default()
         }
     }
@@ -960,6 +1001,7 @@ async fn render_impl(
     let _ = exit_after;
     let process_start = Instant::now();
     let (vw, vh) = params.config.output_resolution()?;
+    let (game_width, game_height) = params.config.canvas_resolution()?;
     let path = params.path;
     info!("Preparing chart: {}", path.display());
 
@@ -983,6 +1025,12 @@ async fn render_impl(
     let (chart, ..) = GameScene::load_chart(fs.deref_mut(), &info)
         .await
         .with_context(|| tl!("load-chart-failed"))?;
+    let rhythm_strip = if params.config.rhythm_analysis {
+        let cover = fs.load_file(&info.illustration).await?;
+        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?)
+    } else {
+        None
+    };
     macro_rules! ld {
             ($path:literal) => {
                 AudioClip::new(load_file($path).await?)
@@ -1308,7 +1356,8 @@ async fn render_impl(
     let yuvs: Vec<YuvTarget> = (0..yuv_count)
         .filter_map(|_| YuvTarget::new(vw, vh).ok())
         .collect();
-    let mut ffmpeg_nv12 = if !vulkan_video && yuvs.len() == 2 {
+    let force_rgba_readback = std::env::var("PHITK_READBACK").is_ok_and(|mode| mode == "rgba");
+    let mut ffmpeg_nv12 = if !force_rgba_readback && !vulkan_video && yuvs.len() == 2 {
         match crate::vulkan_readback::Nv12Readback::new(vw, vh, 8) {
             Some(readback) => {
                 debug!(
@@ -1331,8 +1380,10 @@ async fn render_impl(
     let nv12_mode = ffmpeg_nv12.is_some();
     let mst_count = if nv12_mode { 2 } else { 1 };
     let msts: Vec<Rc<MSRenderTarget>> = (0..mst_count)
-        .map(|_| Rc::new(MSRenderTarget::new((vw, vh), config.sample_count)))
+        .map(|_| Rc::new(MSRenderTarget::new((game_width, game_height), config.sample_count)))
         .collect();
+    let rhythm = RhythmComposite::new(game_width, game_height, rhythm_strip, mst_count)?;
+    let rgba_readback = (!nv12_mode && !vulkan_video).then(|| RgbaReadback::new(vw, vh));
     let mst_slot = Rc::new(Cell::new(0usize));
     let my_time: Rc<RefCell<f64>> = Rc::new(RefCell::new(0.));
     let tm = TimeManager::manual(Box::new({
@@ -1364,7 +1415,7 @@ async fn render_impl(
     )
         .await?;
     main.top_level = false;
-    main.viewport = Some((0, 0, vw as _, vh as _));
+    main.viewport = Some((0, 0, game_width as _, game_height as _));
 
     *my_time.borrow_mut() = 0.;
     main.update()?;
@@ -2580,16 +2631,18 @@ async fn render_impl(
             (None, Some(pipeline), Some(writer), None, None, None)
         };
 
-    fn submit_frame(pipeline: &FramePipeline, target: &RenderTarget, frame_size: usize, ) -> Result<(f64, f64)> {
+    fn submit_frame(pipeline: &FramePipeline, target: &RenderTarget, rgba: &RgbaReadback, frame_size: usize, ) -> Result<(f64, f64)> {
         let acquire_start = Instant::now();
         let buf = pipeline.acquire_buf();
         let pool_wait = acquire_start.elapsed().as_secs_f64();
         let base = pipeline.pool_addrs[buf] as *mut u8;
 
+        unsafe { get_internal_gl() }.flush();
         let quad_context = miniquad_context();
         let dma_start = Instant::now();
         let out = unsafe { std::slice::from_raw_parts_mut(base, frame_size) };
-        target
+        quad_context.copy_render_target(target.render_pass, rgba.0.render_pass);
+        rgba.0
             .texture
             .raw_miniquad_texture_handle()
             .read_pixels(quad_context, out);
@@ -2677,6 +2730,12 @@ async fn render_impl(
         }
         let render_start = Instant::now();
         main.render(&mut painter)?;
+        let rendered = rhythm.compose(
+            mst_slot.get(),
+            &msts[mst_slot.get()],
+            main.scenes.last().and_then(|scene| scene.chart_time()),
+            &mut painter,
+        );
         scene_render_time += render_start.elapsed().as_secs_f64();
         if current_frame_time <= LoadingScene::TOTAL_TIME as f64 && !params.config.disable_loading {
             draw_rectangle(0., 0., 0., 0., Color::default());
@@ -2694,7 +2753,7 @@ async fn render_impl(
                 let context = miniquad_context().vulkan_context().unwrap();
                 let yuv = &yuvs[frame_slot];
                 let convert_start = Instant::now();
-                yuv.convert(&msts[frame_slot].output());
+                yuv.convert(&rendered);
                 yuv_convert_time += convert_start.elapsed().as_secs_f64();
                 let submit_start = Instant::now();
                 context.record_yuv_copy_to_staging(
@@ -2718,7 +2777,7 @@ async fn render_impl(
                 .unwrap();
             slot_wait_time += wait_start.elapsed().as_secs_f64();
             if let Some(yuv) = yuvs.first() {
-                yuv.convert(&msts[0].output());
+                yuv.convert(&rendered);
                 {
                     let context = miniquad_context().vulkan_context().unwrap();
                     context.copy_nv12_from_textures(
@@ -2732,7 +2791,7 @@ async fn render_impl(
             }
         } else {
             let (dma, pool) =
-                submit_frame(pipeline.as_ref().unwrap(), &msts[0].output(), frame_size)?;
+                submit_frame(pipeline.as_ref().unwrap(), &rendered, rgba_readback.as_ref().unwrap(), frame_size)?;
             dma_wait_time += dma;
             pool_wait_time += pool;
         }
@@ -3104,6 +3163,12 @@ pub struct CliArgs {
     /// Audio delay in frames
     #[arg(long)]
     pub audio_delay_frames: Option<i32>,
+    /// Append the synchronized BPM and musical rhythm timeline.
+    #[arg(long, default_value_t = false)]
+    pub rhythm_analysis: bool,
+    /// Note kinds to analyze (comma separated: tap,drag,hold,flick).
+    #[arg(long, default_value = "tap,hold")]
+    pub rhythm_notes: String,
 }
 
 /// Enable/disable the requested UI elements.
@@ -3198,6 +3263,23 @@ pub async fn render_cli(args: CliArgs) -> Result<()> {
         width.parse().context("invalid resolution width")?,
         height.parse().context("invalid resolution height")?,
     );
+    config.rhythm_analysis = args.rhythm_analysis;
+    if config.rhythm_analysis {
+        config.rhythm_tap = false;
+        config.rhythm_drag = false;
+        config.rhythm_hold = false;
+        config.rhythm_flick = false;
+        for kind in args.rhythm_notes.split(',').map(str::trim).filter(|kind| !kind.is_empty()) {
+            match kind.to_ascii_lowercase().as_str() {
+                "tap" | "click" => config.rhythm_tap = true,
+                "drag" => config.rhythm_drag = true,
+                "hold" => config.rhythm_hold = true,
+                "flick" => config.rhythm_flick = true,
+                "none" if args.rhythm_notes.trim().eq_ignore_ascii_case("none") => {},
+                _ => bail!("unknown rhythm note kind '{kind}'; use tap,drag,hold,flick or none"),
+            }
+        }
+    }
     config.output_resolution()?;
     config.fps = args.fps;
     config.bitrate_control = args.bitrate_control.to_uppercase();
