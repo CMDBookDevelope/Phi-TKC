@@ -534,7 +534,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
             <RenderProgressCircular
               v-if="['loading', 'mixing', 'pending', 'rendering', 'done'].includes(row.status.type)"
               :complete="row.status.type === 'done'"
-              :color="statusColor(row.status.type)" :size="20" :width="2" :aria-label="describeStatus(row.status)"
+              color="primary" :size="20" :width="2" :aria-label="describeStatus(row.status)"
             />
             <span class="status-text">{{ describeStatus(row.status) }}</span>
           </div>
