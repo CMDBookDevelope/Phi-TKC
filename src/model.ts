@@ -63,6 +63,7 @@ export interface RenderConfig {
   rhythmHold?: boolean;
   rhythmFlick?: boolean;
   rhythmSpeed?: number;
+  rhythmColors?: [string, string, string] | null;
   flidX: boolean;
   showProgressText: boolean;
   showTimeText: boolean;

@@ -67,7 +67,7 @@ en:
   watermark: Watermark
   flid_x: Mirror
   background: BG Only
-  hand-split: Hand Split
+  hand-split: AI Hand Split
   note-speed-factor: Note Speed
   bar: Judge Bar
   render-list: Judge Line,Score,Combo,Level,Name,Progress,Percent,Time,Pause
@@ -91,6 +91,7 @@ en:
     game: Game
     effect: Effect
     player: Player
+    analysis: Rhythm/HandSplit
     debug: Debug
   section:
     output: Resolution & Frame Rate
@@ -177,7 +178,7 @@ zh-CN:
   watermark: 水印
   flid_x: 镜像
   background: 仅背景显示
-  hand-split: 手序拆解
+  hand-split: AI 手序拆分
   note-speed-factor: 流速
   bar: 判定条显示
   render-list: 判定线,分数,连击,等级,名字,进度,百分比,时间,暂停
@@ -201,6 +202,7 @@ zh-CN:
     game: 游戏
     effect: 效果
     player: 玩家
+    analysis: 节奏/手序
     debug: 调试
   section:
     output: 分辨率与帧率
@@ -230,9 +232,10 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { VForm } from 'vuetify/components';
 import { toast, anyFilter, toastError, RULES } from '@/common';
 import type { RenderConfig } from '@/model';
-import { RHYTHM_DEFAULTS, RHYTHM_SPEED_MIN, RHYTHM_SPEED_MAX, isRhythmSpeed, withRhythmDefaults } from '@/rhythmConfig';
+import { RHYTHM_DEFAULTS, RHYTHM_SPEED_MIN, RHYTHM_SPEED_MAX, isRhythmSpeed, withRhythmDefaults, type RhythmColors } from '@/rhythmConfig';
 import TipSwitch from './TipSwitch.vue';
-const props = defineProps<{ initialConfig?: RenderConfig }>();
+import RhythmColorPicker from './RhythmColorPicker.vue';
+const props = defineProps<{ initialConfig?: RenderConfig; chartPath?: string; chartLabel?: string }>();
 
 // Phi-TKC's preset list, plus the 1920x1080 default (which was missing from it).
 const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2132', '2388x1668', '1600x1080', '7680x5760'];
@@ -294,12 +297,15 @@ const categories = [
   { key: 'game', icon: 'mdi-gamepad-variant-outline', labelKey: 'head-categories.game' },
   { key: 'graphics', icon: 'mdi-palette-outline', labelKey: 'head-categories.effect' },
   { key: 'player', icon: 'mdi-account-outline', labelKey: 'head-categories.player' },
+  { key: 'analysis', icon: 'mdi-music-note-eighth', labelKey: 'head-categories.analysis' },
   { key: 'debug', icon: 'mdi-bug-outline', labelKey: 'head-categories.debug' },
 ];
 
 const resolution = ref('1920x1080');
 const rhythmAnalysis = ref(RHYTHM_DEFAULTS.rhythmAnalysis);
 const rhythmSpeed = ref(String(RHYTHM_DEFAULTS.rhythmSpeed));
+const rhythmColors = ref<RhythmColors | null>(null);
+const rhythmColorRevision = ref(0);
 const rhythmSpeedRule = (value: unknown) => isRhythmSpeed(value) || t('rhythm-speed-invalid');
 const rhythmNotes = ref(['tap', 'hold']);
 const rhythmNoteTypes = ['tap', 'drag', 'hold', 'flick'];
@@ -574,6 +580,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
     rhythmHold: rhythmNotes.value.includes('hold'),
     rhythmFlick: rhythmNotes.value.includes('flick'),
     rhythmSpeed: Number(rhythmSpeed.value),
+    rhythmColors: rhythmColors.value ? [...rhythmColors.value] : null,
     ffmpegPreset: FFMPEG_PRESET_VALUES[ffmpegPreset.value] ?? ffmpegPreset.value,
     endingLength: parseFloat(endingLength.value),
     disableLoading: disableLoading.value,
@@ -628,9 +635,11 @@ async function buildConfig(): Promise<RenderConfig | null> {
 }
 
 function applyConfig(c: RenderConfig) {
+  rhythmColorRevision.value += 1;
   const rhythm = withRhythmDefaults(c);
   rhythmAnalysis.value = rhythm.rhythmAnalysis;
   rhythmSpeed.value = String(rhythm.rhythmSpeed);
+  rhythmColors.value = rhythm.rhythmColors;
   rhythmNotes.value = [
     rhythm.rhythmTap ? 'tap' : '',
     rhythm.rhythmDrag ? 'drag' : '',
@@ -798,31 +807,6 @@ async function replacePreset() {
                   persistent-hint
                   density="compact"
                   variant="outlined" />
-              </div>
-            </div>
-            <div class="md3-card glass fluent-glass rhythm-card" v-glass>
-              <TipSwitch v-model="rhythmAnalysis" :label="t('rhythm-analysis')" density="compact" color="primary" hide-details />
-              <p class="rhythm-description">{{ t('rhythm-description') }}</p>
-              <div v-if="rhythmAnalysis" class="rhythm-options">
-                <div class="card-label">{{ t('rhythm-note-types') }}</div>
-                <div class="rhythm-note-grid" role="group" :aria-label="t('rhythm-note-types')">
-                  <button v-for="kind in rhythmNoteTypes" :key="kind" type="button" class="ui-chip rhythm-note-chip"
-                    :class="{ 'is-on': rhythmNotes.includes(kind) }" :aria-pressed="rhythmNotes.includes(kind)"
-                    @click="toggleRhythmNote(kind)">
-                    <v-icon :icon="rhythmNotes.includes(kind) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline'" size="16" />
-                    <span>{{ kind[0].toUpperCase() + kind.slice(1) }}</span>
-                  </button>
-                </div>
-                <p v-if="!rhythmNotes.length" class="field-hint">{{ t('rhythm-empty') }}</p>
-                <v-text-field v-model="rhythmSpeed" class="rhythm-speed" type="number" inputmode="decimal"
-                  :min="RHYTHM_SPEED_MIN" :max="RHYTHM_SPEED_MAX" step="any" suffix="×"
-                  :label="t('rhythm-speed')" :hint="t('rhythm-speed-hint')" persistent-hint
-                  :rules="[rhythmSpeedRule]"
-                  density="compact" variant="outlined" />
-                <div v-if="rhythmDimensions" class="rhythm-size" aria-live="polite">
-                  <span class="rhythm-output">{{ t('rhythm-output', { width: rhythmDimensions.width, height: rhythmDimensions.outputHeight }) }}</span>
-                  <p class="field-hint">{{ t('rhythm-canvas', rhythmDimensions) }}</p>
-                </div>
               </div>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
@@ -1028,6 +1012,39 @@ async function replacePreset() {
             </div>
           </div>
 
+          <!-- RHYTHM / HAND SPLIT -->
+          <div v-show="activeCategory === 'analysis'" class="settings-stack">
+            <div class="md3-card glass fluent-glass rhythm-card" v-glass>
+              <TipSwitch v-model="rhythmAnalysis" :label="t('rhythm-analysis')" density="compact" color="primary" hide-details />
+              <p class="rhythm-description">{{ t('rhythm-description') }}</p>
+              <div v-if="rhythmAnalysis" class="rhythm-options">
+                <div class="card-label">{{ t('rhythm-note-types') }}</div>
+                <div class="rhythm-note-grid" role="group" :aria-label="t('rhythm-note-types')">
+                  <button v-for="kind in rhythmNoteTypes" :key="kind" type="button" class="ui-chip rhythm-note-chip"
+                    :class="{ 'is-on': rhythmNotes.includes(kind) }" :aria-pressed="rhythmNotes.includes(kind)"
+                    @click="toggleRhythmNote(kind)">
+                    <v-icon :icon="rhythmNotes.includes(kind) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline'" size="16" />
+                    <span>{{ kind[0].toUpperCase() + kind.slice(1) }}</span>
+                  </button>
+                </div>
+                <p v-if="!rhythmNotes.length" class="field-hint">{{ t('rhythm-empty') }}</p>
+                <v-text-field v-model="rhythmSpeed" class="rhythm-speed" type="number" inputmode="decimal"
+                  :min="RHYTHM_SPEED_MIN" :max="RHYTHM_SPEED_MAX" step="any" suffix="×"
+                  :label="t('rhythm-speed')" :hint="t('rhythm-speed-hint')" persistent-hint
+                  :rules="[rhythmSpeedRule]"
+                  density="compact" variant="outlined" />
+                <RhythmColorPicker v-model="rhythmColors" :chart-path="chartPath" :chart-label="chartLabel" :revision="rhythmColorRevision" />
+                <div v-if="rhythmDimensions" class="rhythm-size" aria-live="polite">
+                  <span class="rhythm-output">{{ t('rhythm-output', { width: rhythmDimensions.width, height: rhythmDimensions.outputHeight }) }}</span>
+                  <p class="field-hint">{{ t('rhythm-canvas', rhythmDimensions) }}</p>
+                </div>
+              </div>
+            </div>
+            <div class="md3-card glass fluent-glass" v-glass>
+              <TipSwitch v-model="handSplit" :label="t('hand-split')" density="compact" color="primary" hide-details />
+            </div>
+          </div>
+
           <!-- DEBUG -->
           <div v-show="activeCategory === 'debug'" class="settings-stack">
             <div class="md3-card glass fluent-glass" v-glass>
@@ -1035,7 +1052,6 @@ async function replacePreset() {
               <div class="switch-grid">
                 <v-switch v-model="chartDebug" :label="t('chart_debug')" density="compact" color="primary" hide-details />
                 <v-switch v-model="flidX" :label="t('flid_x')" density="compact" color="primary" hide-details />
-                <v-switch v-model="handSplit" :label="t('hand-split')" density="compact" color="primary" hide-details />
                 <TipSwitch v-model="disableLoading" :label="t('disable-loading')" :tooltip="t('disable-loading-tips')" density="compact" color="warning" />
               </div>
             </div>

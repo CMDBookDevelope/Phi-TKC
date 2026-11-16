@@ -220,6 +220,7 @@ pub async fn run() -> Result<()> {
             save_text_file,
             save_binary_file,
             load_chart_illustration,
+            extract_rhythm_colors,
             get_msaa_sample_counts,
             remote_status,
             remote_jobs,
@@ -890,6 +891,24 @@ async fn load_chart_illustration(
     .await
 }
 
+/// Use the same artwork and palette routine as the exported rhythm strip.
+#[tauri::command]
+async fn extract_rhythm_colors(path: PathBuf) -> Result<[String; 3], InvokeError> {
+    wrap_async(async move {
+        let path = localize_chart_path(&path)?;
+        let mut fs: Box<dyn FileSystem + Send + Sync + 'static> =
+            fs::fs_from_file(&path).with_context(|| mtl!("read-chart-failed"))?;
+        let info = fs::load_info(fs.deref_mut())
+            .await
+            .with_context(|| mtl!("load-info-failed"))?;
+        let data = fs.load_file(&info.illustration)
+            .await
+            .with_context(|| format!("Failed to load chart illustration: {}", info.illustration))?;
+        tokio::task::spawn_blocking(move || prpr::core::rhythm::extract_cover_palette(&data)).await?
+    })
+    .await
+}
+
 /// Probe a remote `phi-tkc server` from the app.
 ///
 /// Done in Rust rather than the WebView so it is not subject to CORS, the
@@ -1055,6 +1074,37 @@ async fn remote_cancel_request(base: String, id: String) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn rhythm_colors_extract_the_named_artwork_from_archive_and_directory() {
+        // Three authored colors in a 96x16 PNG; an invalid decoy must be ignored.
+        const COVER: &[u8] = &[
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 96,
+            0, 0, 0, 16, 8, 2, 0, 0, 0, 102, 216, 237, 174, 0, 0, 0, 61, 73, 68, 65,
+            84, 120, 156, 237, 208, 65, 13, 0, 32, 12, 4, 176, 105, 57, 11, 88, 192,
+            36, 22, 176, 128, 185, 169, 216, 135, 52, 169, 130, 214, 77, 70, 229, 236,
+            89, 235, 141, 42, 65, 130, 4, 9, 18, 36, 72, 144, 32, 65, 130, 4, 9, 18,
+            36, 72, 144, 160, 191, 130, 26, 36, 93, 250, 76, 205, 238, 128, 33, 0, 0,
+            0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+        ];
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("chart");
+        std::fs::create_dir_all(root.join("images")).unwrap();
+        std::fs::write(root.join("info.yml"), "chart: chart.json\nmusic: music.ogg\nillustration: images/artwork.png\n").unwrap();
+        std::fs::write(root.join("chart.json"), b"{}").unwrap();
+        std::fs::write(root.join("music.ogg"), b"").unwrap();
+        std::fs::write(root.join("images/artwork.png"), COVER).unwrap();
+        std::fs::write(root.join("decoy.png"), b"not the illustration").unwrap();
+        let (_, bytes) = chart_archive::read_upload(&root).unwrap();
+        let archive = directory.path().join("chart.pez");
+        std::fs::write(&archive, bytes).unwrap();
+        let from_directory = extract_rhythm_colors(root).await.unwrap();
+        let from_archive = extract_rhythm_colors(archive).await.unwrap();
+        assert_eq!(from_directory, from_archive);
+        let mut sorted = from_archive;
+        sorted.sort();
+        assert_eq!(sorted, ["#2233BB", "#229944", "#AA2222"]);
+    }
 
     /// End-to-end smoke test for the phone → server upload path.
     ///

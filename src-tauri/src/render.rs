@@ -123,6 +123,8 @@ pub struct RenderConfig {
     pub rhythm_flick: bool,
     /// Rhythm timeline spacing and movement, independent of chart playback.
     pub rhythm_speed: f32,
+    /// Exact custom strip colors; None extracts each chart's artwork colors.
+    pub rhythm_colors: Option<[String; 3]>,
 
     pub ui_score: bool,
     pub ui_combo: bool,
@@ -199,6 +201,7 @@ impl Default for RenderConfig {
             rhythm_hold: true,
             rhythm_flick: false,
             rhythm_speed: 1.0,
+            rhythm_colors: None,
 
             ffmpeg_thread: false,
 
@@ -281,6 +284,7 @@ impl RenderConfig {
             rhythm_hold: self.rhythm_hold,
             rhythm_flick: self.rhythm_flick,
             rhythm_speed: self.rhythm_speed,
+            rhythm_colors: self.rhythm_colors.clone(),
             ..Default::default()
         }
     }
@@ -1039,7 +1043,9 @@ async fn render_impl(
         .with_context(|| tl!("load-chart-failed"))?;
     let rhythm_strip = if params.config.rhythm_analysis {
         let cover = fs.load_file(&info.illustration).await?;
-        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?.with_speed(config.rhythm_speed))
+        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?
+            .with_speed(config.rhythm_speed)
+            .with_colors(config.rhythm_colors.as_ref()))
     } else {
         None
     };

@@ -1,5 +1,11 @@
 import type { RenderConfig } from './model';
 
+export type RhythmColors = [string, string, string];
+
+export function isRhythmColors(value: unknown): value is RhythmColors {
+  return Array.isArray(value) && value.length === 3 && value.every((color) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color));
+}
+
 export const RHYTHM_DEFAULTS = {
   rhythmAnalysis: false,
   rhythmTap: true,
@@ -7,6 +13,7 @@ export const RHYTHM_DEFAULTS = {
   rhythmHold: true,
   rhythmFlick: false,
   rhythmSpeed: 1.0,
+  rhythmColors: null as RhythmColors | null,
 };
 
 export const RHYTHM_SPEED_MIN = 0.1;
@@ -30,6 +37,7 @@ export function withRhythmDefaults(config: RenderConfig): RenderConfig & typeof 
     rhythmHold: config.rhythmHold ?? RHYTHM_DEFAULTS.rhythmHold,
     rhythmFlick: config.rhythmFlick ?? RHYTHM_DEFAULTS.rhythmFlick,
     rhythmSpeed: config.rhythmSpeed ?? RHYTHM_DEFAULTS.rhythmSpeed,
+    rhythmColors: isRhythmColors(config.rhythmColors) ? [...config.rhythmColors] as RhythmColors : null,
   };
 }
 

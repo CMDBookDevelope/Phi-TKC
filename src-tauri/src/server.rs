@@ -1098,4 +1098,18 @@ mod tests {
         let legacy: crate::render::RenderConfig = serde_json::from_value(json).unwrap();
         assert_eq!(legacy.rhythm_speed, 1.0);
     }
+
+    #[test]
+    fn rhythm_custom_colors_survive_json_and_renderer_conversion() {
+        let mut config = crate::render::RenderConfig::default();
+        assert!(config.rhythm_colors.is_none());
+        config.rhythm_colors = Some(["#243D52".into(), "#E6D9CD".into(), "#82718E".into()]);
+        let mut json = serde_json::to_value(&config).unwrap();
+        let loaded: crate::render::RenderConfig = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(loaded.rhythm_colors, config.rhythm_colors);
+        assert_eq!(loaded.to_config().rhythm_colors, config.rhythm_colors);
+        json.as_object_mut().unwrap().remove("rhythmColors");
+        let legacy: crate::render::RenderConfig = serde_json::from_value(json).unwrap();
+        assert!(legacy.to_config().rhythm_colors.is_none());
+    }
 }

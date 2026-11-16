@@ -174,7 +174,7 @@ const stepIndex = ref(1),
 
 const chartInfo = ref<ChartInfo>();
 const pstBackgroundDim = ref(0);
-let chartPath = '';
+const chartPath = ref('');
 let renderTaskId: number | null = null;
 const submittedConfig = ref<RenderConfig>();
 const submittedResolution = computed(() => submittedConfig.value ? rhythmOutputResolution(submittedConfig.value).join(' × ') : '');
@@ -230,7 +230,7 @@ async function loadChart(file: string) {
   if (!file) return;
   try {
     parsingChart.value = true;
-    chartPath = file;
+    chartPath.value = file;
     renderTaskId = null;
     renderCover.value = null;
     renderProgress.value = undefined;
@@ -285,7 +285,7 @@ async function buildParams() {
   let config = await configView.value!.buildConfig();
   if (!config) return null;
   return {
-    path: chartPath,
+    path: chartPath.value,
     info: chartInfo.value,
     config,
   };
@@ -598,7 +598,7 @@ getCurrentWebview()
 function resetAndGoChoose() {
   stepIndex.value = 1;
   chartInfo.value = undefined;
-  chartPath = '';
+  chartPath.value = '';
   renderTaskId = null;
   submittedConfig.value = undefined;
   renderCover.value = null;
@@ -752,7 +752,7 @@ function resetAndGoChoose() {
       <!-- Step 3: Options -->
       <div class="clear-glass glass step-panel" v-glass :class="{ 'is-active': step === 'options' }" :inert="step === 'options' ? undefined : true">
         <div class="options-wrapper">
-          <ConfigView ref="configView" />
+          <ConfigView ref="configView" :chart-path="chartPath" :chart-label="chartInfo?.name" />
         </div>
       </div>
 

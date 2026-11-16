@@ -185,6 +185,7 @@ interface BatchChart {
 }
 
 const charts = ref<BatchChart[]>([]);
+const colorSourceChart = computed(() => charts.value.find((chart) => chart.selected && chart.chartInfo));
 const selectedPreset = ref<string>('default');
 const presets = ref<{ name: string }[]>([]);
 const configViewRef = ref<InstanceType<typeof ConfigView> | null>(null);
@@ -845,7 +846,7 @@ watch(
           <v-btn icon="mdi-close" variant="text" @click="configDialog = false" />
         </v-toolbar>
         <v-card-text class="pa-0 h-100">
-          <ConfigView ref="configViewRef" :initial-config="defaultConfig" />
+          <ConfigView ref="configViewRef" :initial-config="defaultConfig" :chart-path="colorSourceChart?.path" :chart-label="colorSourceChart?.name" />
         </v-card-text>
         <v-card-actions class="pa-4 border-t">
           <v-spacer />
