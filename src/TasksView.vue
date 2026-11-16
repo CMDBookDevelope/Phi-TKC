@@ -531,14 +531,10 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
           </p>
 
           <div class="task-status">
-            <v-progress-circular
-              v-if="['loading', 'mixing', 'pending'].includes(row.status.type)"
-              indeterminate :color="statusColor(row.status.type)" size="20" width="2"
-            />
             <RenderProgressCircular
-              v-else-if="row.status.type === 'rendering'"
-              :model-value="row.status.progress * 100"
-              :color="statusColor(row.status.type)" :size="20" :width="2" :aria-label="t('detail.progress')"
+              v-if="['loading', 'mixing', 'pending', 'rendering', 'done'].includes(row.status.type)"
+              :complete="row.status.type === 'done'"
+              :color="statusColor(row.status.type)" :size="20" :width="2" :aria-label="describeStatus(row.status)"
             />
             <span class="status-text">{{ describeStatus(row.status) }}</span>
           </div>
