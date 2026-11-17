@@ -8,6 +8,7 @@ export function isRhythmColors(value: unknown): value is RhythmColors {
 
 export const RHYTHM_DEFAULTS = {
   rhythmAnalysis: false,
+  rhythmAutoBpm: true,
   rhythmTap: true,
   rhythmDrag: false,
   rhythmHold: true,
@@ -32,6 +33,7 @@ export function withRhythmDefaults(config: RenderConfig): RenderConfig & typeof 
   return {
     ...config,
     rhythmAnalysis: config.rhythmAnalysis ?? RHYTHM_DEFAULTS.rhythmAnalysis,
+    rhythmAutoBpm: config.rhythmAutoBpm ?? RHYTHM_DEFAULTS.rhythmAutoBpm,
     rhythmTap: config.rhythmTap ?? RHYTHM_DEFAULTS.rhythmTap,
     rhythmDrag: config.rhythmDrag ?? RHYTHM_DEFAULTS.rhythmDrag,
     rhythmHold: config.rhythmHold ?? RHYTHM_DEFAULTS.rhythmHold,

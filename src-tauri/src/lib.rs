@@ -1075,6 +1075,17 @@ async fn remote_cancel_request(base: String, id: String) -> Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn rhythm_auto_bpm_legacy_defaults_and_explicit_disable_reach_core() {
+        let legacy: RenderConfig = serde_json::from_str("{}").unwrap();
+        assert!(legacy.rhythm_auto_bpm);
+        assert!(legacy.to_config().rhythm_auto_bpm);
+        let disabled: RenderConfig = serde_json::from_str(r#"{"rhythmAutoBpm":false}"#).unwrap();
+        assert!(!disabled.to_config().rhythm_auto_bpm);
+        let restored: RenderConfig = serde_json::from_value(serde_json::to_value(&disabled).unwrap()).unwrap();
+        assert!(!restored.rhythm_auto_bpm);
+    }
+
     #[tokio::test]
     async fn rhythm_colors_extract_the_named_artwork_from_archive_and_directory() {
         // Three authored colors in a 96x16 PNG; an invalid decoy must be ignored.

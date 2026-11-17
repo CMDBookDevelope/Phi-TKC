@@ -117,6 +117,8 @@ pub struct RenderConfig {
     /// Draw the HUD above 噪域 (`blockAreaList`) instead of under it.
     pub block_area_ui: bool,
     pub rhythm_analysis: bool,
+    /// Infer musical tempo from audio only when the chart has no authored BPM list.
+    pub rhythm_auto_bpm: bool,
     pub rhythm_tap: bool,
     pub rhythm_drag: bool,
     pub rhythm_hold: bool,
@@ -196,6 +198,7 @@ impl Default for RenderConfig {
             score_aim: false,
             block_area_ui: false,
             rhythm_analysis: false,
+            rhythm_auto_bpm: true,
             rhythm_tap: true,
             rhythm_drag: false,
             rhythm_hold: true,
@@ -279,6 +282,7 @@ impl RenderConfig {
             score_aim: self.score_aim,
             block_area_ui: self.block_area_ui,
             rhythm_analysis: self.rhythm_analysis,
+            rhythm_auto_bpm: self.rhythm_auto_bpm,
             rhythm_tap: self.rhythm_tap,
             rhythm_drag: self.rhythm_drag,
             rhythm_hold: self.rhythm_hold,
@@ -1041,14 +1045,6 @@ async fn render_impl(
     let (chart, ..) = GameScene::load_chart(fs.deref_mut(), &info)
         .await
         .with_context(|| tl!("load-chart-failed"))?;
-    let rhythm_strip = if params.config.rhythm_analysis {
-        let cover = fs.load_file(&info.illustration).await?;
-        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?
-            .with_speed(config.rhythm_speed)
-            .with_colors(config.rhythm_colors.as_ref()))
-    } else {
-        None
-    };
     macro_rules! ld {
             ($path:literal) => {
                 AudioClip::new(load_file($path).await?)
@@ -1057,6 +1053,15 @@ async fn render_impl(
         }
     let music: Result<_> = async { AudioClip::new(fs.load_file(&info.music).await?) }.await;
     let music = music.with_context(|| tl!("load-music-failed"))?;
+    let rhythm_strip = if params.config.rhythm_analysis {
+        let cover = fs.load_file(&info.illustration).await?;
+        Some(RhythmStrip::from_chart_bytes_with_audio(
+            &chart, RhythmNoteSelection::from(&config), &cover, &music, config.rhythm_auto_bpm,
+            chart.offset + config.offset + info.offset,
+        )?.with_speed(config.rhythm_speed).with_colors(config.rhythm_colors.as_ref()))
+    } else {
+        None
+    };
     let ending = ld!("ending.mp3");
     let track_length = music.length() as f64;
     let sfx_click = ld!("click.ogg");
@@ -3184,6 +3189,9 @@ pub struct CliArgs {
     /// Append the synchronized BPM and musical rhythm timeline.
     #[arg(long, default_value_t = false)]
     pub rhythm_analysis: bool,
+    /// Infer audio BPM for charts without a BPM list; set false to keep the chart baseline.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    pub rhythm_auto_bpm: bool,
     /// Note kinds to analyze (comma separated: tap,drag,hold,flick).
     #[arg(long, default_value = "tap,hold")]
     pub rhythm_notes: String,
@@ -3285,6 +3293,7 @@ pub async fn render_cli(args: CliArgs) -> Result<()> {
         height.parse().context("invalid resolution height")?,
     );
     config.rhythm_analysis = args.rhythm_analysis;
+    config.rhythm_auto_bpm = args.rhythm_auto_bpm;
     config.rhythm_speed = args.rhythm_speed;
     if config.rhythm_analysis {
         config.rhythm_tap = false;

@@ -141,13 +141,6 @@ async fn render_async(
         .await
         .context("failed to load the chart")?;
     crate::apple_platform::debug_log("render: chart loaded");
-    let rhythm_strip = if params.config.rhythm_analysis {
-        let cover = chart_fs.load_file(&info.illustration).await?;
-        Some(RhythmStrip::from_chart_bytes(&chart, RhythmNoteSelection::from(&config), &cover)?
-            .with_speed(config.rhythm_speed)
-            .with_colors(config.rhythm_colors.as_ref()))
-    } else { None };
-
     let music = AudioClip::new(
         chart_fs
             .load_file(&info.music)
@@ -156,6 +149,13 @@ async fn render_async(
     )
     .context("failed to decode the chart music")?;
     crate::apple_platform::debug_log("render: music decoded");
+    let rhythm_strip = if params.config.rhythm_analysis {
+        let cover = chart_fs.load_file(&info.illustration).await?;
+        Some(RhythmStrip::from_chart_bytes_with_audio(
+            &chart, RhythmNoteSelection::from(&config), &cover, &music, config.rhythm_auto_bpm,
+            chart.offset + config.offset + info.offset,
+        )?.with_speed(config.rhythm_speed).with_colors(config.rhythm_colors.as_ref()))
+    } else { None };
     macro_rules! ld {
         ($path:literal) => {
             AudioClip::new(load_file($path).await?).context(concat!("failed to load ", $path))?

@@ -3,6 +3,8 @@ en:
   resolution: Resolution
   rhythm-analysis: Rhythm Analysis
   rhythm-description: 'Append a BPM metronome and a scrolling note timeline, with colors from the chart artwork.'
+  rhythm-auto-bpm: Automatically Analyze BPM
+  rhythm-auto-bpm-hint: 'Estimate BPM changes from the audio only when the chart has no BPM list. Charts with an existing BPM list use it directly. Match the detected opening tempo to the chart’s initial BPM and apply that tempo multiplier throughout.'
   rhythm-note-types: Note types to analyze
   rhythm-empty: Only BPM and beat guides will be shown.
   rhythm-speed: Speed
@@ -114,6 +116,8 @@ zh-CN:
   resolution: 分辨率
   rhythm-analysis: 节奏解析模式
   rhythm-description: 在底部延伸 BPM 节拍器与滚动音符时间线，并从曲绘提取配色。
+  rhythm-auto-bpm: 自动解析 BPM
+  rhythm-auto-bpm-hint: 仅在谱面没有 BPMList 时，从音乐自动估计 BPM 变化；有原始 BPMList 时直接使用原表。检测出的开头 BPM 会按倍率匹配谱面首个 BPM，并将该倍率统一应用于全曲。
   rhythm-note-types: 解析音符类型
   rhythm-empty: 仅显示 BPM 与逐拍参考线。
   rhythm-speed: 流速
@@ -303,6 +307,7 @@ const categories = [
 
 const resolution = ref('1920x1080');
 const rhythmAnalysis = ref(RHYTHM_DEFAULTS.rhythmAnalysis);
+const rhythmAutoBpm = ref(RHYTHM_DEFAULTS.rhythmAutoBpm);
 const rhythmSpeed = ref(String(RHYTHM_DEFAULTS.rhythmSpeed));
 const rhythmColors = ref<RhythmColors | null>(null);
 const rhythmColorRevision = ref(0);
@@ -575,6 +580,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
   return {
     resolution: [w, h],
     rhythmAnalysis: rhythmAnalysis.value,
+    rhythmAutoBpm: rhythmAutoBpm.value,
     rhythmTap: rhythmNotes.value.includes('tap'),
     rhythmDrag: rhythmNotes.value.includes('drag'),
     rhythmHold: rhythmNotes.value.includes('hold'),
@@ -638,6 +644,7 @@ function applyConfig(c: RenderConfig) {
   rhythmColorRevision.value += 1;
   const rhythm = withRhythmDefaults(c);
   rhythmAnalysis.value = rhythm.rhythmAnalysis;
+  rhythmAutoBpm.value = rhythm.rhythmAutoBpm;
   rhythmSpeed.value = String(rhythm.rhythmSpeed);
   rhythmColors.value = rhythm.rhythmColors;
   rhythmNotes.value = [
@@ -1018,6 +1025,8 @@ async function replacePreset() {
               <TipSwitch v-model="rhythmAnalysis" :label="t('rhythm-analysis')" density="compact" color="primary" hide-details />
               <p class="rhythm-description">{{ t('rhythm-description') }}</p>
               <div v-if="rhythmAnalysis" class="rhythm-options">
+                <TipSwitch v-model="rhythmAutoBpm" :label="t('rhythm-auto-bpm')" density="compact" color="primary" hide-details />
+                <p class="field-hint">{{ t('rhythm-auto-bpm-hint') }}</p>
                 <div class="card-label">{{ t('rhythm-note-types') }}</div>
                 <div class="rhythm-note-grid" role="group" :aria-label="t('rhythm-note-types')">
                   <button v-for="kind in rhythmNoteTypes" :key="kind" type="button" class="ui-chip rhythm-note-chip"
