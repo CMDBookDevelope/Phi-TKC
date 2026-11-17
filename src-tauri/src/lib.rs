@@ -221,6 +221,7 @@ pub async fn run() -> Result<()> {
             save_binary_file,
             load_chart_illustration,
             extract_rhythm_colors,
+            sample_rhythm_color,
             get_msaa_sample_counts,
             remote_status,
             remote_jobs,
@@ -905,6 +906,21 @@ async fn extract_rhythm_colors(path: PathBuf) -> Result<[String; 3], InvokeError
             .await
             .with_context(|| format!("Failed to load chart illustration: {}", info.illustration))?;
         tokio::task::spawn_blocking(move || prpr::core::rhythm::extract_cover_palette(&data)).await?
+    })
+    .await
+}
+
+#[tauri::command]
+async fn sample_rhythm_color(path: PathBuf, x: u32, y: u32) -> Result<String, InvokeError> {
+    wrap_async(async move {
+        let path = localize_chart_path(&path)?;
+        let mut fs: Box<dyn FileSystem + Send + Sync + 'static> =
+            fs::fs_from_file(&path).with_context(|| mtl!("read-chart-failed"))?;
+        let info = prpr::fs::load_info(fs.as_mut()).await.with_context(|| mtl!("load-info-failed"))?;
+        let data = fs.load_file(&info.illustration)
+            .await
+            .with_context(|| format!("Failed to load chart illustration: {}", info.illustration))?;
+        tokio::task::spawn_blocking(move || prpr::core::rhythm::sample_cover_color(&data, x, y)).await?
     })
     .await
 }

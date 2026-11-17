@@ -239,7 +239,7 @@ import type { RenderConfig } from '@/model';
 import { RHYTHM_DEFAULTS, RHYTHM_SPEED_MIN, RHYTHM_SPEED_MAX, isRhythmSpeed, withRhythmDefaults, type RhythmColors } from '@/rhythmConfig';
 import TipSwitch from './TipSwitch.vue';
 import RhythmColorPicker from './RhythmColorPicker.vue';
-const props = defineProps<{ initialConfig?: RenderConfig; chartPath?: string; chartLabel?: string }>();
+const props = defineProps<{ initialConfig?: RenderConfig; chartPath?: string; chartLabel?: string; chartCover?: string | null }>();
 
 // Phi-TKC's preset list, plus the 1920x1080 default (which was missing from it).
 const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2132', '2388x1668', '1600x1080', '7680x5760'];
@@ -308,7 +308,7 @@ const categories = [
 const resolution = ref('1920x1080');
 const rhythmAnalysis = ref(RHYTHM_DEFAULTS.rhythmAnalysis);
 const rhythmAutoBpm = ref(RHYTHM_DEFAULTS.rhythmAutoBpm);
-const rhythmSpeed = ref(String(RHYTHM_DEFAULTS.rhythmSpeed));
+const rhythmSpeed = ref(RHYTHM_DEFAULTS.rhythmSpeed);
 const rhythmColors = ref<RhythmColors | null>(null);
 const rhythmColorRevision = ref(0);
 const rhythmSpeedRule = (value: unknown) => isRhythmSpeed(value) || t('rhythm-speed-invalid');
@@ -645,7 +645,7 @@ function applyConfig(c: RenderConfig) {
   const rhythm = withRhythmDefaults(c);
   rhythmAnalysis.value = rhythm.rhythmAnalysis;
   rhythmAutoBpm.value = rhythm.rhythmAutoBpm;
-  rhythmSpeed.value = String(rhythm.rhythmSpeed);
+  rhythmSpeed.value = rhythm.rhythmSpeed;
   rhythmColors.value = rhythm.rhythmColors;
   rhythmNotes.value = [
     rhythm.rhythmTap ? 'tap' : '',
@@ -1023,10 +1023,8 @@ async function replacePreset() {
           <div v-show="activeCategory === 'analysis'" class="settings-stack">
             <div class="md3-card glass fluent-glass rhythm-card" v-glass>
               <TipSwitch v-model="rhythmAnalysis" :label="t('rhythm-analysis')" density="compact" color="primary" hide-details />
-              <p class="rhythm-description">{{ t('rhythm-description') }}</p>
               <div v-if="rhythmAnalysis" class="rhythm-options">
                 <TipSwitch v-model="rhythmAutoBpm" :label="t('rhythm-auto-bpm')" density="compact" color="primary" hide-details />
-                <p class="field-hint">{{ t('rhythm-auto-bpm-hint') }}</p>
                 <div class="card-label">{{ t('rhythm-note-types') }}</div>
                 <div class="rhythm-note-grid" role="group" :aria-label="t('rhythm-note-types')">
                   <button v-for="kind in rhythmNoteTypes" :key="kind" type="button" class="ui-chip rhythm-note-chip"
@@ -1037,12 +1035,15 @@ async function replacePreset() {
                   </button>
                 </div>
                 <p v-if="!rhythmNotes.length" class="field-hint">{{ t('rhythm-empty') }}</p>
-                <v-text-field v-model="rhythmSpeed" class="rhythm-speed" type="number" inputmode="decimal"
-                  :min="RHYTHM_SPEED_MIN" :max="RHYTHM_SPEED_MAX" step="any" suffix="×"
-                  :label="t('rhythm-speed')" :hint="t('rhythm-speed-hint')" persistent-hint
-                  :rules="[rhythmSpeedRule]"
-                  density="compact" variant="outlined" />
-                <RhythmColorPicker v-model="rhythmColors" :chart-path="chartPath" :chart-label="chartLabel" :revision="rhythmColorRevision" />
+                <div class="rhythm-speed-control">
+                  <div class="field-label">{{ t('rhythm-speed') }} <span>{{ rhythmSpeed.toFixed(1) }}×</span></div>
+                  <v-slider v-model="rhythmSpeed" class="rhythm-speed" color="primary" thumb-label="always"
+                    :min="RHYTHM_SPEED_MIN" :max="RHYTHM_SPEED_MAX" :step="0.1" :rules="[rhythmSpeedRule]"
+                    hide-details density="compact" />
+                  <p class="field-hint">{{ t('rhythm-speed-hint') }}</p>
+                </div>
+                <RhythmColorPicker v-model="rhythmColors" :chart-path="chartPath" :chart-label="chartLabel"
+                  :chart-cover="chartCover" :revision="rhythmColorRevision" />
                 <div v-if="rhythmDimensions" class="rhythm-size" aria-live="polite">
                   <span class="rhythm-output">{{ t('rhythm-output', { width: rhythmDimensions.width, height: rhythmDimensions.outputHeight }) }}</span>
                   <p class="field-hint">{{ t('rhythm-canvas', rhythmDimensions) }}</p>

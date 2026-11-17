@@ -752,7 +752,7 @@ function resetAndGoChoose() {
       <!-- Step 3: Options -->
       <div class="clear-glass glass step-panel" v-glass :class="{ 'is-active': step === 'options' }" :inert="step === 'options' ? undefined : true">
         <div class="options-wrapper">
-          <ConfigView ref="configView" :chart-path="chartPath" :chart-label="chartInfo?.name" />
+          <ConfigView ref="configView" :chart-path="chartPath" :chart-label="chartInfo?.name" :chart-cover="renderCover" />
         </div>
       </div>
 

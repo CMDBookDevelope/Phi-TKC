@@ -20,7 +20,7 @@ const OUTPUT_HEIGHT: u32 = 212;
 
 /// The production target can be RGB8. Copy through a real RGBA8 render pass
 /// before readback so RGB channels are never reinterpreted as RGBA pixels.
-fn read_rgba(target: RenderTarget, width: u32, height: u32) -> Vec<u8> {
+fn read_rgba_raw(target: RenderTarget, width: u32, height: u32) -> Vec<u8> {
     let mut gl = unsafe { get_internal_gl() };
     gl.flush();
     let texture = mq::Texture::new_render_texture(
@@ -38,9 +38,15 @@ fn read_rgba(target: RenderTarget, width: u32, height: u32) -> Vec<u8> {
     texture.read_pixels(gl.quad_context, &mut bytes);
     pass.delete(gl.quad_context);
     texture.delete(gl.quad_context);
+    bytes
+}
+
+fn read_rgba(target: RenderTarget, width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = read_rgba_raw(target, width, height);
     // The Metal shader translator preserves OpenGL's bottom-first target
-    // rows. Match the production Apple export's flip_y=true before treating
-    // the prefix as the game rectangle and the suffix as its appended strip.
+    // rows for the generic crop assertion. Match the production Apple
+    // export's flip_y=true before treating the prefix as the game rectangle
+    // and the suffix as its appended strip.
     let row_bytes = width as usize * 4;
     for y in 0..height as usize / 2 {
         let opposite = (height as usize - 1 - y) * row_bytes;
@@ -259,7 +265,7 @@ fn apple_rhythm_composite_preserves_game_rectangle() -> Result<()> {
 // changing musical tempo: verify that separately from the variable-BPM RPE.
 #[cfg(target_os = "macos")]
 mod variable_bpm {
-    use super::read_rgba;
+    use super::read_rgba_raw as read_rgba;
     use anyhow::{ensure, Context, Result};
     use macroquad::{miniquad as mq, prelude::*};
     use prpr::{
@@ -615,9 +621,11 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
             .try_into()
             .map_err(|_| anyhow::anyhow!("missing digit references"))?;
         for (index, reference) in references.iter().enumerate() {
+            let lit_pixels = reference.0.iter().filter(|&&v| v).count();
             ensure!(
-                reference.0.iter().filter(|&&v| v).count() >= 12,
-                "blank fixed BPM reference"
+                lit_pixels >= 12,
+                "blank fixed BPM {bpm} reference in the digit ROI: {lit_pixels} pixels",
+                bpm = BPMS[index]
             );
             ensure!(
                 read_bpm(reference, &references)? == BPMS[index],
