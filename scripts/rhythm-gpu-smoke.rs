@@ -431,15 +431,17 @@ mod variable_bpm {
             archive.write_all(&serde_json::to_vec(&json!({
                 "bpm": 120,
                 "effects": [{"start": [0, 0, 1], "end": [64, 0, 1],
-                    "shader": "legacy.glsl", "global": true}]
+                    "shader": "/legacy.glsl", "global": true}]
             }))?)?;
             archive.start_file("legacy.glsl", options)?;
-            archive.write_all(br#"#version 100
+            archive.write_all(
+                br#"#version 100
 precision mediump float;
 uniform sampler2D screenTexture;
 varying vec2 uv;
 void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 1.0); }
-"#)?;
+"#,
+            )?;
         }
         archive.finish()?;
         Ok(path)
@@ -586,6 +588,57 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
             .map_err(|_| anyhow::anyhow!("missing reference fixtures"))
     }
 
+    fn draw_test_game(game: &MSRenderTarget) -> Result<Vec<u8>> {
+        let mut camera =
+            Camera2D::from_display_rect(Rect::new(0., 0., WIDTH as f32, GAME_HEIGHT as f32));
+        camera.render_target = Some(game.input());
+        set_camera(&camera);
+        clear_background(BLACK);
+        let half_width = WIDTH as f32 * 0.5;
+        let half_height = GAME_HEIGHT as f32 * 0.5;
+        draw_rectangle(0., 0., half_width, half_height, Color::new(1., 0., 0., 1.));
+        draw_rectangle(
+            half_width,
+            0.,
+            half_width,
+            half_height,
+            Color::new(0., 1., 0., 1.),
+        );
+        draw_rectangle(
+            0.,
+            half_height,
+            half_width,
+            half_height,
+            Color::new(0., 0., 1., 1.),
+        );
+        draw_rectangle(
+            half_width,
+            half_height,
+            half_width,
+            half_height,
+            Color::new(1., 1., 0., 1.),
+        );
+        unsafe { get_internal_gl() }.flush();
+        let pixels = read_rgba(game.output(), WIDTH, GAME_HEIGHT);
+        let centers: Vec<_> = [
+            (WIDTH / 4, GAME_HEIGHT / 4),
+            (3 * WIDTH / 4, GAME_HEIGHT / 4),
+            (WIDTH / 4, 3 * GAME_HEIGHT / 4),
+            (3 * WIDTH / 4, 3 * GAME_HEIGHT / 4),
+        ]
+        .into_iter()
+        .map(|(x, y)| {
+            let i = ((y * WIDTH + x) * 4) as usize;
+            [pixels[i], pixels[i + 1], pixels[i + 2]]
+        })
+        .collect();
+        ensure!(
+            centers == [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]],
+            "Metal source target did not preserve exact top-first quadrants: {centers:?}"
+        );
+        Ok(pixels)
+    }
+
     async fn metal_references_and_verify(
         fixtures: &[PathBuf],
         fixed: &[PathBuf; 4],
@@ -607,13 +660,7 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
             "/assets/font.ttf"
         )))?);
         let game = MSRenderTarget::new((WIDTH, GAME_HEIGHT), 4);
-        let mut camera =
-            Camera2D::from_display_rect(Rect::new(0., 0., WIDTH as f32, GAME_HEIGHT as f32));
-        camera.render_target = Some(game.input());
-        set_camera(&camera);
-        clear_background(Color::new(0.1, 0.2, 0.3, 1.));
-        unsafe { get_internal_gl() }.flush();
-        let original = read_rgba(game.output(), WIDTH, GAME_HEIGHT);
+        let original = draw_test_game(&game)?;
         let mut references = Vec::new();
         for (index, path) in fixed.iter().enumerate() {
             let strip = load_strip(path).await?;
@@ -635,6 +682,16 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
         let references: [DigitMask; 4] = references
             .try_into()
             .map_err(|_| anyhow::anyhow!("missing digit references"))?;
+        let after_references = read_rgba(game.output(), WIDTH, GAME_HEIGHT);
+        let reference_diff = after_references
+            .iter()
+            .zip(&original)
+            .filter(|(actual, expected)| actual != expected)
+            .count();
+        ensure!(
+            reference_diff == 0,
+            "fixed BPM reference rendering changed {reference_diff} game bytes"
+        );
         for (index, reference) in references.iter().enumerate() {
             let lit_pixels = reference.0.iter().filter(|&&v| v).count();
             ensure!(
@@ -661,10 +718,26 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
             for (index, &time) in SAMPLE_TIMES.iter().enumerate() {
                 let target = composite.compose(0, &game, Some(time), &mut painter);
                 let bytes = read_rgba(target, WIDTH, OUTPUT_HEIGHT);
-                ensure!(
-                    bytes[..original.len()] == original,
-                    "dynamic BPM altered the game rectangle"
-                );
+                let game = &bytes[..original.len()];
+                if game != original {
+                    let differences: Vec<_> = game
+                        .chunks_exact(4)
+                        .zip(original.chunks_exact(4))
+                        .enumerate()
+                        .filter(|(_, (actual, expected))| actual != expected)
+                        .take(4)
+                        .map(|(pixel, (actual, expected))| (pixel, expected, actual))
+                        .collect();
+                    let changed = game
+                        .chunks_exact(4)
+                        .zip(original.chunks_exact(4))
+                        .filter(|(actual, expected)| actual != expected)
+                        .count();
+                    println!(
+                        "APPLE_DYNAMIC_GAME_RECT time={time} changed_pixels={changed} first={differences:?}"
+                    );
+                    anyhow::bail!("dynamic BPM altered the game rectangle at {time}");
+                }
                 let expected = if format_index == 0 { BPMS[index] } else { 150 };
                 ensure!(
                     read_bpm(&digit_mask(&bytes), &references)? == expected,
