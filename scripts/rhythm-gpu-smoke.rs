@@ -479,40 +479,15 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
         for y in GAME_HEIGHT + STRIP_HEIGHT * 40 / 100..GAME_HEIGHT + STRIP_HEIGHT * 64 / 100 {
             for x in WIDTH * 22 / 1000..WIDTH * 78 / 1000 {
                 let i = ((y * WIDTH + x) * 4) as usize;
-                mask.push(rgba[i..i + 3].iter().all(|&v| v >= 180));
+                let pixel = &rgba[i..i + 3];
+                mask.push(
+                    pixel.iter().all(|&channel| channel >= 130)
+                        && pixel[0].abs_diff(pixel[1]) <= 24
+                        && pixel[1].abs_diff(pixel[2]) <= 24,
+                );
             }
         }
         DigitMask(mask)
-    }
-
-    fn digit_roi_diagnostics(rgba: &[u8]) -> String {
-        let mut levels = Vec::new();
-        for threshold in [80_u8, 100, 120, 140, 160, 180] {
-            let mut count = 0;
-            let mut bounds = (WIDTH, GAME_HEIGHT + STRIP_HEIGHT, 0, 0);
-            for y in GAME_HEIGHT + STRIP_HEIGHT * 30 / 100..GAME_HEIGHT + STRIP_HEIGHT * 70 / 100 {
-                for x in 0..WIDTH * 100 / 1000 {
-                    let i = ((y * WIDTH + x) * 4) as usize;
-                    let pixel = &rgba[i..i + 3];
-                    if pixel.iter().all(|&channel| channel >= threshold)
-                        && pixel[0].abs_diff(pixel[1]) <= 24
-                        && pixel[1].abs_diff(pixel[2]) <= 24
-                    {
-                        count += 1;
-                        bounds.0 = bounds.0.min(x);
-                        bounds.1 = bounds.1.min(y);
-                        bounds.2 = bounds.2.max(x);
-                        bounds.3 = bounds.3.max(y);
-                    }
-                }
-            }
-            levels.push(format!(
-                "{threshold}:{count}@{}..{}",
-                if count == 0 { "none".to_owned() } else { format!("{},{}", bounds.0, bounds.1) },
-                if count == 0 { "none".to_owned() } else { format!("{},{}", bounds.2, bounds.3) },
-            ));
-        }
-        levels.join(" ")
     }
 
     fn mask_distance(a: &DigitMask, b: &DigitMask) -> f32 {
@@ -651,10 +626,9 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
             let pixels = read_rgba(target, WIDTH, OUTPUT_HEIGHT);
             let mask = digit_mask(&pixels);
             println!(
-                "APPLE_BPM_REFERENCE bpm={} digit_pixels={} diagnostic={}",
+                "APPLE_BPM_REFERENCE bpm={} digit_pixels={}",
                 BPMS[index],
                 mask.0.iter().filter(|&&v| v).count(),
-                digit_roi_diagnostics(&pixels)
             );
             references.push(mask);
         }
