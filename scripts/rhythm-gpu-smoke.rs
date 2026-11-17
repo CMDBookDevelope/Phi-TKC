@@ -659,18 +659,23 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
             env!("CARGO_MANIFEST_DIR"),
             "/assets/font.ttf"
         )))?);
-        let game = MSRenderTarget::new((WIDTH, GAME_HEIGHT), 4);
-        let original = draw_test_game(&game)?;
         let mut references = Vec::new();
         for (index, path) in fixed.iter().enumerate() {
+            let reference_game = MSRenderTarget::new((WIDTH, GAME_HEIGHT), 4);
+            let reference_original = draw_test_game(&reference_game)?;
             let strip = load_strip(path).await?;
             ensure!(
                 strip.bpm_at(4.125) == BPMS[index] as f32,
                 "fixed reference tempo is wrong"
             );
             let composite = RhythmComposite::new(WIDTH, GAME_HEIGHT, Some(strip), 1)?;
-            let target = composite.compose(0, &game, Some(0.125), &mut painter);
+            let target = composite.compose(0, &reference_game, Some(0.125), &mut painter);
             let pixels = read_rgba(target, WIDTH, OUTPUT_HEIGHT);
+            ensure!(
+                pixels[..reference_original.len()] == reference_original,
+                "fixed BPM {bpm} reference changed the game rectangle",
+                bpm = BPMS[index]
+            );
             let mask = digit_mask(&pixels);
             println!(
                 "APPLE_BPM_REFERENCE bpm={} digit_pixels={}",
@@ -682,16 +687,6 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
         let references: [DigitMask; 4] = references
             .try_into()
             .map_err(|_| anyhow::anyhow!("missing digit references"))?;
-        let after_references = read_rgba(game.output(), WIDTH, GAME_HEIGHT);
-        let reference_diff = after_references
-            .iter()
-            .zip(&original)
-            .filter(|(actual, expected)| actual != expected)
-            .count();
-        ensure!(
-            reference_diff == 0,
-            "fixed BPM reference rendering changed {reference_diff} game bytes"
-        );
         for (index, reference) in references.iter().enumerate() {
             let lit_pixels = reference.0.iter().filter(|&&v| v).count();
             ensure!(
@@ -704,6 +699,8 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
                 "digit references are not discriminative"
             );
         }
+        let game = MSRenderTarget::new((WIDTH, GAME_HEIGHT), 4);
+        let original = draw_test_game(&game)?;
         for (format_index, path) in fixtures.iter().enumerate() {
             let strip = load_strip(path).await?;
             for (time, expected) in [(1.999, 120.), (2., 180.), (3.999, 180.), (4., 90.)] {
