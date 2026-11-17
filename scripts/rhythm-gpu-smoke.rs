@@ -265,7 +265,10 @@ fn apple_rhythm_composite_preserves_game_rectangle() -> Result<()> {
 // changing musical tempo: verify that separately from the variable-BPM RPE.
 #[cfg(target_os = "macos")]
 mod variable_bpm {
-    use super::read_rgba_raw as read_rgba;
+    // BPM ROIs and the native MP4 reader both use top-first image coordinates.
+    // Metal texture readback is bottom-first, so use the same row-normalizing
+    // helper as the composite crop check above.
+    use super::read_rgba;
     use anyhow::{ensure, Context, Result};
     use macroquad::{miniquad as mq, prelude::*};
     use prpr::{
