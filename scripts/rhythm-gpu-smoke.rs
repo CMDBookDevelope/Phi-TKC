@@ -870,6 +870,44 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
         Ok(())
     }
 
+    fn shader_frame_difference(expected: &[u8], actual: &[u8]) -> Value {
+        let mut changed_pixels = 0usize;
+        let mut changed_bytes = 0usize;
+        let mut largest_delta = 0u8;
+        let mut bounds = [WIDTH, GAME_HEIGHT, 0, 0];
+        let mut first = Vec::new();
+        let mut sums = [0u64; 2];
+        for (index, (before, after)) in expected
+            .chunks_exact(4)
+            .zip(actual.chunks_exact(4))
+            .enumerate()
+        {
+            sums[0] += before[..3].iter().map(|&v| v as u64).sum::<u64>();
+            sums[1] += after[..3].iter().map(|&v| v as u64).sum::<u64>();
+            if before != after {
+                changed_pixels += 1;
+                let x = index as u32 % WIDTH;
+                let y = index as u32 / WIDTH;
+                bounds[0] = bounds[0].min(x);
+                bounds[1] = bounds[1].min(y);
+                bounds[2] = bounds[2].max(x);
+                bounds[3] = bounds[3].max(y);
+                for (&a, &b) in before.iter().zip(after) {
+                    changed_bytes += usize::from(a != b);
+                    largest_delta = largest_delta.max(a.abs_diff(b));
+                }
+                if first.len() < 8 {
+                    first.push(json!({"x": x, "y": y, "expected": before, "actual": after}));
+                }
+            }
+        }
+        json!({"changed_pixels": changed_pixels, "changed_bytes": changed_bytes,
+            "bbox": if changed_pixels == 0 { None } else { Some(bounds) },
+            "max_channel_delta": largest_delta,
+            "mean_rgb": sums.map(|s| s as f64 / (WIDTH * GAME_HEIGHT * 3) as f64),
+            "first_differences": first})
+    }
+
     // A fixed scene and shader clock must produce identical consecutive frames.
     // In particular, a single post effect must not alternate between the fresh
     // MSAA resolve texture and the previous frame's ping-pong output.
@@ -949,19 +987,48 @@ void main() { gl_FragColor = vec4(texture2D(screenTexture, uv).rgb * 1.3, 1.0); 
                 scene
                     .res
                     .update_size((0, 0, WIDTH as i32, GAME_HEIGHT as i32));
-                let mut disabled = None;
-                let mut active = None;
-                for enabled in [false, true, false] {
+                // Resource/font creation and the first Metal frame submission
+                // happen only once when a scene loads. Prepare two disabled
+                // frames before measuring the running scene; never prepare or
+                // skip a frame when shaders are enabled or disabled again.
+                // Log the setup differences rather than assuming they are text.
+                scene.res.no_effect = true;
+                let mut prepared = None::<Vec<u8>>;
+                for frame in 0..2 {
+                    let mut ui =
+                        Ui::new(&mut painter, Some((0, 0, WIDTH as i32, GAME_HEIGHT as i32)));
+                    ui.scope(|ui| scene.render(&mut tm, ui, Some(output.output())))?;
+                    let pixels = read_rgba(output.output(), WIDTH, GAME_HEIGHT);
+                    if let Some(previous) = &prepared {
+                        println!("APPLE_SHADER_PREPARE samples={samples} global={global} local={local} frame={frame} {}",
+                            shader_frame_difference(previous, &pixels));
+                    }
+                    prepared = Some(pixels);
+                    next_frame().await;
+                }
+                let mut disabled = None::<Vec<u8>>;
+                let mut active = None::<Vec<u8>>;
+                for (stage, enabled) in [false, true, false].into_iter().enumerate() {
                     scene.res.no_effect = !enabled;
-                    let mut reference = None;
+                    let mut reference = None::<Vec<u8>>;
                     for frame in 0..12 {
                         let mut ui =
                             Ui::new(&mut painter, Some((0, 0, WIDTH as i32, GAME_HEIGHT as i32)));
                         ui.scope(|ui| scene.render(&mut tm, ui, Some(output.output())))?;
                         let pixels = read_rgba(output.output(), WIDTH, GAME_HEIGHT);
+                        if stage == 0 && frame == 0 {
+                            if let Some(previous) = &prepared {
+                                println!("APPLE_SHADER_READY samples={samples} global={global} local={local} {}",
+                                    shader_frame_difference(previous, &pixels));
+                            }
+                        }
                         if let Some(expected) = &reference {
-                            ensure!(pixels == *expected,
-                                "shader frame flicker: samples={samples} global={global} local={local} enabled={enabled} frame={frame}");
+                            if pixels != *expected {
+                                let difference = shader_frame_difference(expected, &pixels);
+                                println!("APPLE_SHADER_FRAME_DIFFERENCE samples={samples} global={global} local={local} enabled={enabled} frame={frame} {difference}");
+                                ensure!(false,
+                                    "shader frame flicker: samples={samples} global={global} local={local} enabled={enabled} frame={frame}: {difference}");
+                            }
                         } else {
                             ensure!(
                                 pixels
@@ -981,7 +1048,8 @@ void main() { gl_FragColor = vec4(texture2D(screenTexture, uv).rgb * 1.3, 1.0); 
                     } else if let Some(expected) = &disabled {
                         ensure!(
                             pixels == *expected,
-                            "disabling shaders retained stale effect output"
+                            "disabling shaders retained stale effect output: {}",
+                            shader_frame_difference(expected, &pixels)
                         );
                     } else {
                         disabled = Some(pixels);
