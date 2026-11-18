@@ -14,9 +14,9 @@ use std::{
     },
 };
 
-const WIDTH: u32 = 320;
-const GAME_HEIGHT: u32 = 180;
-const OUTPUT_HEIGHT: u32 = 212;
+const WIDTH: u32 = 640;
+const GAME_HEIGHT: u32 = 360;
+const OUTPUT_HEIGHT: u32 = 424;
 
 /// The production target can be RGB8. Copy through a real RGBA8 render pass
 /// before readback so RGB channels are never reinterpreted as RGBA pixels.
@@ -671,9 +671,30 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
             let composite = RhythmComposite::new(WIDTH, GAME_HEIGHT, Some(strip), 1)?;
             let target = composite.compose(0, &reference_game, Some(0.125), &mut painter);
             let pixels = read_rgba(target, WIDTH, OUTPUT_HEIGHT);
+            let game = &pixels[..reference_original.len()];
+            let changed = game
+                .chunks_exact(4)
+                .zip(reference_original.chunks_exact(4))
+                .filter(|(actual, expected)| actual != expected)
+                .count();
+            let first: Vec<_> = game
+                .chunks_exact(4)
+                .zip(reference_original.chunks_exact(4))
+                .enumerate()
+                .filter(|(_, (actual, expected))| actual != expected)
+                .take(8)
+                .map(|(pixel, (actual, expected))| {
+                    (
+                        pixel % WIDTH as usize,
+                        pixel / WIDTH as usize,
+                        expected,
+                        actual,
+                    )
+                })
+                .collect();
             ensure!(
-                pixels[..reference_original.len()] == reference_original,
-                "fixed BPM {bpm} reference changed the game rectangle",
+                changed == 0,
+                "fixed BPM {bpm} reference changed {changed} game pixels; first={first:?}",
                 bpm = BPMS[index]
             );
             let mask = digit_mask(&pixels);
