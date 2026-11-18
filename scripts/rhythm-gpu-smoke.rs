@@ -661,9 +661,9 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
         )))?);
         let mut references = Vec::new();
         for (index, path) in fixed.iter().enumerate() {
+            let strip = load_strip(path).await?;
             let reference_game = MSRenderTarget::new((WIDTH, GAME_HEIGHT), 4);
             let reference_original = draw_test_game(&reference_game)?;
-            let strip = load_strip(path).await?;
             ensure!(
                 strip.bpm_at(4.125) == BPMS[index] as f32,
                 "fixed reference tempo is wrong"
@@ -720,8 +720,6 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
                 "digit references are not discriminative"
             );
         }
-        let game = MSRenderTarget::new((WIDTH, GAME_HEIGHT), 4);
-        let original = draw_test_game(&game)?;
         for (format_index, path) in fixtures.iter().enumerate() {
             let strip = load_strip(path).await?;
             for (time, expected) in [(1.999, 120.), (2., 180.), (3.999, 180.), (4., 90.)] {
@@ -732,6 +730,10 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
                     path.display()
                 );
             }
+            // Asset loading awaits Metal frames, so create transient MSAA
+            // targets only after the loader has finished polling.
+            let game = MSRenderTarget::new((WIDTH, GAME_HEIGHT), 4);
+            let original = draw_test_game(&game)?;
             let composite = RhythmComposite::new(WIDTH, GAME_HEIGHT, Some(strip), 1)?;
             for (index, &time) in SAMPLE_TIMES.iter().enumerate() {
                 let target = composite.compose(0, &game, Some(time), &mut painter);
