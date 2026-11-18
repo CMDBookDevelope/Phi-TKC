@@ -249,7 +249,8 @@ onUnmounted(() => {
 /* 容器：居中布局，背景由 App.vue 提供，故保持透明 */
 .about-container {
   width: 100%;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   max-width: 1200px;
   margin: 0 auto;
   display: flex;
@@ -284,7 +285,12 @@ onUnmounted(() => {
   gap: 40px;
   width: 100%;
   max-width: 450px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  padding: 8px;
 }
+.about-content > * { flex-shrink: 0; }
 
 /* 应用头部：Logo 和版本标签 */
 .app-header {

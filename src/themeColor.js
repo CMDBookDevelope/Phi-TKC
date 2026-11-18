@@ -4,9 +4,8 @@
  * meaningful coloured areas take priority over black/white wallpaper margins.
  * This module is also embedded by the Rust server for the standalone WebUI.
  * @param {ArrayLike<number>} pixels RGBA pixels
- * @returns {string}
  */
-export function dominantColor(pixels) {
+function wallpaperPalette(pixels) {
   const bins = new Map();
   let total = 0;
   for (let i = 0; i + 3 < pixels.length; i += 4) {
@@ -34,6 +33,10 @@ export function dominantColor(pixels) {
     return { rgb, weight: bin.weight, saturation,
       colourful: max - min >= 24 && max >= 48 && min <= 232 };
   });
+  return { palette, total };
+}
+
+function dominantBin({ palette, total }) {
   const colourful = palette.filter(bin => bin.colourful);
   // A stray bright pixel must not outweigh an otherwise monochrome wallpaper.
   const candidates = colourful.reduce((sum, bin) => sum + bin.weight, 0) >= total * 0.01
@@ -41,7 +44,14 @@ export function dominantColor(pixels) {
   const winner = candidates.reduce((best, bin) =>
     bin.weight * (0.7 + 0.3 * bin.saturation) > best.weight * (0.7 + 0.3 * best.saturation)
       ? bin : best);
-  return '#' + winner.rgb.map(value => Math.round(value).toString(16).padStart(2, '0')).join('');
+  return winner;
+}
+
+const toHex = rgb => '#' + rgb.map(value => Math.round(value).toString(16).padStart(2, '0')).join('');
+
+/** @param {ArrayLike<number>} pixels @returns {string} */
+export function dominantColor(pixels) {
+  return toHex(dominantBin(wallpaperPalette(pixels)).rgb);
 }
 
 /** Turn the sampled hue into a legible accent for the selected surface colour.
@@ -78,10 +88,9 @@ export function readableMainColor(color, background) {
 
 /** Sample the supplied, already displayed wallpaper; never request a new random image.
  * @param {string} source
- * @param {string} [background]
- * @returns {Promise<string>}
+ * @returns {Promise<Uint8ClampedArray>}
  */
-export async function extractMainColor(source, background = '#222222') {
+async function wallpaperPixels(source) {
   if (!source) throw new Error('No wallpaper is loaded');
   const image = new Image();
   await new Promise((resolve, reject) => {
@@ -108,5 +117,62 @@ export async function extractMainColor(source, background = '#222222') {
   const context = canvas.getContext('2d', { willReadFrequently: true });
   if (!context) throw new Error('Canvas is unavailable');
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return readableMainColor(dominantColor(context.getImageData(0, 0, canvas.width, canvas.height).data), background);
+  return context.getImageData(0, 0, canvas.width, canvas.height).data;
+}
+
+/**
+ * Build the theme from visible wallpaper colours. Preserve the user's light/dark
+ * surface preference, and choose a second sizeable colour area for the accent.
+ * Monochrome wallpapers get a softer neutral accent instead of an invented hue.
+ * @param {ArrayLike<number>} pixels
+ * @param {string} [background]
+ * @param {boolean} [useGeneratedBackground]
+ * @returns {{ main: string, bg: string, sub: string }}
+ */
+export function dominantThemeColors(pixels, background = '#222222', useGeneratedBackground = true) {
+  const sample = wallpaperPalette(pixels);
+  const winner = dominantBin(sample);
+  const source = winner.rgb;
+  const previous = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(background);
+  const old = parseInt(previous ? previous[1] : '222222', 16);
+  const light = (0.2126 * (old >> 16 & 255) + 0.7152 * (old >> 8 & 255) + 0.0722 * (old & 255)) > 160;
+  const surface = toHex(source.map(channel => light ? 235 + channel * 0.05 : 18 + channel * 0.08));
+  const target = useGeneratedBackground ? surface : previous ? '#' + previous[1] : '#222222';
+  const main = readableMainColor(toHex(source), target);
+
+  const distance = rgb => rgb.reduce((sum, value, i) => sum + (value - source[i]) ** 2, 0);
+  const alternatives = sample.palette.filter(bin => bin.weight >= sample.total * 0.02 && distance(bin.rgb) >= 48 ** 2);
+  const colouredAlternatives = alternatives.filter(bin => bin.colourful);
+  const secondary = (colouredAlternatives.length ? colouredAlternatives : alternatives).sort((a, b) =>
+    distance(b.rgb) * Math.sqrt(b.weight) * (0.5 + b.saturation) -
+    distance(a.rgb) * Math.sqrt(a.weight) * (0.5 + a.saturation))[0];
+  let sub;
+  if (secondary) {
+    sub = readableMainColor(toHex(secondary.rgb), target);
+  } else {
+    // Keep the sampled hue, but soften the secondary colour toward the surface.
+    const mainRgb = main.slice(1).match(/.{2}/g).map(channel => parseInt(channel, 16));
+    const bgRgb = target.slice(1, 7).match(/.{2}/g).map(channel => parseInt(channel, 16));
+    sub = toHex(mainRgb.map((channel, i) => channel * 0.88 + bgRgb[i] * 0.12));
+  }
+  if (sub === main) {
+    const channels = main.slice(1).match(/.{2}/g).map(channel => parseInt(channel, 16));
+    sub = toHex(channels.map(channel => Math.min(255, Math.max(0, channel + (light ? 24 : -24)))));
+  }
+  return { main, bg: surface, sub };
+}
+
+/** Sample the currently displayed wallpaper once for all three theme colours.
+ * @param {string} source
+ * @param {string} [background]
+ * @param {boolean} [useGeneratedBackground]
+ * @returns {Promise<{ main: string, bg: string, sub: string }>}
+ */
+export async function extractThemeColors(source, background = '#222222', useGeneratedBackground = true) {
+  return dominantThemeColors(await wallpaperPixels(source), background, useGeneratedBackground);
+}
+
+/** @param {string} source @param {string} [background] @returns {Promise<string>} */
+export async function extractMainColor(source, background = '#222222') {
+  return readableMainColor(dominantColor(await wallpaperPixels(source)), background);
 }

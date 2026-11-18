@@ -135,7 +135,6 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { useLayout } from 'vuetify';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { toastError, toast, anyFilter, isString, RULES } from './common';
@@ -149,9 +148,9 @@ import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
 import gsap from 'gsap';
 import { isMobile } from './platform';
+import { renderStepIndex } from './appState';
 
 const mobile = isMobile();
-const { mainRect } = useLayout();
 
 const { t } = useI18n();
 
@@ -171,6 +170,8 @@ const router = useRouter();
 const steps = ['choose', 'config', 'options', 'render'];
 const stepIndex = ref(1),
   step = computed(() => steps[stepIndex.value - 1]);
+watch(stepIndex, (index) => { renderStepIndex.value = index - 1; }, { immediate: true });
+onUnmounted(() => { renderStepIndex.value = null; });
 
 const chartInfo = ref<ChartInfo>();
 const pstBackgroundDim = ref(0);
@@ -609,7 +610,7 @@ function resetAndGoChoose() {
 </script>
 
 <template>
-  <div class="render-container" :class="{ 'is-mobile': mobile, 'has-mobile-action': mobile && (step === 'config' || step === 'options') }">
+  <div class="render-container" :class="{ 'is-mobile': mobile, 'has-render-actions': step === 'config' || step === 'options' }">
     <!-- MD3 Top Action Bar -->
     <header class="clear-glass glass md3-top-bar" v-glass v-if="step !== 'choose' && step !== 'render'">
       <div class="bar-left">
@@ -617,15 +618,6 @@ function resetAndGoChoose() {
           <v-icon icon="mdi-arrow-left" size="20" />
           <span>{{ t('prev-step') }}</span>
         </button>
-      </div>
-
-      <div class="bar-center">
-        <div class="step-chips">
-          <span v-for="(s, i) in steps" :key="s" class="step-chip" :class="{ 'is-active': step === s, 'is-done': stepIndex > i + 1 }">
-            <span class="chip-dot"></span>
-            <span class="chip-label" v-if="step === s">{{ t('steps.' + s) }}</span>
-          </span>
-        </div>
       </div>
 
       <div class="bar-right">
@@ -641,12 +633,17 @@ function resetAndGoChoose() {
           <v-icon icon="mdi-eye" size="18" />
           <span>{{ t('preview') }}</span>
         </button>
-        <button class="bar-btn bar-btn-filled" v-if="!mobile && (step === 'config' || step === 'options')" @click="moveNext">
-          <span>{{ step === 'options' ? t('render') : t('next-step') }}</span>
-          <v-icon icon="mdi-arrow-right" size="18" />
-        </button>
+
       </div>
     </header>
+
+    <footer v-show="step === 'config' || step === 'options'" class="render-action-bar">
+      <div id="render-preset-controls" class="render-preset-controls"></div>
+      <button class="bar-btn blur-glass render-forward-action" @click="moveNext">
+        <span>{{ step === 'options' ? t('render') : t('next-step') }}</span>
+        <v-icon icon="mdi-chevron-right" size="20" />
+      </button>
+    </footer>
 
     <!-- Content area -->
     <main class="render-content">
@@ -750,9 +747,9 @@ function resetAndGoChoose() {
       </div>
 
       <!-- Step 3: Options -->
-      <div class="clear-glass glass step-panel" v-glass :class="{ 'is-active': step === 'options' }" :inert="step === 'options' ? undefined : true">
+      <div class="clear-glass glass step-panel options-panel" v-glass :class="{ 'is-active': step === 'options' }" :inert="step === 'options' ? undefined : true">
         <div class="options-wrapper">
-          <ConfigView ref="configView" :chart-path="chartPath" :chart-label="chartInfo?.name" :chart-cover="renderCover" />
+          <ConfigView preset-target="#render-preset-controls" ref="configView" :chart-path="chartPath" :chart-label="chartInfo?.name" :chart-cover="renderCover" />
         </div>
       </div>
 
@@ -829,14 +826,7 @@ function resetAndGoChoose() {
       </div>
     </main>
 
-    <Teleport to="body">
-      <button v-if="mobile && (step === 'config' || step === 'options')"
-        class="bar-btn blur-glass mobile-render-action"
-        :style="{ bottom: `${mainRect.bottom + 12}px` }" @click="moveNext">
-        <span>{{ step === 'options' ? t('render') : t('next-step') }}</span>
-        <v-icon icon="mdi-arrow-right" size="18" />
-      </button>
-    </Teleport>
+
 
     <!-- File drag overlay -->
     <v-overlay v-model="fileHovering" contained class="align-center justify-center drop-overlay" persistent :close-on-content-click="false">
@@ -860,7 +850,9 @@ function resetAndGoChoose() {
 .render-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   width: 100%;
   background: transparent;
   color: var(--main-color);
@@ -877,6 +869,7 @@ function resetAndGoChoose() {
   border-bottom-right-radius: 16px;
   flex-shrink: 0;
   z-index: 10;
+  order: 0;
 }
 
 .bar-left,
@@ -884,52 +877,6 @@ function resetAndGoChoose() {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.bar-center {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-}
-
-.step-chips {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.step-chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 16px;
-  transition: all 0.3s ease;
-}
-
-.chip-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(var(--main-color-rgb), 0.25);
-  transition: all 0.3s ease;
-}
-
-.step-chip.is-active {
-  background: rgba(var(--main-color-rgb), 0.12);
-}
-.step-chip.is-active .chip-dot {
-  background: var(--sub-color);
-  box-shadow: 0 0 8px rgba(var(--sub-color-rgb), 0.5);
-}
-.step-chip.is-done .chip-dot {
-  background: var(--main-color);
-}
-
-.chip-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(var(--main-color-rgb), 0.8);
 }
 
 /* MD3 Button variants */
@@ -978,9 +925,10 @@ function resetAndGoChoose() {
 /* ===== Content Area ===== */
 .render-content {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   position: relative;
-  padding: 24px;
+  order: 1;
 }
 
 .step-panel {
@@ -994,6 +942,12 @@ function resetAndGoChoose() {
     opacity 0.35s cubic-bezier(0.2, 0, 0, 1),
     transform 0.35s cubic-bezier(0.2, 0, 0, 1);
   overflow-y: auto;
+  overscroll-behavior: none;
+}
+.options-panel {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 .step-panel.is-active {
   opacity: 1;
@@ -1071,9 +1025,9 @@ function resetAndGoChoose() {
 /* ===== Config Card (Step 2) ===== */
 .config-card-wrapper {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  height: 100%;
+  min-height: 100%;
   padding: 8px;
 }
 
@@ -1139,8 +1093,10 @@ function resetAndGoChoose() {
 }
 
 /* ===== Options (Step 3) ===== */
-.options-wrapper {
+ .options-wrapper {
+  flex: 1;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -1275,42 +1231,38 @@ function resetAndGoChoose() {
   font-size: 14px;
 }
 
-.render-container.is-mobile {
-  height: calc(100dvh - var(--v-layout-top, 0px) - var(--v-layout-bottom, 0px));
-  min-height: 0 !important;
-  padding-bottom: 0;
+/* Footer is a fixed-height sibling of the scrolling content. */
+.render-action-bar {
+  order: 2;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px 16px;
+  position: relative;
+  z-index: 12;
 }
-.is-mobile.has-mobile-action .step-panel.is-active {
-  padding: 12px 12px 76px;
-}
-.is-mobile .config-card-wrapper {
-  align-items: flex-start;
-  height: auto;
-  min-height: 100%;
-}
-.is-mobile .options-wrapper {
-  /* Keep the parameter list usable when landscape leaves little vertical space. */
-  min-height: 240px;
-}
-.mobile-render-action {
-  position: fixed;
-  right: 14px;
-  width: 104px;
+.render-preset-controls { min-width: 0; }
+.render-forward-action {
+  width: 112px;
   height: 52px;
   padding: 0;
+  flex-shrink: 0;
   justify-content: center;
-  border: 1px solid rgba(var(--main-color-rgb), 0.2);
   border-radius: 16px;
   color: var(--main-color);
   font-size: 16px;
   font-weight: 700;
-  z-index: 1005;
 }
-.mobile-render-action.bar-btn span { display: inline; }
-.mobile-render-action:focus-visible {
+.render-forward-action.bar-btn span { display: inline; }
+.render-forward-action:focus-visible {
   outline: 2px solid var(--main-color);
   outline-offset: 3px;
 }
+.render-container.is-mobile .step-panel { padding: 12px; }
+.render-container.is-mobile .render-action-bar { padding: 10px 12px 12px; }
+
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
   .config-grid {
@@ -1325,9 +1277,6 @@ function resetAndGoChoose() {
   }
   .bar-btn span {
     display: none;
-  }
-  .render-container {
-    padding-bottom: 84px;
   }
   .config-card {
     padding: 20px;

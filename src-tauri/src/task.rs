@@ -63,6 +63,7 @@ pub enum TaskStatus {
 pub struct Task {
     id: u32,
     name: String,
+    charter: String,
     cover: NamedTempFile,
     output: PathBuf,
 
@@ -120,6 +121,7 @@ impl Task {
         Ok(Self {
             id,
             name: info.name,
+            charter: params.info.charter.clone(),
             cover,
             output,
 
@@ -463,6 +465,7 @@ impl Task {
         TaskView {
             id: self.id,
             name: self.name.clone(),
+            charter: self.charter.clone(),
             output: self.output.clone(),
             path: self.params.path.display().to_string(),
             cover: self.cover.path().display().to_string(),
@@ -475,6 +478,7 @@ impl Task {
 pub struct TaskView {
     id: u32,
     name: String,
+    charter: String,
     output: PathBuf,
     path: String,
     cover: String,

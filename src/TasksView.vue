@@ -23,6 +23,7 @@ en:
   detail:
     name: Name
     path: Path
+    charter: Charter
     status: Status
     progress: Progress
     fps: Frame rate
@@ -73,6 +74,7 @@ zh-CN:
   detail:
     name: 名称
     path: 路径
+    charter: 谱师
     status: 状态
     progress: 进度
     fps: 帧率
@@ -125,6 +127,7 @@ const tasks = ref<Task[]>();
 interface RemoteJob {
   id: string;
   name: string;
+  charter?: string;
   status: string;
   progress?: number;
   fps?: number;
@@ -308,6 +311,7 @@ interface Row {
   key: string;
   source: 'local' | 'local-server' | 'remote';
   name: string;
+  charter: string;
   path: string;
   cover: string;
   status: TaskStatus;
@@ -326,6 +330,7 @@ const rows = computed<Row[]>(() => {
       key: `local-${task.id}`,
       source: 'local',
       name: task.name,
+      charter: task.charter || '—',
       path: task.path,
       cover: task.cover,
       status: task.status,
@@ -337,6 +342,7 @@ const rows = computed<Row[]>(() => {
       key: JSON.stringify([server.serverId || server.base, job.id]),
       source: server.kind,
       name: job.name || t('remote-job'),
+      charter: job.charter || '—',
       path: `${server.base} · ${job.id}`,
       cover: '',
       status: remoteStatus(job),
@@ -526,8 +532,8 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
             />
           </div>
 
-          <p class="task-path" :title="row.path">
-            {{ row.source !== 'local' ? t('remote-job') + ' · ' + row.path : row.path }}
+          <p class="task-path" :title="mobile ? row.charter : row.path">
+            {{ mobile ? t('detail.charter') + ' · ' + row.charter : row.source !== 'local' ? t('remote-job') + ' · ' + row.path : row.path }}
           </p>
 
           <div class="task-status">
@@ -640,7 +646,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
         <v-card-text>
           <div class="detail-list">
             <div class="detail-row"><span class="detail-label">{{ t('detail.name') }}</span><span>{{ selectedRow.name }}</span></div>
-            <div class="detail-row"><span class="detail-label">{{ t('detail.path') }}</span><span class="break-all">{{ selectedRow.source !== 'local' ? t('remote-job') + ' · ' + selectedRow.path : selectedRow.path }}</span></div>
+            <div class="detail-row"><span class="detail-label">{{ t(mobile ? 'detail.charter' : 'detail.path') }}</span><span class="break-all">{{ mobile ? selectedRow.charter : selectedRow.source !== 'local' ? t('remote-job') + ' · ' + selectedRow.path : selectedRow.path }}</span></div>
             <div class="detail-row"><span class="detail-label">{{ t('detail.status') }}</span><span>{{ describeStatus(selectedRow.status) }}</span></div>
             <div class="detail-row" v-if="selectedRow.status.type === 'rendering'">
               <span class="detail-label">{{ t('detail.progress') }}</span><span>{{ Math.round(selectedRow.status.progress * 100) }}%</span>
@@ -671,7 +677,9 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 .tasks-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   width: 100%;
   max-width: 960px;
   margin: 0 auto;
@@ -712,7 +720,9 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
   flex-direction: column;
   gap: 12px;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: none;
 }
 
 /* ===== Task Card ===== */

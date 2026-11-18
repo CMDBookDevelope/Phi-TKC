@@ -965,7 +965,9 @@ watch(
 .batch-layout {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   width: 100%;
   padding: 20px;
   box-sizing: border-box;
@@ -1142,6 +1144,7 @@ watch(
 /* ===== Chart List ===== */
 .chart-list {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   position: relative;
 }
@@ -1149,6 +1152,7 @@ watch(
 .list-scroll {
   height: 100%;
   overflow-y: auto;
+  overscroll-behavior: none;
   display: flex;
   flex-direction: column;
   gap: 8px;

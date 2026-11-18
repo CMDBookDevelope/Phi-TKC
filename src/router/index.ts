@@ -11,10 +11,7 @@ import TasksView from '../TasksView.vue';
 import BatchRenderView from '../BatchRenderView.vue';
 import Setting from '../Setting.vue';
 
-import { useOnLoaded } from '../appState';
 import { isMobile } from '../platform';
-
-const onLoaded = useOnLoaded();
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -44,19 +41,9 @@ const router = createRouter({
       component: AboutView,
     },
   ],
-  scrollBehavior(_to, _from, savedPosition) {
-    return new Promise((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        resolve(savedPosition ? savedPosition : { top: 0 });
-      };
-      onLoaded.value = finish;
-      // Navigation between two routes that reuse the same component instance does not
-      // change `routeComponent`, so don't leave the scroll promise pending forever.
-      setTimeout(finish, 600);
-    });
+  // Views own their content scrollers; the application shell never scrolls.
+  scrollBehavior() {
+    return false;
   },
 });
 

@@ -44,6 +44,7 @@ export type TaskStatus =
 export interface Task {
   id: number;
   name: string;
+  charter?: string;
   output: string;
   path: string;
   cover: string;

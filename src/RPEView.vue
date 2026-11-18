@@ -117,7 +117,9 @@ onMounted(() => {
 .rpe-container {
   padding: 24px;
   width: 100%;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   max-width: 1100px;
   margin: 0 auto;
   display: flex;
@@ -160,12 +162,15 @@ onMounted(() => {
   flex-direction: column;
   gap: 12px;
   overflow-y: auto;
+  overscroll-behavior: none;
+  min-height: 0;
   flex: 1;
 }
 
 .chart-card {
   display: flex;
   flex-direction: row;
+  flex-shrink: 0;
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
@@ -175,17 +180,20 @@ onMounted(() => {
 }
 
 .chart-cover {
+  position: relative;
   width: 35%;
   min-height: 180px;
   background: rgba(var(--bg-color-rgb), 0.2);
 }
 
 .cover-image {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   background-position: center;
   background-repeat: no-repeat;
-  background-size: cover;
+  background-size: contain;
 }
 
 .chart-content {
@@ -226,6 +234,7 @@ onMounted(() => {
   }
   .chart-cover {
     width: 100%;
+    height: 180px;
     min-height: 160px;
   }
   .chart-content {

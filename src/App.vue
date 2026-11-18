@@ -7,6 +7,7 @@ en:
   batch-render: Batch Render
   setting: Settings
   more: More
+  render-steps: [Choose chart, Chart information, Render parameters, Render]
 
 zh-CN:
   render: 渲染
@@ -16,6 +17,7 @@ zh-CN:
   batch-render: 批量渲染
   setting: 设置
   more: 更多
+  render-steps: [选择谱面, 谱面信息, 渲染参数, 开始渲染]
 </i18n>
 
 <script setup lang="ts">
@@ -26,7 +28,7 @@ import { useTheme } from 'vuetify';
 import ToastHost from './components/ToastHost.vue';
 
 import { mainColor, bgColor, subColor, loadCustomColors } from './colorStore';
-import { routeComponent } from './appState';
+import { routeComponent, renderStepIndex } from './appState';
 import { isAndroid, isMobile } from './platform';
 import { API_BACKGROUND_URL, backgroundUrl, initializeBackground, refreshApiBackground, fixCurrentBackground } from './background';
 
@@ -186,14 +188,20 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
     </Teleport>
 
     <v-app-bar
-      v-if="mobile"
       class="glass blur-glass tk-appbar"
-      :height="64 + mobileTopInset"
+      :height="(mobile ? 64 : 56) + mobileTopInset"
       :style="{ '--mobile-top-inset': `${mobileTopInset}px` }"
       density="compact"
       flat
     >
       <v-app-bar-title>Phi-TKC</v-app-bar-title>
+      <div v-if="route.name === 'render' && renderStepIndex !== null" class="render-step-dots" role="group" :aria-label="t('render')">
+        <span class="step-dot-indicator" :style="{ transform: `translateX(${renderStepIndex * 34}px)` }"></span>
+        <span v-for="index in 4" :key="index" class="step-dot-slot" :class="{ 'is-current': renderStepIndex === index - 1, 'is-done': renderStepIndex > index - 1 }"
+          :aria-current="renderStepIndex === index - 1 ? 'step' : undefined" :title="t(`render-steps[${index - 1}]`)">
+          <span class="step-dot"></span>
+        </span>
+      </div>
     </v-app-bar>
 
     <v-navigation-drawer
@@ -238,18 +246,20 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
     </v-navigation-drawer>
 
     <v-main class="tk-main">
-      <router-view v-slot="{ Component }">
-        <Suspense timeout="0">
-          <template #default>
-            <component :is="Component" ref="routeComponent" class="page-view" />
-          </template>
-          <template #fallback>
-            <div class="loading-container">
-              <v-progress-circular indeterminate size="48" color="primary" />
-            </div>
-          </template>
-        </Suspense>
-      </router-view>
+      <div class="route-viewport">
+        <router-view v-slot="{ Component }">
+          <Suspense timeout="0">
+            <template #default>
+              <component :is="Component" ref="routeComponent" class="page-view" />
+            </template>
+            <template #fallback>
+              <div class="loading-container">
+                <v-progress-circular indeterminate size="48" color="primary" />
+              </div>
+            </template>
+          </Suspense>
+        </router-view>
+      </div>
     </v-main>
 
     <!-- Phones get a bottom bar: all primary destinations live in the thumb
@@ -360,13 +370,25 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 /* ===== Main content ===== */
 .tk-main {
   background: transparent !important;
-  position: relative;
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  overflow: hidden;
   z-index: 1;
+}
+
+.route-viewport {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .page-view {
   width: 100%;
-  min-height: 100vh;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden;
   animation: pageEnter 0.35s cubic-bezier(0.2, 0, 0, 1) both;
 }
 
@@ -385,7 +407,7 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
+  height: 100%;
 }
 
 /* ===== Mobile (iOS/iPadOS/Android) ===== */
@@ -453,10 +475,53 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .step-dot-indicator,
+  .step-dot,
   .tk-nav,
   .nav-item,
   .tk-bottomnav-btn {
     transition: none !important;
   }
+}
+
+.render-step-dots {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  height: 28px;
+  margin-right: 20px;
+}
+.step-dot-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  z-index: 1;
+}
+.step-dot-indicator {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(var(--main-color-rgb), 0.16);
+  transition: transform 0.5s cubic-bezier(0.65, 0, 0.35, 1);
+}
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(var(--main-color-rgb), 0.3);
+  transition: background-color 0.5s cubic-bezier(0.65, 0, 0.35, 1), transform 0.5s cubic-bezier(0.65, 0, 0.35, 1), box-shadow 0.5s cubic-bezier(0.65, 0, 0.35, 1);
+}
+.is-done .step-dot { background: var(--main-color); }
+.is-current .step-dot {
+  background: var(--sub-color);
+  transform: scale(1.25);
+  box-shadow: 0 0 8px rgba(var(--sub-color-rgb), 0.45);
 }
 </style>

@@ -75,6 +75,7 @@ pub struct ServerArgs {
 struct JobView {
     id: String,
     name: String,
+    charter: String,
     status: &'static str,
     progress: f64,
     fps: u64,
@@ -642,6 +643,7 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
         view: JobView {
             id: id.clone(),
             name: info.name.clone(),
+            charter: info.charter.clone(),
             status: "queued",
             progress: 0.0,
             fps: 0,

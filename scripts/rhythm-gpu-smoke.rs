@@ -870,6 +870,178 @@ void main() { gl_FragColor = texture2D(screenTexture, uv) * vec4(0.7, 1.0, 1.0, 
         Ok(())
     }
 
+    // A fixed scene and shader clock must produce identical consecutive frames.
+    // In particular, a single post effect must not alternate between the fresh
+    // MSAA resolve texture and the previous frame's ping-pong output.
+    async fn verify_shader_frames(paths: &[PathBuf; 2]) -> Result<()> {
+        use prpr::{
+            config::{Config, Mods},
+            core::Effect,
+            scene::{GameMode, LoadingScene, Scene},
+            time::TimeManager,
+            ui::Ui,
+        };
+        use std::{cell::Cell, rc::Rc};
+
+        const LOCAL_SHADER: &str = r#"#version 100
+precision highp float;
+varying vec2 uv;
+uniform sampler2D screenTexture;
+void main() { gl_FragColor = vec4(texture2D(screenTexture, uv).rgb * 1.3, 1.0); }
+"#;
+        set_pc_assets_folder(&format!("{}/assets", env!("CARGO_MANIFEST_DIR")));
+        let font = FontArc::try_from_slice(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/font.ttf"
+        )))?;
+        let mut painter = TextPainter::new(font);
+        for samples in [1, 4] {
+            for (global, local) in [(false, true), (true, false), (true, true)] {
+                let mut fs = prpr::fs::fs_from_file(&paths[usize::from(global)])?;
+                let info = prpr::fs::load_info(fs.as_mut()).await?;
+                let config = Config {
+                    interactive: false,
+                    adjust_time: false,
+                    mods: Mods::AUTOPLAY,
+                    autoplay: Some(true),
+                    sample_count: samples,
+                    particle: false,
+                    disable_loading: true,
+                    volume_music: 0.,
+                    volume_sfx: 0.,
+                    volume_bgm: 0.,
+                    ..Default::default()
+                };
+                let mut loading =
+                    LoadingScene::new(GameMode::View, info, config, fs, None, None, None).await?;
+                let mut scene = loading
+                    .load_task
+                    .take()
+                    .context("missing scene load future")?
+                    .await?;
+                if local {
+                    scene.chart.extra.effects.push(Effect::new(
+                        0.0..100.0,
+                        LOCAL_SHADER,
+                        Vec::new(),
+                        false,
+                    )?);
+                }
+                // The outer target remains single-sampled. GameScene owns the
+                // actual MSAA + post-effect targets exercised by this check.
+                let output = MSRenderTarget::new((WIDTH, GAME_HEIGHT), 1);
+                let clock = Rc::new(Cell::new(0.0));
+                let source_clock = Rc::clone(&clock);
+                let mut tm = TimeManager::manual(Box::new(move || source_clock.get()));
+                scene.enter(&mut tm, Some(output.output()))?;
+                scene.update(&mut tm)?;
+                clock.set(GameScene::BEFORE_TIME as f64 + 0.0001);
+                scene.update(&mut tm)?;
+                tm.seek_to(2.);
+                scene.update(&mut tm)?;
+                ensure!(
+                    scene.res.alpha > 0.99,
+                    "shader fixture never entered the visible scene"
+                );
+                // Allocate through Resource while effects are enabled. The
+                // following stages toggle drawing on an already loaded scene.
+                scene.res.no_effect = false;
+                scene
+                    .res
+                    .update_size((0, 0, WIDTH as i32, GAME_HEIGHT as i32));
+                let mut disabled = None;
+                let mut active = None;
+                for enabled in [false, true, false] {
+                    scene.res.no_effect = !enabled;
+                    let mut reference = None;
+                    for frame in 0..12 {
+                        let mut ui =
+                            Ui::new(&mut painter, Some((0, 0, WIDTH as i32, GAME_HEIGHT as i32)));
+                        ui.scope(|ui| scene.render(&mut tm, ui, Some(output.output())))?;
+                        let pixels = read_rgba(output.output(), WIDTH, GAME_HEIGHT);
+                        if let Some(expected) = &reference {
+                            ensure!(pixels == *expected,
+                                "shader frame flicker: samples={samples} global={global} local={local} enabled={enabled} frame={frame}");
+                        } else {
+                            ensure!(
+                                pixels
+                                    .chunks_exact(4)
+                                    .filter(|p| p[..3].iter().any(|&v| v > 24))
+                                    .count()
+                                    > 1024,
+                                "shader fixture rendered an empty scene"
+                            );
+                            reference = Some(pixels);
+                        }
+                        next_frame().await;
+                    }
+                    let pixels = reference.context("missing shader reference")?;
+                    if enabled {
+                        active = Some(pixels);
+                    } else if let Some(expected) = &disabled {
+                        ensure!(
+                            pixels == *expected,
+                            "disabling shaders retained stale effect output"
+                        );
+                    } else {
+                        disabled = Some(pixels);
+                    }
+                }
+                ensure!(active != disabled, "legacy shader never changed the scene");
+                scene.pause(&mut tm)?;
+                println!("APPLE_SHADER_FRAME_STABILITY_PASS samples={samples} global={global} local={local} frames=36");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn apple_shader_msaa_frames_and_effect_transitions_are_stable() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let paths = [
+            fixture(directory.path(), "shader-local", &pgr_json(150))?,
+            fixture(directory.path(), "shader-global-legacy-gl", &pgr_json(150))?,
+        ];
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        let _runtime = runtime.enter();
+        let result = Arc::new(Mutex::new(None::<Result<()>>));
+        let completed = Arc::clone(&result);
+        macroquad::Window::from_config(
+            mq::conf::Conf {
+                headless: true,
+                window_width: WIDTH as i32,
+                window_height: GAME_HEIGHT as i32,
+                platform: mq::conf::Platform {
+                    rendering_backend: mq::conf::RenderingBackend::Metal,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            async move {
+                let mut future = Box::pin(verify_shader_frames(&paths));
+                let checked = std::future::poll_fn(|cx| {
+                    match catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(cx))) {
+                        Ok(poll) => poll,
+                        Err(_) => std::task::Poll::Ready(Err(anyhow::anyhow!(
+                            "shader frame stability assertion panicked"
+                        ))),
+                    }
+                })
+                .await;
+                *completed.lock().unwrap() = Some(checked);
+                macroquad::window::miniquad_context().request_quit();
+            },
+        );
+        let checked = result
+            .lock()
+            .unwrap()
+            .take()
+            .context("Metal loop did not report shader stability")?;
+        checked
+    }
+
     // Decode the actual native export with Apple's own reader. This exercises
     // apple_render::run, LoadingScene/GameScene's clock and MetalFrames, rather
     // than substituting a test frame loop or a mirrored BPM calculation.

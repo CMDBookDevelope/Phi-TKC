@@ -74,6 +74,7 @@ en:
   bar: Judge Bar
   render-list: Judge Line,Score,Combo,Level,Name,Progress,Percent,Time,Pause
   presets: Presets
+  preset-button: preset
   preset-create-title: Preset name
   preset-created: Preset created
   preset-deleted: Preset deleted
@@ -187,6 +188,7 @@ zh-CN:
   bar: 判定条显示
   render-list: 判定线,分数,连击,等级,名字,进度,百分比,时间,暂停
   presets: 预设
+  preset-button: 预设
   preset-create-title: 预设名称
   preset-created: 预设已创建
   preset-deleted: 预设已删除
@@ -227,7 +229,8 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import gsap from 'gsap';
 import { useI18n } from 'vue-i18n';
 const { t } = useI18n();
 
@@ -239,7 +242,7 @@ import type { RenderConfig } from '@/model';
 import { RHYTHM_DEFAULTS, RHYTHM_SPEED_MIN, RHYTHM_SPEED_MAX, isRhythmSpeed, withRhythmDefaults, type RhythmColors } from '@/rhythmConfig';
 import TipSwitch from './TipSwitch.vue';
 import RhythmColorPicker from './RhythmColorPicker.vue';
-const props = defineProps<{ initialConfig?: RenderConfig; chartPath?: string; chartLabel?: string; chartCover?: string | null }>();
+const props = defineProps<{ initialConfig?: RenderConfig; chartPath?: string; chartLabel?: string; chartCover?: string | null; presetTarget?: string }>();
 
 // Phi-TKC's preset list, plus the 1920x1080 default (which was missing from it).
 const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2132', '2388x1668', '1600x1080', '7680x5760'];
@@ -516,6 +519,23 @@ const DEFAULT_PRESET: Preset = {
 };
 const presets = ref([DEFAULT_PRESET]);
 const preset = ref(DEFAULT_PRESET);
+const presetExpanded = ref(false);
+const presetChevron = ref<SVGPolylineElement>();
+watch(presetExpanded, (expanded) => {
+  if (!presetChevron.value) return;
+  gsap.to(presetChevron.value, {
+    attr: { points: expanded ? '16 4 8 12 16 20' : '8 4 16 12 8 20' },
+    duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.5,
+    ease: 'power2.inOut',
+    overwrite: true,
+  });
+});
+onUnmounted(() => { if (presetChevron.value) gsap.killTweensOf(presetChevron.value); });
+const settingsScroll = ref<HTMLElement>();
+watch(activeCategory, async () => {
+  await nextTick();
+  if (settingsScroll.value) settingsScroll.value.scrollTop = 0;
+});
 
 async function updatePresets() {
   const currentKey = preset.value.key;
@@ -787,7 +807,7 @@ async function replacePreset() {
     <div class="config-body">
       <!-- LEFT: Settings scroll -->
       <div class="settings-col">
-        <div class="settings-scroll">
+        <div ref="settingsScroll" class="settings-scroll">
           <!-- OUTPUT -->
           <div v-show="activeCategory === 'output'" class="settings-stack">
             <div class="md3-card glass fluent-glass" v-glass>
@@ -1070,30 +1090,30 @@ async function replacePreset() {
       </div>
     </div>
 
-    <!-- Preset bar -->
-    <div class="preset-bar clear-glass">
-      <v-select
-        :model-value="preset"
-        @update:model-value="
-          (val: Preset) => {
-            preset = val;
-            applyConfig(val.config);
-          }
-        "
-        :items="presets"
-        item-title="name"
-        :label="t('presets')"
-        density="compact"
-        variant="outlined"
-        hide-details
-        return-object
-        class="preset-select" />
-      <div class="preset-actions">
-        <v-btn variant="tonal" color="primary" size="small" prepend-icon="mdi-plus" @click="createPreset">{{ t('preset-new') }}</v-btn>
-        <v-btn variant="tonal" color="warning" size="small" prepend-icon="mdi-content-save" :disabled="preset.key === 'default'" @click="replacePreset">{{ t('preset-save') }}</v-btn>
-        <v-btn variant="tonal" color="error" size="small" prepend-icon="mdi-delete" :disabled="preset.key === 'default'" @click="deletePreset">{{ t('preset-delete') }}</v-btn>
+    <Teleport :to="props.presetTarget || 'body'" :disabled="!props.presetTarget">
+      <div class="preset-controls" :class="{ 'is-expanded': presetExpanded, 'is-inline': !props.presetTarget }" @keydown.esc="presetExpanded = false">
+        <button type="button" class="preset-toggle blur-glass" :aria-expanded="presetExpanded" aria-controls="render-preset-drawer" @click="presetExpanded = !presetExpanded">
+          <span>{{ t('preset-button') }}</span>
+          <svg class="preset-chevron" :class="{ 'is-open': presetExpanded }" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline ref="presetChevron" points="8 4 16 12 8 20" />
+          </svg>
+        </button>
+        <Transition name="preset-reveal">
+          <div v-if="presetExpanded" id="render-preset-drawer" class="preset-drawer blur-glass" role="group" :aria-label="t('presets')">
+            <v-select
+              :model-value="preset"
+              @update:model-value="(val: Preset) => { preset = val; applyConfig(val.config); }"
+              :items="presets" item-title="name" :label="t('presets')"
+              density="compact" variant="outlined" hide-details return-object class="preset-select" />
+            <div class="preset-actions">
+              <v-btn variant="tonal" color="primary" size="small" prepend-icon="mdi-plus" @click="createPreset">{{ t('preset-new') }}</v-btn>
+              <v-btn variant="tonal" color="primary" size="small" prepend-icon="mdi-content-save" @click="preset.key === 'default' ? createPreset() : replacePreset()">{{ t('preset-save') }}</v-btn>
+              <v-btn variant="tonal" color="error" size="small" :aria-label="t('preset-delete')" icon="mdi-delete" :disabled="preset.key === 'default'" @click="deletePreset" />
+            </div>
+          </div>
+        </Transition>
       </div>
-    </div>
+    </Teleport>
 
     <!-- Preset name dialog (replaces window.prompt, which iOS WKWebView ignores) -->
     <v-dialog v-model="presetNameDialog" max-width="420">
@@ -1124,6 +1144,8 @@ async function replacePreset() {
   flex-direction: column;
   width: 100%;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: transparent;
   font-family: inherit;
 }
@@ -1135,6 +1157,8 @@ async function replacePreset() {
   margin: 0 16px;
   flex-shrink: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior: none;
 }
 .cat-chip {
   display: inline-flex;
@@ -1181,7 +1205,9 @@ async function replacePreset() {
 }
 .settings-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: none;
   padding-right: 4px;
 }
 .settings-stack {
@@ -1296,21 +1322,69 @@ async function replacePreset() {
   color: var(--main-color);
 }
 
-.preset-bar {
-  display: flex;
+.preset-controls {
+  position: relative;
+  width: 112px;
+  height: 52px;
+  flex: 0 0 auto;
+}
+.preset-controls.is-inline { margin: 12px 16px; }
+.preset-toggle {
+  width: 112px;
+  height: 52px;
+  padding: 0;
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  margin: 0 16px;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 16px;
+  font-family: inherit;
+  color: var(--main-color);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.preset-toggle:focus-visible { outline: 2px solid var(--main-color); outline-offset: 3px; }
+.preset-chevron {
   flex-shrink: 0;
 }
-.preset-select {
-  flex: 1;
-  max-width: 240px;
-}
-.preset-actions {
+.preset-drawer {
+  position: absolute;
+  left: 124px;
+  bottom: 0;
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  width: min(460px, calc(100vw - 360px));
+  height: 52px;
+  padding: 6px 10px;
+  border-radius: 16px;
+  transform-origin: left center;
+}
+.preset-select { flex: 1; min-width: 100px; }
+.preset-actions { display: flex; align-items: center; gap: 6px; }
+.preset-actions :deep(.v-btn--icon) { width: 32px; height: 32px; }
+.preset-reveal-enter-active,
+.preset-reveal-leave-active { transition: opacity 0.5s cubic-bezier(0.65, 0, 0.35, 1), transform 0.5s cubic-bezier(0.65, 0, 0.35, 1); }
+.preset-reveal-enter-from,
+.preset-reveal-leave-to { opacity: 0; transform: translateX(-10px) scaleX(0.96); }
+@media (max-width: 900px) {
+  .preset-drawer {
+    left: 0;
+    bottom: 64px;
+    width: min(460px, calc(100vw - 24px));
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+  }
+  .preset-select { min-width: 150px; }
+  .preset-actions { margin-left: auto; }
+  .preset-controls.is-inline .preset-drawer { width: min(460px, calc(100vw - 88px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .preset-chevron,
+  .preset-reveal-enter-active,
+  .preset-reveal-leave-active { transition: none; }
 }
 
 @media (max-width: 900px) {

@@ -150,7 +150,9 @@ onUnmounted(invalidate);
             <span>{{ t('color', { number: index + 1 }) }}</span>
           </button>
         </template>
-        <v-color-picker :model-value="color" @update:model-value="setColor(index, $event)" mode="hex" :modes="['hex']" hide-inputs hide-mode-switch />
+        <div class="color-picker-panel fluent-glass glass" v-glass>
+          <v-color-picker :model-value="color" @update:model-value="setColor(index, $event)" mode="hex" :modes="['hex']" hide-inputs hide-mode-switch />
+        </div>
       </v-menu>
     </div>
     <p class="colors-hint">{{ props.modelValue ? t('custom') : t('automatic') }}</p>
@@ -167,8 +169,8 @@ onUnmounted(invalidate);
 <style scoped>
 .rhythm-colors { display: flex; flex-direction: column; gap: 10px; }
 .colors-label { font-size: 13px; font-weight: 600; }
-.artwork-preview { position: relative; display: grid; place-items: center; width: 100%; height: 190px; overflow: hidden; border: 1px solid rgba(var(--main-color-rgb), 0.2); border-radius: 8px; background: rgba(0, 0, 0, 0.18); }
-.artwork-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.artwork-preview { position: relative; width: 100%; height: 190px; flex: none; min-width: 0; overflow: hidden; border: 1px solid rgba(var(--main-color-rgb), 0.2); border-radius: 8px; background: rgba(0, 0, 0, 0.18); }
+.artwork-preview img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; }
 .artwork-preview.is-picking img { cursor: crosshair; }
 .artwork-placeholder { display: grid; place-items: center; width: 100%; height: 100%; opacity: 0.45; }
 .eyedropper-button { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid rgba(255,255,255,0.24); border-radius: 50%; color: white; background: rgba(20,24,30,0.74); cursor: pointer; }

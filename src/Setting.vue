@@ -76,7 +76,10 @@ en:
       sub: "Sub Color"
       submit: "Apply"
       saved: "Color saved!"
-      fromWallpaper: "Use wallpaper main color"
+      fromWallpaper: "Pick all 3 colors"
+      auto: "Auto"
+      autoAria: "Pick {color} from wallpaper"
+      editAria: "Edit {color}"
       extractFailed: "Could not read the current wallpaper. Try another background."
 zh-CN:
   settings:
@@ -155,7 +158,10 @@ zh-CN:
       sub: "辅色"
       submit: "应用"
       saved: "颜色已保存！"
-      fromWallpaper: "从壁纸取主色"
+      fromWallpaper: "一键取3个颜色"
+      auto: "自动取色"
+      autoAria: "从壁纸自动提取{color}"
+      editAria: "编辑{color}"
       extractFailed: "无法读取当前壁纸，请尝试更换背景。"
 </i18n>
 
@@ -173,7 +179,7 @@ import { RULES as rules, toast, toastError, changeLocale } from './common';
 import { mainColor, bgColor, subColor } from './colorStore';
 import { isMobile } from './platform';
 import ColorDot from './components/ColorDot.vue';
-import { extractMainColor } from './themeColor.js';
+import { extractThemeColors } from './themeColor.js';
 import { backgroundPath, backgroundUrl, customBackgroundUrl as backgroundPreviewUrl, backgroundBusy, autoColorOnRefresh, backgroundColorError, selectCustomBackground, clearCustomBackground, fixCurrentBackground, refreshApiBackground } from './background';
 
 const { t } = useI18n();
@@ -198,8 +204,9 @@ const outputPath = ref<string>(localStorage.getItem('outputPath') || '');
 const selectedInfo = ref<string | null>(null);
 
 const selectingBackground = ref(false);
-const extractingMainColor = ref(false);
-const backgroundControlsBusy = computed(() => selectingBackground.value || backgroundBusy.value || extractingMainColor.value);
+type ThemeColor = 'main' | 'bg' | 'sub';
+const extractingColor = ref<ThemeColor | 'all' | null>(null);
+const backgroundControlsBusy = computed(() => selectingBackground.value || backgroundBusy.value || extractingColor.value !== null);
 
 async function selectFolder() {
   selectedInfo.value = null;
@@ -290,6 +297,10 @@ const tempSubColor = ref(subColor.value);
 // Refreshing can apply a new accent outside the picker. Show that actual value
 // in the preview so a later Apply cannot accidentally restore the old colour.
 watch(mainColor, (color) => { tempMainColor.value = color; });
+watch(bgColor, (color) => { tempBgColor.value = color; });
+watch(subColor, (color) => { tempSubColor.value = color; });
+let colorEditVersion = 0;
+watch([tempMainColor, tempBgColor, tempSubColor], () => { colorEditVersion++; }, { flush: 'sync' });
 
 function saveColor(colorKey: 'mainColor' | 'bgColor' | 'subColor', value: string) {
   localStorage.setItem(colorKey, value);
@@ -305,19 +316,23 @@ function confirmColor(type: 'main' | 'bg' | 'sub') {
   else saveColor('subColor', tempSubColor.value);
 }
 
-async function useWallpaperColor() {
+async function useWallpaperColor(type: ThemeColor | 'all' = 'all') {
   const source = backgroundUrl.value;
   if (!source || backgroundControlsBusy.value) return;
-  extractingMainColor.value = true;
+  extractingColor.value = type;
+  const editVersion = colorEditVersion;
   try {
-    const color = await extractMainColor(source, bgColor.value);
-    tempMainColor.value = color;
-    saveColor('mainColor', color);
+    const colors = await extractThemeColors(source, bgColor.value, type === 'all');
+    if (editVersion !== colorEditVersion || source !== backgroundUrl.value) return;
+    if (type === 'all' || type === 'main') mainColor.value = tempMainColor.value = colors.main;
+    if (type === 'all' || type === 'bg') bgColor.value = tempBgColor.value = colors.bg;
+    if (type === 'all' || type === 'sub') subColor.value = tempSubColor.value = colors.sub;
+    toast(t('settings.colors.saved'), 'success');
   } catch (error) {
     console.error('Wallpaper color extraction failed', error);
     toast(t('settings.colors.extractFailed'), 'error');
   } finally {
-    extractingMainColor.value = false;
+    extractingColor.value = null;
   }
 }
 
@@ -758,20 +773,29 @@ onUnmounted(stopWatching);
         <div class="card-label">{{ t('settings.colors.label') }}</div>
         <div class="card-actions">
           <v-btn variant="tonal" color="primary" prepend-icon="mdi-palette"
-            :loading="extractingMainColor" :disabled="!backgroundUrl || backgroundControlsBusy"
-            @click="useWallpaperColor">{{ t('settings.colors.fromWallpaper') }}</v-btn>
+            :loading="extractingColor === 'all'" :disabled="!backgroundUrl || backgroundControlsBusy"
+            @click="useWallpaperColor('all')">{{ t('settings.colors.fromWallpaper') }}</v-btn>
         </div>
         <div class="color-row">
           <div class="color-item">
             <span class="color-label">{{ t('settings.colors.main') }}</span>
             <v-menu :close-on-content-click="false" location="bottom">
               <template v-slot:activator="{ props }">
-                <div v-bind="props" class="swatch-btn">
+                <button v-bind="props" type="button" class="swatch-btn" :aria-label="t('settings.colors.editAria', { color: t('settings.colors.main') })">
                   <ColorDot :color="tempMainColor" :size="28" />
-                </div>
+                </button>
               </template>
-              <v-color-picker v-model="tempMainColor" hide-inputs mode="hex" />
+              <div class="color-picker-panel fluent-glass glass" v-glass>
+                <v-color-picker v-model="tempMainColor" hide-inputs mode="hex" />
+              </div>
             </v-menu>
+            <v-btn variant="tonal" color="primary" size="small" class="auto-color-btn"
+              :loading="extractingColor === 'main'" :disabled="!backgroundUrl || backgroundControlsBusy"
+              :aria-label="t('settings.colors.autoAria', { color: t('settings.colors.main') })"
+              @click="useWallpaperColor('main')">
+              <v-icon icon="mdi-auto-fix" size="16" class="mr-1" />
+              <span>{{ t('settings.colors.auto') }}</span>
+            </v-btn>
             <v-btn variant="tonal" color="primary" size="small" @click="confirmColor('main')">
               <v-icon icon="mdi-check" size="16" class="mr-1" />
               <span>{{ t('settings.colors.submit') }}</span>
@@ -782,12 +806,21 @@ onUnmounted(stopWatching);
             <span class="color-label">{{ t('settings.colors.bg') }}</span>
             <v-menu :close-on-content-click="false" location="bottom">
               <template v-slot:activator="{ props }">
-                <div v-bind="props" class="swatch-btn">
+                <button v-bind="props" type="button" class="swatch-btn" :aria-label="t('settings.colors.editAria', { color: t('settings.colors.bg') })">
                   <ColorDot :color="tempBgColor" :size="28" />
-                </div>
+                </button>
               </template>
-              <v-color-picker v-model="tempBgColor" hide-inputs mode="hex" />
+              <div class="color-picker-panel fluent-glass glass" v-glass>
+                <v-color-picker v-model="tempBgColor" hide-inputs mode="hex" />
+              </div>
             </v-menu>
+            <v-btn variant="tonal" color="primary" size="small" class="auto-color-btn"
+              :loading="extractingColor === 'bg'" :disabled="!backgroundUrl || backgroundControlsBusy"
+              :aria-label="t('settings.colors.autoAria', { color: t('settings.colors.bg') })"
+              @click="useWallpaperColor('bg')">
+              <v-icon icon="mdi-auto-fix" size="16" class="mr-1" />
+              <span>{{ t('settings.colors.auto') }}</span>
+            </v-btn>
             <v-btn variant="tonal" color="primary" size="small" @click="confirmColor('bg')">
               <v-icon icon="mdi-check" size="16" class="mr-1" />
               <span>{{ t('settings.colors.submit') }}</span>
@@ -798,12 +831,21 @@ onUnmounted(stopWatching);
             <span class="color-label">{{ t('settings.colors.sub') }}</span>
             <v-menu :close-on-content-click="false" location="bottom">
               <template v-slot:activator="{ props }">
-                <div v-bind="props" class="swatch-btn">
+                <button v-bind="props" type="button" class="swatch-btn" :aria-label="t('settings.colors.editAria', { color: t('settings.colors.sub') })">
                   <ColorDot :color="tempSubColor" :size="28" />
-                </div>
+                </button>
               </template>
-              <v-color-picker v-model="tempSubColor" hide-inputs mode="hex" />
+              <div class="color-picker-panel fluent-glass glass" v-glass>
+                <v-color-picker v-model="tempSubColor" hide-inputs mode="hex" />
+              </div>
             </v-menu>
+            <v-btn variant="tonal" color="primary" size="small" class="auto-color-btn"
+              :loading="extractingColor === 'sub'" :disabled="!backgroundUrl || backgroundControlsBusy"
+              :aria-label="t('settings.colors.autoAria', { color: t('settings.colors.sub') })"
+              @click="useWallpaperColor('sub')">
+              <v-icon icon="mdi-auto-fix" size="16" class="mr-1" />
+              <span>{{ t('settings.colors.auto') }}</span>
+            </v-btn>
             <v-btn variant="tonal" color="primary" size="small" @click="confirmColor('sub')">
               <v-icon icon="mdi-check" size="16" class="mr-1" />
               <span>{{ t('settings.colors.submit') }}</span>
@@ -904,20 +946,35 @@ onUnmounted(stopWatching);
 .color-item {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   flex-wrap: nowrap;
 }
 .color-label {
   min-width: 100px;
+  flex: 1;
   color: var(--main-color);
   font-weight: 500;
 }
 .swatch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 50%;
   cursor: pointer;
   transition: transform 0.12s ease;
 }
 .swatch-btn:hover {
   transform: scale(1.08);
+}
+
+.swatch-btn:focus-visible {
+  outline: 2px solid var(--main-color);
+  outline-offset: 3px;
 }
 
 /* ===== Responsive ===== */
@@ -926,11 +983,21 @@ onUnmounted(stopWatching);
     padding: 16px;
   }
   .color-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
   }
   .color-label {
     min-width: 0;
-    flex: 1;
+  }
+  .swatch-btn {
+    justify-self: end;
+  }
+  .auto-color-btn {
+    justify-self: end;
+  }
+  .color-item > .v-btn {
+    min-height: 36px;
   }
 }
 .server-hint {
