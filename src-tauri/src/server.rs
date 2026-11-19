@@ -76,6 +76,9 @@ struct JobView {
     id: String,
     name: String,
     charter: String,
+    composer: String,
+    illustrator: String,
+    level: String,
     status: &'static str,
     progress: f64,
     fps: u64,
@@ -87,6 +90,8 @@ struct JobView {
     /// Seconds the render took; only present once the job is `done`.
     #[serde(skip_serializing_if = "Option::is_none")]
     duration: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    average_fps: Option<f64>,
 }
 
 struct Job {
@@ -644,6 +649,9 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
             id: id.clone(),
             name: info.name.clone(),
             charter: info.charter.clone(),
+            composer: info.composer.clone(),
+            illustrator: info.illustrator.clone(),
+            level: info.level.clone(),
             status: "queued",
             progress: 0.0,
             fps: 0,
@@ -652,6 +660,7 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
             download: None,
             created_at: now_secs(),
             duration: None,
+            average_fps: None,
         },
         input,
         output,
@@ -794,12 +803,13 @@ async fn run_job(state: AppState, id: &str) {
     log::info!("[server] job {id} ({name}) started");
     let result = render_one(&state, id, &input, &output, &config, info.as_ref(), &cancel).await;
     match result {
-        Ok(()) => {
+        Ok(stats) => {
             log::info!("[server] job {id} ({name}) completed: {}", output.display());
             set_status(&state, id, |view| {
                 view.status = "done";
                 view.progress = 1.0;
-                view.duration = Some(now_secs().saturating_sub(view.created_at) as f64);
+                view.duration = Some(stats.duration);
+                view.average_fps = Some(stats.average_fps());
                 view.download = Some(format!("/api/jobs/{id}/download"));
             })
             .await;
@@ -852,7 +862,7 @@ async fn render_one(
     config: &RenderConfig,
     info: Option<&ChartInfo>,
     cancel: &AtomicBool,
-) -> Result<()> {
+) -> Result<crate::common::RenderStats> {
     let info = match info {
         Some(info) => info.clone(),
         None => {
@@ -913,6 +923,7 @@ async fn render_one(
     let mut lines = BufReader::new(stdout).lines();
     let mut total: u64 = 0;
     let mut frames: u64 = 0;
+    let mut completed_duration = None;
     // Realtime FPS over the last ten frames, exactly like `task.rs` / the CLI:
     // averaging since the start made the number ramp up from zero.
     let mut last_fps_time = Instant::now();
@@ -969,7 +980,7 @@ async fn render_one(
             IPCEvent::EncoderFps(fps) => {
                 job.view.fps = fps.max(0.0) as u64;
             }
-            IPCEvent::Done(_) => {}
+            IPCEvent::Done(duration) => completed_duration = Some(duration),
         }
     }
 
@@ -979,7 +990,10 @@ async fn render_one(
         let tail = stderr_tail.lock().await.join("\n");
         anyhow::bail!("renderer exited with {status}\n{tail}");
     }
-    Ok(())
+    Ok(crate::common::RenderStats {
+        frames,
+        duration: completed_duration.context("renderer exited without reporting completion")?,
+    })
 }
 
 fn jobs_dir() -> PathBuf {

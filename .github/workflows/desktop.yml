@@ -132,6 +132,9 @@ jobs:
             librsvg2-dev \
             libasound2-dev \
             libssl-dev \
+            libvulkan1 \
+            mesa-vulkan-drivers \
+            vulkan-validationlayers \
             pkg-config \
             libswresample-dev \
             libavfilter-dev \
@@ -172,6 +175,31 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Verify Vulkan texture replacement with validation
+        if: matrix.label == 'linux-x86_64-deb'
+        shell: bash
+        run: |
+          set -euo pipefail
+          MINIQUAD_MANIFEST="$(cargo metadata --locked --manifest-path src-tauri/Cargo.toml \
+            --format-version 1 | python3 -c 'import json,sys; print(next(p["manifest_path"] for p in json.load(sys.stdin)["packages"] if p["name"] == "miniquad"))')"
+          # A software Vulkan device makes this lifecycle regression independent
+          # of the hosted runner's GPU. The source is pinned by the app's lock.
+          if [ -f /usr/share/vulkan/icd.d/lvp_icd.x86_64.json ]; then
+            export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          else
+            export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
+          fi
+          test -f "$VK_ICD_FILENAMES"
+          export MINIQUAD_VULKAN_VALIDATION=1
+          cargo run --release --manifest-path "$MINIQUAD_MANIFEST" --features vulkan,headless \
+            --example vulkan_texture_lifetime 2>&1 | tee "$RUNNER_TEMP/vulkan-texture-lifetime.log"
+          python3 - "$RUNNER_TEMP/vulkan-texture-lifetime.log" <<'PY'
+          import pathlib, sys
+          text = pathlib.Path(sys.argv[1]).read_text()
+          assert 'ERROR/VALIDATION' not in text and 'Validation Error' not in text, text
+          assert 'Vulkan texture lifetime regression passed' in text, text
+          PY
 
       - name: Verify Apple native rendering and MP4 encoding
         if: matrix.rust-target == 'aarch64-apple-darwin'
@@ -374,7 +402,7 @@ jobs:
             - **Linux (x86_64)** — `.deb`, `.AppImage`, or a portable `.tar.gz` with renderer assets. The AppImage needs FUSE 2, or run it with `--appimage-extract-and-run`.
             - **Windows (x86_64)** — NSIS installer or portable `.zip` / `.7z`, including renderer assets and WebView2Loader.dll. The GUI requires the WebView2 Runtime.
             - **macOS (Apple Silicon)** — `.dmg`, macOS 11 or newer; unsigned, so right-click → Open the first time.
-            - **Android (arm64-v8a)** — `.apk`, unsigned; sign it with `apksigner` before installing.
+            - **Android (arm64-v8a)** — `.apk`, signed with a persistent release key. Updates from v1.3.8 onward install over the existing app; older releases need one reinstall because they used temporary signing keys.
             - **iOS / iPadOS** — unsigned `.ipa`; re-sign it with your own Apple team before sideloading.
 
             ## Notes

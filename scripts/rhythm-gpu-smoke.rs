@@ -1592,13 +1592,14 @@ void main() { gl_FragColor = vec4(texture2D(screenTexture, uv).rgb * 1.3, 1.0); 
             config.bitrate = "8M".to_owned();
             config.volume_sfx = 0.;
             config.particle = false;
+            config.hand_split = true;
             config.rhythm_analysis = true;
             config.rhythm_tap = false;
             config.rhythm_drag = false;
             config.rhythm_hold = false;
             config.rhythm_flick = false;
             config.rhythm_colors = Some(palette());
-            crate::apple_render::run(
+            let stats = crate::apple_render::run(
                 crate::apple_render::RenderRequest {
                     params: crate::render::RenderParams { path, info, config },
                     output_path: output.clone(),
@@ -1607,6 +1608,9 @@ void main() { gl_FragColor = vec4(texture2D(screenTexture, uv).rgb * 1.3, 1.0); 
                 },
                 |_, _| {},
             )?;
+            assert_eq!(stats.frames, 240, "completed native output frame count");
+            assert!(stats.duration.is_finite() && stats.duration > 0.0);
+            assert!(stats.average_fps().is_finite() && stats.average_fps() > 0.0);
             let evidence =
                 media::verify(&output, &references, artifacts.as_deref(), name, dynamic)?;
             if let Some(directory) = &artifacts {

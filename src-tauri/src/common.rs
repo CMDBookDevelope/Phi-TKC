@@ -4,6 +4,23 @@ use std::{path::PathBuf, sync::OnceLock};
 pub static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 pub static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// Completed output frames and the renderer's measured wall time through
+/// encoder finalization, matching the duration shown on the task.
+pub struct RenderStats {
+    pub frames: u64,
+    pub duration: f64,
+}
+
+impl RenderStats {
+    pub fn average_fps(&self) -> f64 {
+        if self.duration.is_finite() && self.duration > 0.0 {
+            self.frames as f64 / self.duration
+        } else {
+            0.0
+        }
+    }
+}
+
 /// Clear texture owners before macroquad tears down the native GPU context.
 /// Android's pthread-key destructors can run after that context has gone away.
 #[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]

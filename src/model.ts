@@ -31,6 +31,7 @@ export type TaskStatus =
   | {
       type: 'done';
       duration: number;
+      average_fps?: number;
       output: string;
     }
   | {
@@ -45,6 +46,9 @@ export interface Task {
   id: number;
   name: string;
   charter?: string;
+  composer?: string;
+  illustrator?: string;
+  level?: string;
   output: string;
   path: string;
   cover: string;

@@ -146,7 +146,6 @@ import RenderProgressBar from './components/RenderProgressBar.vue';
 import moment from 'moment';
 import * as dialog from '@tauri-apps/plugin-dialog';
 import * as shell from '@tauri-apps/plugin-shell';
-import gsap from 'gsap';
 import { isMobile } from './platform';
 import { renderStepIndex } from './appState';
 
@@ -170,7 +169,7 @@ const router = useRouter();
 const steps = ['choose', 'config', 'options', 'render'];
 const stepIndex = ref(1),
   step = computed(() => steps[stepIndex.value - 1]);
-watch(stepIndex, (index) => { renderStepIndex.value = index - 1; }, { immediate: true });
+watch(stepIndex, (index) => { renderStepIndex.value = index > 1 ? index - 2 : null; }, { immediate: true });
 onUnmounted(() => { renderStepIndex.value = null; });
 
 const chartInfo = ref<ChartInfo>();
@@ -186,8 +185,6 @@ const submittedRhythm = computed(() => {
 
 const choosingChart = ref(false),
   parsingChart = ref(false);
-
-const flipCardRef = ref<HTMLElement>();
 
 function handleDimChange(val: number) {
   pstBackgroundDim.value = val;
@@ -252,7 +249,7 @@ async function loadChart(file: string) {
     pstBackgroundDim.value = Math.round(chartInfo.value.backgroundDim * 100);
 
     await nextTick();
-    performFlip();
+    showChartConfig();
   } catch (e) {
     toastError(e);
   } finally {
@@ -260,22 +257,11 @@ async function loadChart(file: string) {
   }
 }
 
-function performFlip() {
+function showChartConfig() {
   stepIndex.value = 2;
-  nextTick(() => {
-    if (flipCardRef.value) {
-      gsap.from(flipCardRef.value, {
-        scale: 0.9,
-        opacity: 0,
-        y: 20,
-        duration: 0.5,
-        ease: 'power2.out',
-      });
-    }
-  });
 }
 
-function unflipCard() {
+function backToChoose() {
   stepIndex.value = 1;
 }
 
@@ -558,7 +544,7 @@ async function moveNext() {
 
 function goBack() {
   if (step.value === 'config') {
-    unflipCard();
+    backToChoose();
     return;
   }
   if (stepIndex.value > 1) {
@@ -648,7 +634,7 @@ function resetAndGoChoose() {
     <!-- Content area -->
     <main class="render-content">
       <!-- Step 1: Choose (Bookshelf) -->
-      <div class="step-panel" :class="{ 'is-active': step === 'choose' }" :inert="step === 'choose' ? undefined : true">
+      <div class="step-panel" :class="{ 'is-active': step === 'choose', 'is-before': stepIndex > 1 }" :inert="step === 'choose' ? undefined : true">
         <div class="clear-glass bookshelf glass" v-glass>
           <div class="glass fluent-glass shelf-label" v-glass>{{ t('steps.choose') }}</div>
           <div class="shelf-row">
@@ -671,8 +657,8 @@ function resetAndGoChoose() {
       </div>
 
       <!-- Step 2: Config -->
-      <div class="step-panel" :class="{ 'is-active': step === 'config' }" :inert="step === 'config' ? undefined : true">
-        <div class="config-card-wrapper" ref="flipCardRef">
+      <div class="step-panel" :class="{ 'is-active': step === 'config', 'is-before': stepIndex > 2 }" :inert="step === 'config' ? undefined : true">
+        <div class="config-card-wrapper">
           <div class="glass fluent-glass config-card" v-glass v-if="chartInfo">
             <v-form ref="form" class="config-form" @submit.prevent>
               <h2 class="config-title">{{ t('steps.config') }}</h2>
@@ -747,14 +733,14 @@ function resetAndGoChoose() {
       </div>
 
       <!-- Step 3: Options -->
-      <div class="clear-glass glass step-panel options-panel" v-glass :class="{ 'is-active': step === 'options' }" :inert="step === 'options' ? undefined : true">
+      <div class="clear-glass glass step-panel options-panel" v-glass :class="{ 'is-active': step === 'options', 'is-before': stepIndex > 3 }" :inert="step === 'options' ? undefined : true">
         <div class="options-wrapper">
           <ConfigView preset-target="#render-preset-controls" ref="configView" :chart-path="chartPath" :chart-label="chartInfo?.name" :chart-cover="renderCover" />
         </div>
       </div>
 
       <!-- Step 4: Render -->
-      <div class="step-panel" :class="{ 'is-active': step === 'render' }" :inert="step === 'render' ? undefined : true">
+      <div class="step-panel" :class="{ 'is-active': step === 'render', 'is-before': stepIndex > 4 }" :inert="step === 'render' ? undefined : true">
         <div class="render-card fluent-glass glass" v-if="chartInfo" v-glass>
           <!-- Left: Illustration -->
           <div class="render-cover">
@@ -936,11 +922,11 @@ function resetAndGoChoose() {
   inset: 0;
   padding: 24px;
   opacity: 0;
-  transform: translateY(16px);
+  transform: translateX(100%);
   pointer-events: none;
   transition:
-    opacity 0.35s cubic-bezier(0.2, 0, 0, 1),
-    transform 0.35s cubic-bezier(0.2, 0, 0, 1);
+    opacity 0.5s cubic-bezier(0.65, 0, 0.35, 1),
+    transform 0.5s cubic-bezier(0.65, 0, 0.35, 1);
   overflow-y: auto;
   overscroll-behavior: none;
 }
@@ -949,9 +935,10 @@ function resetAndGoChoose() {
   display: flex;
   flex-direction: column;
 }
+.step-panel.is-before { transform: translateX(-100%); }
 .step-panel.is-active {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateX(0);
   pointer-events: auto;
 }
 
@@ -961,7 +948,8 @@ function resetAndGoChoose() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  height: auto;
+  min-height: 100%;
   padding: 20px;
   border-radius: 16px;
 }
@@ -1262,6 +1250,10 @@ function resetAndGoChoose() {
 }
 .render-container.is-mobile .step-panel { padding: 12px; }
 .render-container.is-mobile .render-action-bar { padding: 10px 12px 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .step-panel { transition: none; }
+}
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {

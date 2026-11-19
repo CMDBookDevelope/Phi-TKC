@@ -55,7 +55,7 @@ pub struct RenderRequest {
     pub request_cancel: Option<Arc<AtomicBool>>,
 }
 
-pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> Result<()> {
+pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> Result<crate::common::RenderStats> {
     crate::apple_platform::install_logger();
     let _log = crate::apple_platform::start_render_log(request.output_path.with_extension("log"))?;
     let mut request = request;
@@ -67,7 +67,7 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> 
     let activity = RenderActivity::begin();
     activity.checkpoint(|| check_canceled(&request.request_cancel), || Ok(()))?;
 
-    let shared: std::sync::Arc<std::sync::Mutex<Option<Result<()>>>> =
+    let shared: std::sync::Arc<std::sync::Mutex<Option<Result<crate::common::RenderStats>>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
     let slot = std::sync::Arc::clone(&shared);
     // Tauri owns UIKit; the renderer creates only an offscreen Metal context.
@@ -98,7 +98,7 @@ async fn render_async(
     vw: u32,
     vh: u32,
     on_progress: impl Fn(f32, f64) + 'static,
-) -> Result<()> {
+) -> Result<crate::common::RenderStats> {
     let process_start = Instant::now();
     let mut phase = process_start;
     macro_rules! mark {
@@ -455,7 +455,10 @@ async fn render_async(
         "Metal render complete: {output_frames} frames in {:.2}s",
         process_start.elapsed().as_secs_f64()
     );
-    Ok(())
+    Ok(crate::common::RenderStats {
+        frames: output_frames,
+        duration: process_start.elapsed().as_secs_f64(),
+    })
 }
 
 fn check_canceled(cancel: &Option<Arc<AtomicBool>>) -> Result<()> {

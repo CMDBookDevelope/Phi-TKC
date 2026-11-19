@@ -69,7 +69,7 @@ en:
   watermark: Watermark
   flid_x: Mirror
   background: BG Only
-  hand-split: AI Hand Split
+  hand-split: Hand Split
   note-speed-factor: Note Speed
   bar: Judge Bar
   render-list: Judge Line,Score,Combo,Level,Name,Progress,Percent,Time,Pause
@@ -183,7 +183,7 @@ zh-CN:
   watermark: 水印
   flid_x: 镜像
   background: 仅背景显示
-  hand-split: AI 手序拆分
+  hand-split: 手序拆分
   note-speed-factor: 流速
   bar: 判定条显示
   render-list: 判定线,分数,连击,等级,名字,进度,百分比,时间,暂停

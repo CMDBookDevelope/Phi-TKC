@@ -7,7 +7,6 @@ en:
   batch-render: Batch Render
   setting: Settings
   more: More
-  render-steps: [Choose chart, Chart information, Render parameters, Render]
 
 zh-CN:
   render: 渲染
@@ -17,7 +16,6 @@ zh-CN:
   batch-render: 批量渲染
   setting: 设置
   more: 更多
-  render-steps: [选择谱面, 谱面信息, 渲染参数, 开始渲染]
 </i18n>
 
 <script setup lang="ts">
@@ -26,6 +24,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useTheme } from 'vuetify';
 import ToastHost from './components/ToastHost.vue';
+import RenderSteps from './components/RenderSteps.vue';
 
 import { mainColor, bgColor, subColor, loadCustomColors } from './colorStore';
 import { routeComponent, renderStepIndex } from './appState';
@@ -194,14 +193,10 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
       density="compact"
       flat
     >
-      <v-app-bar-title>Phi-TKC</v-app-bar-title>
-      <div v-if="route.name === 'render' && renderStepIndex !== null" class="render-step-dots" role="group" :aria-label="t('render')">
-        <span class="step-dot-indicator" :style="{ transform: `translateX(${renderStepIndex * 34}px)` }"></span>
-        <span v-for="index in 4" :key="index" class="step-dot-slot" :class="{ 'is-current': renderStepIndex === index - 1, 'is-done': renderStepIndex > index - 1 }"
-          :aria-current="renderStepIndex === index - 1 ? 'step' : undefined" :title="t(`render-steps[${index - 1}]`)">
-          <span class="step-dot"></span>
-        </span>
-      </div>
+      <v-app-bar-title class="tk-appbar-title">Phi-TKC</v-app-bar-title>
+      <Transition name="render-steps-presence">
+        <RenderSteps v-if="route.name === 'render' && renderStepIndex !== null" :step="renderStepIndex" class="appbar-render-steps" />
+      </Transition>
     </v-app-bar>
 
     <v-navigation-drawer
@@ -475,8 +470,6 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .step-dot-indicator,
-  .step-dot,
   .tk-nav,
   .nav-item,
   .tk-bottomnav-btn {
@@ -484,44 +477,18 @@ watch([mainColor, bgColor, subColor], applyThemeColors, { immediate: true });
   }
 }
 
-.render-step-dots {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 0 0 auto;
-  height: 28px;
-  margin-right: 20px;
+.tk-appbar-title { flex: 1 1 auto; min-width: 0; }
+.appbar-render-steps { margin-right: 20px; }
+.render-steps-presence-enter-active,
+.render-steps-presence-leave-active { transition: opacity 0.5s cubic-bezier(0.65, 0, 0.35, 1); }
+.render-steps-presence-enter-from,
+.render-steps-presence-leave-to { opacity: 0; }
+@media (max-width: 600px) {
+  .appbar-render-steps { margin-right: 12px; }
+  .tk-appbar-title { margin-inline-start: 16px; }
 }
-.step-dot-slot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  z-index: 1;
-}
-.step-dot-indicator {
-  position: absolute;
-  left: 0;
-  top: 2px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: rgba(var(--main-color-rgb), 0.16);
-  transition: transform 0.5s cubic-bezier(0.65, 0, 0.35, 1);
-}
-.step-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(var(--main-color-rgb), 0.3);
-  transition: background-color 0.5s cubic-bezier(0.65, 0, 0.35, 1), transform 0.5s cubic-bezier(0.65, 0, 0.35, 1), box-shadow 0.5s cubic-bezier(0.65, 0, 0.35, 1);
-}
-.is-done .step-dot { background: var(--main-color); }
-.is-current .step-dot {
-  background: var(--sub-color);
-  transform: scale(1.25);
-  box-shadow: 0 0 8px rgba(var(--sub-color-rgb), 0.45);
+@media (prefers-reduced-motion: reduce) {
+  .render-steps-presence-enter-active,
+  .render-steps-presence-leave-active { transition: none; }
 }
 </style>

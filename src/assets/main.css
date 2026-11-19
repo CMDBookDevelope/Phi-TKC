@@ -148,10 +148,10 @@ textarea,
   opacity: var(--highlight-opacity, 0); /* 初始透明，由 v-glass 指令切换 */
 }
 
-/* Hide the scrollbar without changing any scroll container's overflow. */
+/* Keep wheel chaining through clipped cards and fields to the page scroller.
+   Overscroll containment belongs only on the actual scrolling regions. */
 * {
   scrollbar-width: none;
-  overscroll-behavior: none;
 }
 *::-webkit-scrollbar {
   display: none;

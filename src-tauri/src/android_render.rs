@@ -57,7 +57,7 @@ pub struct RenderRequest {
     pub request_cancel: Option<Arc<AtomicBool>>,
 }
 
-pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> Result<()> {
+pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> Result<crate::common::RenderStats> {
     crate::android_uri::install_logger();
     let _log = crate::android_uri::start_render_log(request.output_path.with_extension("log"))?;
     let mut request = request;
@@ -66,7 +66,7 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> 
     crate::android_uri::debug_log(&format!("render: using requested {vw}x{vh}"));
     let conf = build_conf(vw, vh);
 
-    let shared: std::sync::Arc<std::sync::Mutex<Option<Result<()>>>> =
+    let shared: std::sync::Arc<std::sync::Mutex<Option<Result<crate::common::RenderStats>>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
     let slot = std::sync::Arc::clone(&shared);
     // Our macroquad fork has no `from_config_headless`; a headless `Conf` plus
@@ -96,7 +96,7 @@ async fn render_async(
     vw: u32,
     vh: u32,
     on_progress: impl Fn(f32, f64) + 'static,
-) -> Result<()> {
+) -> Result<crate::common::RenderStats> {
     let process_start = Instant::now();
     let mut phase = process_start;
     macro_rules! mark {
@@ -669,7 +669,11 @@ async fn render_async(
         render_start.elapsed().as_secs_f64(),
         request.output_path.display()
     );
-    Ok(())
+    anyhow::ensure!(submitted == out_frames, "incomplete video frame submission: {submitted}/{out_frames}");
+    Ok(crate::common::RenderStats {
+        frames: submitted,
+        duration: process_start.elapsed().as_secs_f64(),
+    })
 }
 
 fn resample_pcm(input: &[f32], from: usize, to: usize) -> Vec<f32> {

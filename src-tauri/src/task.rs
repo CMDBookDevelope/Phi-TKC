@@ -52,6 +52,7 @@ pub enum TaskStatus {
     },
     Done {
         duration: f64,
+        average_fps: f64,
         output: String,
     },
     Canceled,
@@ -120,7 +121,7 @@ impl Task {
 
         Ok(Self {
             id,
-            name: info.name,
+            name: params.info.name.clone(),
             charter: params.info.charter.clone(),
             cover,
             output,
@@ -166,7 +167,7 @@ impl Task {
         };
 
         *self.status.lock().await = TaskStatus::Mixing;
-        let finished = Arc::new(std::sync::Mutex::new(None::<Result<()>>));
+        let finished = Arc::new(std::sync::Mutex::new(None::<Result<crate::common::RenderStats>>));
         let finished_out = Arc::clone(&finished);
         let runtime = tokio::runtime::Handle::current();
         std::thread::Builder::new().name("native-render".into()).spawn(move || {
@@ -211,7 +212,7 @@ impl Task {
                 0.0
             };
             match done {
-                Some(Ok(())) => {
+                Some(Ok(stats)) => {
                     if self.request_cancel.load(Ordering::Relaxed) {
                         let _ = tokio::fs::remove_file(&self.output).await;
                         *self.status.lock().await = TaskStatus::Canceled;
@@ -251,7 +252,8 @@ impl Task {
                         let _ = tokio::fs::remove_file(&self.output).await;
                     }
                     *self.status.lock().await = TaskStatus::Done {
-                        duration: elapsed,
+                        duration: stats.duration,
+                        average_fps: stats.average_fps(),
                         output: format!("{log}\n\nSaved to: {target}\n{photo_note}"),
                     };
                     return Ok(());
@@ -447,6 +449,7 @@ impl Task {
         *self.status.lock().await = match completed_duration {
             Some(duration) => TaskStatus::Done {
                 duration,
+                average_fps: crate::common::RenderStats { frames: frame_count, duration }.average_fps(),
                 output: format!("[LOG]\n{child_log}\n\n[STDERR]\n{stderr}"),
             },
             None => TaskStatus::Failed {
@@ -466,6 +469,9 @@ impl Task {
             id: self.id,
             name: self.name.clone(),
             charter: self.charter.clone(),
+            composer: self.params.info.composer.clone(),
+            illustrator: self.params.info.illustrator.clone(),
+            level: self.params.info.level.clone(),
             output: self.output.clone(),
             path: self.params.path.display().to_string(),
             cover: self.cover.path().display().to_string(),
@@ -479,6 +485,9 @@ pub struct TaskView {
     id: u32,
     name: String,
     charter: String,
+    composer: String,
+    illustrator: String,
+    level: String,
     output: PathBuf,
     path: String,
     cover: String,
@@ -550,8 +559,40 @@ impl Drop for TaskQueue {
 
 #[cfg(test)]
 mod tests {
-    use super::create_task_cover;
+    use super::{create_task_cover, Task, TaskStatus};
     use std::io::Write;
+
+    #[tokio::test]
+    async fn task_view_preserves_edited_metadata_and_completed_average() {
+        let root = tempfile::tempdir().unwrap();
+        let original = prpr::info::ChartInfo::default();
+        std::fs::write(root.path().join("info.yml"), serde_yaml::to_string(&original).unwrap()).unwrap();
+        std::fs::write(root.path().join(&original.illustration), b"cover").unwrap();
+        std::fs::write(root.path().join(&original.chart), b"{}").unwrap();
+        std::fs::write(root.path().join(&original.music), b"music").unwrap();
+        let mut edited = original;
+        edited.name = "Edited title".into();
+        edited.charter = "Edited charter".into();
+        edited.composer = "Edited composer".into();
+        edited.illustrator = "Edited artist".into();
+        edited.level = "AT Lv.17.5".into();
+        let task = Task::new(0, crate::render::RenderParams {
+            path: root.path().to_owned(), info: edited, config: Default::default(),
+        }, Some(root.path().join("output")), Some(root.path())).await.unwrap();
+        *task.status.lock().await = TaskStatus::Done {
+            duration: 2.5,
+            average_fps: crate::common::RenderStats { frames: 100, duration: 2.5 }.average_fps(),
+            output: "complete".into(),
+        };
+        let view = serde_json::to_value(task.to_view().await).unwrap();
+        assert_eq!(view["name"], "Edited title");
+        assert_eq!(view["charter"], "Edited charter");
+        assert_eq!(view["composer"], "Edited composer");
+        assert_eq!(view["illustrator"], "Edited artist");
+        assert_eq!(view["level"], "AT Lv.17.5");
+        assert_eq!(view["status"]["average_fps"], 40.0);
+        assert_eq!(view["status"]["duration"], 2.5);
+    }
 
     #[test]
     fn private_cover_cache_is_created_and_files_are_cleaned_up() {

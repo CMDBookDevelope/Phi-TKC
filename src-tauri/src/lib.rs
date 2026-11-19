@@ -1092,6 +1092,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn apple_bundled_hand_model_matches_render_core() {
+        let packaged = include_bytes!("../assets/phitk_ai_model.bin");
+        assert_eq!(packaged.as_slice(), prpr::hand::bundled_hand_model());
+        assert!(packaged.starts_with(b"PHITKHP\0"));
+    }
+
+    #[test]
+    fn apple_hand_split_assigns_both_sides_without_gpu_readback() {
+        use prpr::{core::{note::Hand, Note, NoteKind, Object, Vector}, judge::JudgeStatus};
+        let note = Note {
+            time: 1.0, kind: NoteKind::Click, height: 1.0, object: Object::default(),
+            speed: 1.0, end_speed: 1.0, start_height: 0.0, hand: Hand::Left,
+            above: true, multiple_hint: false, fake: false,
+            judge: JudgeStatus::NotJudged, format: false,
+        };
+        let mut notes = vec![note.clone(), note];
+        let config = prpr::config::Config { hand_split: true, ..Default::default() };
+        prpr::hand::assign_hands_unified_perspective(
+            &mut notes, &config, 0, 0.0, 0.0,
+            &[Vector::new(-0.5, 0.0), Vector::new(0.5, 0.0)],
+            || panic!("hand splitting must not read the GPU framebuffer"),
+        );
+        assert_eq!(notes[0].hand, Hand::Left);
+        assert_eq!(notes[1].hand, Hand::Right);
+    }
+
+    #[test]
     fn rhythm_auto_bpm_legacy_defaults_and_explicit_disable_reach_core() {
         let legacy: RenderConfig = serde_json::from_str("{}").unwrap();
         assert!(legacy.rhythm_auto_bpm);

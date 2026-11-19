@@ -7,7 +7,7 @@ en:
     loading: Loading…
     mixing: Mixing…
     rendering: Rendering {fps} FPS, estimated to end {estimate}
-    done: Done, took {duration}
+    done: 'Done, took {duration}, average frame rate: {fps} fps'
     canceled: Canceled
     failed: Failed
 
@@ -24,10 +24,14 @@ en:
     name: Name
     path: Path
     charter: Charter
+    composer: Composer
+    illustrator: Illustrator
+    level: Difficulty
     status: Status
     progress: Progress
     fps: Frame rate
     duration: Duration
+    average-fps: Average frame rate
     output: Output
     error: Error
 
@@ -58,7 +62,7 @@ zh-CN:
     loading: 加载中…
     mixing: 混音中…
     rendering: 渲染中 {fps} FPS  预计 {estimate} 结束
-    done: 已完成，耗时 {duration}
+    done: '已完成，耗时 {duration}，平均帧率：{fps} fps'
     canceled: 已取消
     failed: 失败
 
@@ -75,10 +79,14 @@ zh-CN:
     name: 名称
     path: 路径
     charter: 谱师
+    composer: 曲师
+    illustrator: 画师
+    level: 难度
     status: 状态
     progress: 进度
     fps: 帧率
     duration: 耗时
+    average-fps: 平均帧率
     output: 输出
     error: 错误
 
@@ -128,6 +136,9 @@ interface RemoteJob {
   id: string;
   name: string;
   charter?: string;
+  composer?: string;
+  illustrator?: string;
+  level?: string;
   status: string;
   progress?: number;
   fps?: number;
@@ -136,6 +147,7 @@ interface RemoteJob {
   download?: string | null;
   createdAt?: number;
   duration?: number;
+  averageFps?: number;
 }
 
 interface ServerSource {
@@ -301,7 +313,7 @@ function remoteStatus(job: RemoteJob): TaskStatus {
         fps: Math.round(job.fps ?? 0),
         estimate: job.eta ?? 0,
       };
-    case 'done': return { type: 'done', duration: job.duration ?? 0, output: job.download ?? '' };
+    case 'done': return { type: 'done', duration: job.duration ?? Number.NaN, average_fps: job.averageFps, output: job.download ?? '' };
     case 'canceled': return { type: 'canceled' };
     default: return { type: 'failed', error: job.error || 'unknown error' };
   }
@@ -312,6 +324,9 @@ interface Row {
   source: 'local' | 'local-server' | 'remote';
   name: string;
   charter: string;
+  composer: string;
+  illustrator: string;
+  level: string;
   path: string;
   cover: string;
   status: TaskStatus;
@@ -331,6 +346,9 @@ const rows = computed<Row[]>(() => {
       source: 'local',
       name: task.name,
       charter: task.charter || '—',
+      composer: task.composer || '—',
+      illustrator: task.illustrator || '—',
+      level: task.level || '—',
       path: task.path,
       cover: task.cover,
       status: task.status,
@@ -343,6 +361,9 @@ const rows = computed<Row[]>(() => {
       source: server.kind,
       name: job.name || t('remote-job'),
       charter: job.charter || '—',
+      composer: job.composer || '—',
+      illustrator: job.illustrator || '—',
+      level: job.level || '—',
       path: `${server.base} · ${job.id}`,
       cover: '',
       status: remoteStatus(job),
@@ -363,10 +384,17 @@ function describeStatus(status: TaskStatus): string {
         fps: status.fps,
         estimate: status.estimate ? formatDuration(status.estimate) : '',
       });
-    case 'done': return t('status.done', { duration: status.duration ? formatDuration(status.duration) : '' });
+    case 'done': return t('status.done', {
+      duration: `${formatMetric(status.duration)} s`,
+      fps: formatMetric(status.average_fps),
+    });
     case 'canceled': return t('status.canceled');
     case 'failed': return t('status.failed');
   }
+}
+
+function formatMetric(value: number | undefined): string {
+  return value !== undefined && Number.isFinite(value) && value >= 0 ? value.toFixed(2) : '—';
 }
 
 function statusColor(statusType: string): string {
@@ -532,9 +560,11 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
             />
           </div>
 
-          <p class="task-path" :title="mobile ? row.charter : row.path">
-            {{ mobile ? t('detail.charter') + ' · ' + row.charter : row.source !== 'local' ? t('remote-job') + ' · ' + row.path : row.path }}
-          </p>
+          <div class="task-metadata">
+            <span v-for="field in (['charter', 'composer', 'illustrator', 'level'] as const)" :key="field" :title="row[field]">
+              {{ t('detail.' + field) }}：{{ row[field] }}
+            </span>
+          </div>
 
           <div class="task-status">
             <RenderProgressCircular
@@ -639,14 +669,15 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
     </v-menu>
 
     <!-- Detail dialog -->
-    <v-dialog v-model="detailDialog" width="auto" min-width="500px">
+    <v-dialog v-model="detailDialog" width="min(560px, calc(100vw - 32px))">
       <v-card v-if="selectedRow">
         <v-card-title>{{ t('details') }}</v-card-title>
         <v-divider />
         <v-card-text>
           <div class="detail-list">
             <div class="detail-row"><span class="detail-label">{{ t('detail.name') }}</span><span>{{ selectedRow.name }}</span></div>
-            <div class="detail-row"><span class="detail-label">{{ t(mobile ? 'detail.charter' : 'detail.path') }}</span><span class="break-all">{{ mobile ? selectedRow.charter : selectedRow.source !== 'local' ? t('remote-job') + ' · ' + selectedRow.path : selectedRow.path }}</span></div>
+            <div v-for="field in (['charter', 'composer', 'illustrator', 'level'] as const)" :key="field" class="detail-row"><span class="detail-label">{{ t('detail.' + field) }}</span><span class="break-all">{{ selectedRow[field] }}</span></div>
+            <div v-if="!mobile" class="detail-row"><span class="detail-label">{{ t('detail.path') }}</span><span class="break-all">{{ selectedRow.path }}</span></div>
             <div class="detail-row"><span class="detail-label">{{ t('detail.status') }}</span><span>{{ describeStatus(selectedRow.status) }}</span></div>
             <div class="detail-row" v-if="selectedRow.status.type === 'rendering'">
               <span class="detail-label">{{ t('detail.progress') }}</span><span>{{ Math.round(selectedRow.status.progress * 100) }}%</span>
@@ -655,7 +686,10 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
               <span class="detail-label">{{ t('detail.fps') }}</span><span>{{ selectedRow.status.fps }} FPS</span>
             </div>
             <div class="detail-row" v-if="selectedRow.status.type === 'done' && selectedRow.status.duration">
-              <span class="detail-label">{{ t('detail.duration') }}</span><span>{{ formatDuration(selectedRow.status.duration) }}</span>
+              <span class="detail-label">{{ t('detail.duration') }}</span><span>{{ formatMetric(selectedRow.status.duration) }} s</span>
+            </div>
+            <div class="detail-row" v-if="selectedRow.status.type === 'done'">
+              <span class="detail-label">{{ t('detail.average-fps') }}</span><span>{{ formatMetric(selectedRow.status.average_fps) }} fps</span>
             </div>
             <div class="detail-row" v-if="selectedRow.status.type === 'done' && selectedRow.status.output">
               <span class="detail-label">{{ t('detail.output') }}</span><span class="break-all">{{ selectedRow.status.type === 'done' ? selectedRow.status.output : '' }}</span>
@@ -780,10 +814,14 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
   flex: 1;
   min-width: 0;
 }
-.task-path {
+.task-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
   font-size: 12px;
   color: rgba(var(--main-color-rgb), 0.45);
-  margin: 0;
+}
+.task-metadata span {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -798,9 +836,8 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 .status-text {
   font-size: 13px;
   color: rgba(var(--main-color-rgb), 0.7);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ===== Status Chip ===== */
