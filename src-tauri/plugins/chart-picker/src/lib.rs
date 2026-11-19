@@ -17,8 +17,9 @@ impl<R: Runtime> ChartPicker<R> {
         width: u32,
         height: u32,
         show_fps: bool,
+        color_space: &str,
     ) -> Result<(), tauri::plugin::mobile::PluginInvokeError> {
-        self.0.run_mobile_plugin::<serde_json::Value>("preview", serde_json::json!({ "session": session, "width": width, "height": height, "showFps": show_fps }))
+        self.0.run_mobile_plugin::<serde_json::Value>("preview", serde_json::json!({ "session": session, "width": width, "height": height, "showFps": show_fps, "colorSpace": color_space }))
             .map(|_| ())
     }
 
@@ -42,12 +43,20 @@ impl<R: Runtime> ChartPicker<R> {
     }
 
     pub fn pick(&self) -> Result<Option<String>, tauri::plugin::mobile::PluginInvokeError> {
+        self.pick_document("pick")
+    }
+
+    pub fn pick_video(&self) -> Result<Option<String>, tauri::plugin::mobile::PluginInvokeError> {
+        self.pick_document("pickVideo")
+    }
+
+    fn pick_document(&self, command: &str) -> Result<Option<String>, tauri::plugin::mobile::PluginInvokeError> {
         #[derive(serde::Deserialize)]
         struct Response {
             path: Option<String>,
         }
         self.0
-            .run_mobile_plugin::<Response>("pick", serde_json::json!({}))
+            .run_mobile_plugin::<Response>(command, serde_json::json!({}))
             .map(|response| response.path)
     }
 

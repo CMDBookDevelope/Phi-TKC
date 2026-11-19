@@ -1,7 +1,8 @@
-//! VideoToolbox H.264 compression and AVFoundation AAC/MP4 writing.
+//! VideoToolbox compression and AVFoundation AAC/MP4 and MOV writing.
 //! No subprocesses or FFmpeg executable are used. Compression callbacks retain
 //! their CMSampleBuffers until the writer has consumed them.
-use anyhow::{ensure, Result};
+use crate::apple_render::mobile_hdr::{is_10_bit_420_sps, Transfer};
+use anyhow::{ensure, Context, Result};
 use objc::{
     class, msg_send,
     runtime::{Object, NO, YES},
@@ -66,6 +67,7 @@ struct AudioDescription {
 extern "C" {
     fn CFRetain(value: Ref) -> Ref;
     fn CFRelease(value: Ref);
+    fn CFEqual(first: Ref, second: Ref) -> u8;
 }
 #[cfg_attr(
     any(target_os = "macos", target_os = "ios"),
@@ -91,6 +93,20 @@ extern "C" {
     fn CVPixelBufferGetWidth(buffer: Ref) -> usize;
     fn CVPixelBufferGetHeight(buffer: Ref) -> usize;
     fn CVPixelBufferGetPixelFormatType(buffer: Ref) -> u32;
+    fn CVPixelBufferGetPlaneCount(buffer: Ref) -> usize;
+    fn CVPixelBufferGetBaseAddressOfPlane(buffer: Ref, plane: usize) -> Ref;
+    fn CVPixelBufferGetBytesPerRowOfPlane(buffer: Ref, plane: usize) -> usize;
+    fn CVBufferSetAttachment(buffer: Ref, key: Ref, value: Ref, mode: u32);
+    static kCVImageBufferColorPrimariesKey: Ref;
+    static kCVImageBufferTransferFunctionKey: Ref;
+    static kCVImageBufferYCbCrMatrixKey: Ref;
+    static kCVImageBufferColorPrimaries_ITU_R_2020: Ref;
+    static kCVImageBufferColorPrimaries_ITU_R_709_2: Ref;
+    static kCVImageBufferTransferFunction_ITU_R_709_2: Ref;
+    static kCVImageBufferYCbCrMatrix_ITU_R_709_2: Ref;
+    static kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ: Ref;
+    static kCVImageBufferTransferFunction_ITU_R_2100_HLG: Ref;
+    static kCVImageBufferYCbCrMatrix_ITU_R_2020: Ref;
     static kCVPixelBufferWidthKey: Ref;
     static kCVPixelBufferHeightKey: Ref;
     static kCVPixelBufferPixelFormatTypeKey: Ref;
@@ -104,6 +120,21 @@ extern "C" {
     link(name = "CoreMedia", kind = "framework")
 )]
 extern "C" {
+    fn CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+        format: Ref,
+        index: usize,
+        bytes: *mut *const u8,
+        length: *mut usize,
+        count: *mut usize,
+        nal_header_length: *mut i32,
+    ) -> i32;
+    fn CMFormatDescriptionGetMediaSubType(format: Ref) -> u32;
+    fn CMSampleBufferGetDataBuffer(sample: Ref) -> Ref;
+    fn CMBlockBufferCopyDataBytes(block: Ref, offset: usize, length: usize, output: *mut c_void) -> i32;
+    fn CMFormatDescriptionGetExtension(format: Ref, key: Ref) -> Ref;
+    static kCMFormatDescriptionExtension_ColorPrimaries: Ref;
+    static kCMFormatDescriptionExtension_TransferFunction: Ref;
+    static kCMFormatDescriptionExtension_YCbCrMatrix: Ref;
     fn CMSampleBufferGetFormatDescription(sample: Ref) -> Ref;
     fn CMSampleBufferGetPresentationTimeStamp(sample: Ref) -> Time;
     fn CMAudioFormatDescriptionCreate(
@@ -184,6 +215,10 @@ extern "C" {
     static kVTEncodeFrameOptionKey_ForceKeyFrame: Ref;
     static kVTCompressionPropertyKey_MaxFrameDelayCount: Ref;
     static kVTProfileLevel_H264_High_AutoLevel: Ref;
+    static kVTProfileLevel_HEVC_Main10_AutoLevel: Ref;
+    static kVTCompressionPropertyKey_ColorPrimaries: Ref;
+    static kVTCompressionPropertyKey_TransferFunction: Ref;
+    static kVTCompressionPropertyKey_YCbCrMatrix: Ref;
 }
 #[cfg_attr(
     any(target_os = "macos", target_os = "ios"),
@@ -312,7 +347,61 @@ const MAX_PENDING_VIDEO: usize = 64;
 const MAX_IN_FLIGHT_VIDEO: usize = 6;
 // Six VideoToolbox inputs, three GPU frame leases and one allocation margin.
 const MAX_PIXEL_BUFFERS: usize = MAX_IN_FLIGHT_VIDEO + 4;
-const BGRA: u32 = 0x42475241;
+const BGRA: u32 = u32::from_be_bytes(*b"BGRA");
+const X420: u32 = u32::from_be_bytes(*b"x420");
+
+const X422: u32 = u32::from_be_bytes(*b"x422");
+const AYUV64: u32 = u32::from_be_bytes(*b"y416");
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ProRes {
+    tag: u32,
+    pub(crate) alpha: bool,
+}
+
+impl ProRes {
+    const PROFILES: [(&'static str, [u8; 4], bool); 7] = [
+        ("prores_422_proxy", *b"apco", false),
+        ("prores_422_lt", *b"apcs", false),
+        ("prores_422", *b"apcn", false),
+        ("prores_422_hq", *b"apch", false),
+        ("prores_4444", *b"ap4h", false),
+        ("prores_4444_xq", *b"ap4x", true),
+        ("prores_4444_alpha", *b"ap4h", true),
+    ];
+
+    pub(crate) const NAMES: [&'static str; 7] = [
+        Self::PROFILES[0].0, Self::PROFILES[1].0, Self::PROFILES[2].0,
+        Self::PROFILES[3].0, Self::PROFILES[4].0, Self::PROFILES[5].0, Self::PROFILES[6].0,
+    ];
+
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        Self::PROFILES.iter().find(|profile| profile.0 == name)
+            .map(|&(_, tag, alpha)| Self { tag: u32::from_be_bytes(tag), alpha })
+    }
+
+    fn is_4444(self) -> bool {
+        matches!(self.tag.to_be_bytes(), [b'a', b'p', b'4', b'h' | b'x'])
+    }
+}
+
+fn pixel_format(hdr: Option<Transfer>, prores: Option<ProRes>) -> u32 {
+    match (hdr, prores) {
+        (_, Some(profile)) if profile.is_4444() => AYUV64,
+        (_, Some(_)) => X422,
+        (Some(_), None) => X420,
+        _ => BGRA,
+    }
+}
+
+fn transfer_value(transfer: Transfer) -> Ref {
+    unsafe {
+        match transfer {
+            Transfer::Pq => kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ,
+            Transfer::Hlg => kCVImageBufferTransferFunction_ITU_R_2100_HLG,
+        }
+    }
+}
 const POOL_THRESHOLD_EXCEEDED: i32 = -6689;
 const INVALID_SESSION: i32 = -12903;
 
@@ -382,6 +471,8 @@ pub struct Encoder {
     force_next_keyframe: bool,
     keyframe_properties: Obj,
     bitrate: u32,
+    hdr: Option<Transfer>,
+    prores: Option<ProRes>,
     next_token: usize,
     next_output_frame: u64,
     writer: Obj,
@@ -401,6 +492,40 @@ pub struct Encoder {
     complete: bool,
 }
 impl Encoder {
+    #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+    pub(crate) fn probe(path: &Path, transfer: Option<Transfer>, prores: Option<ProRes>) -> Result<()> {
+        const WIDTH: u32 = 320;
+        const HEIGHT: u32 = 240;
+        const FPS: u32 = 30;
+        const RATE: u32 = 48_000;
+        const PIXELS: usize = (WIDTH * HEIGHT) as usize;
+        objc::rc::autoreleasepool(|| {
+            let mut encoder = Self::new_with_prores(
+                path, WIDTH, HEIGHT, FPS, 2_000_000, RATE, transfer, prores,
+            )?;
+            let pcm = vec![0; (RATE / FPS * 4) as usize];
+            if prores.is_some() {
+                let pixel = encoder.pixel_buffer(&pcm)?;
+                let rgba = if transfer.is_some() {
+                    half::f16::from_f32(0.5).to_bits().to_ne_bytes().repeat(PIXELS * 4)
+                } else {
+                    vec![128; PIXELS * 4]
+                };
+                encoder.write_prores_pixel(&pixel, &rgba)?;
+                encoder.frame_pixel(pixel, 0, &pcm)?;
+            } else if transfer.is_some() {
+                let pixel = encoder.pixel_buffer(&pcm)?;
+                let mut p010 = (64_u16 << 6).to_le_bytes().repeat(PIXELS);
+                p010.extend((512_u16 << 6).to_le_bytes().repeat(PIXELS / 2));
+                encoder.write_hdr_pixel(&pixel, &p010)?;
+                encoder.frame_pixel(pixel, 0, &pcm)?;
+            } else {
+                encoder.frame(&vec![128; PIXELS * 4], 0, &pcm)?;
+            }
+            encoder.finish(&pcm)
+        })
+    }
+
     pub fn new(
         path: &Path,
         width: u32,
@@ -408,6 +533,20 @@ impl Encoder {
         fps: u32,
         bitrate: u32,
         rate: u32,
+        hdr: Option<Transfer>,
+    ) -> Result<Self> {
+        Self::new_with_prores(path, width, height, fps, bitrate, rate, hdr, None)
+    }
+
+    pub(crate) fn new_with_prores(
+        path: &Path,
+        width: u32,
+        height: u32,
+        fps: u32,
+        bitrate: u32,
+        rate: u32,
+        hdr: Option<Transfer>,
+        prores: Option<ProRes>,
     ) -> Result<Self> {
         ensure!(
             width > 0
@@ -424,14 +563,14 @@ impl Encoder {
         unsafe {
             let path = string(&path.to_string_lossy());
             let url: *mut Object = msg_send![class!(NSURL), fileURLWithPath:path.0];
-            let kind = string("public.mpeg-4");
+            let kind = string(if prores.is_some() { "com.apple.quicktime-movie" } else { "public.mpeg-4" });
             let mut error: *mut Object = null_mut();
             let allocated: *mut Object = msg_send![class!(AVAssetWriter), alloc];
             let writer: *mut Object =
                 msg_send![allocated, initWithURL:url fileType:kind.0 error:&mut error];
             ensure!(
                 !writer.is_null(),
-                "Cannot open MP4 output: {}",
+                "Cannot open Apple video output: {}",
                 media_error(error, 0)
             );
             let writer = Obj(writer);
@@ -482,7 +621,7 @@ impl Encoder {
             let audio_format = Cf(audio_format);
             let pixel_width = number(width as i64);
             let pixel_height = number(height as i64);
-            let pixel_format = number(BGRA as i64);
+            let pixel_format = number(pixel_format(hdr, prores) as i64);
             let true_value: *mut Object = msg_send![class!(NSNumber), numberWithBool:YES];
             let _: () = msg_send![true_value, retain];
             let true_value = Obj(true_value);
@@ -523,6 +662,8 @@ impl Encoder {
                 pixel_pool: Cf(pixel_pool),
                 pixel_attributes,
                 bitrate,
+                hdr,
+                prores,
                 next_token: 1,
                 next_output_frame: 0,
                 force_next_keyframe: true,
@@ -548,7 +689,15 @@ impl Encoder {
                 audio_finished: false,
                 complete: false,
             };
-            encoder.create_session()?;
+            encoder.create_session().with_context(|| {
+                if prores.is_some() {
+                    "Failed to open the requested VideoToolbox ProRes profile"
+                } else if hdr.is_some() {
+                    "This Apple device needs VideoToolbox HEVC Main10 with 10-bit 4:2:0 input for HDR. Try a lower resolution or frame rate, or choose SDR."
+                } else {
+                    "Failed to open the VideoToolbox H.264 encoder"
+                }
+            })?;
             Ok(encoder)
         }
     }
@@ -563,7 +712,10 @@ impl Encoder {
                 null_mut(),
                 self.width as i32,
                 self.height as i32,
-                0x61766331,
+                self.prores.map_or_else(
+                    || u32::from_be_bytes(if self.hdr.is_some() { *b"hvc1" } else { *b"avc1" }),
+                    |profile| profile.tag,
+                ),
                 null_mut(),
                 self.pixel_attributes.0 as Ref,
                 null_mut(),
@@ -580,46 +732,66 @@ impl Encoder {
                 !self.session.is_null(),
                 "VideoToolbox returned a null session"
             );
-            for (key, value) in [
-                (kVTCompressionPropertyKey_RealTime, 0),
-                (kVTCompressionPropertyKey_AllowFrameReordering, 0),
-                (
-                    kVTCompressionPropertyKey_AverageBitRate,
-                    self.bitrate as i64,
-                ),
-                (kVTCompressionPropertyKey_ExpectedFrameRate, self.fps as i64),
-                (
-                    kVTCompressionPropertyKey_MaxKeyFrameInterval,
-                    self.fps.saturating_mul(2) as i64,
-                ),
-            ] {
-                // Boolean properties use true CFBoolean values, not CFNumber.
-                let value = if key == kVTCompressionPropertyKey_RealTime
-                    || key == kVTCompressionPropertyKey_AllowFrameReordering
-                {
-                    let object: *mut Object = msg_send![class!(NSNumber), numberWithBool:NO];
-                    let _: () = msg_send![object, retain];
-                    Obj(object)
-                } else {
-                    number(value)
-                };
-                let code = VTSessionSetProperty(self.session, key, value.0 as Ref);
+            if self.prores.is_none() {
+                for (key, value) in [
+                    (kVTCompressionPropertyKey_RealTime, 0),
+                    (kVTCompressionPropertyKey_AllowFrameReordering, 0),
+                    (
+                        kVTCompressionPropertyKey_AverageBitRate,
+                        self.bitrate as i64,
+                    ),
+                    (kVTCompressionPropertyKey_ExpectedFrameRate, self.fps as i64),
+                    (
+                        kVTCompressionPropertyKey_MaxKeyFrameInterval,
+                        self.fps.saturating_mul(2) as i64,
+                    ),
+                ] {
+                    // Boolean properties use true CFBoolean values, not CFNumber.
+                    let value = if key == kVTCompressionPropertyKey_RealTime
+                        || key == kVTCompressionPropertyKey_AllowFrameReordering
+                    {
+                        let object: *mut Object = msg_send![class!(NSNumber), numberWithBool:NO];
+                        let _: () = msg_send![object, retain];
+                        Obj(object)
+                    } else {
+                        number(value)
+                    };
+                    let code = VTSessionSetProperty(self.session, key, value.0 as Ref);
+                    if code == INVALID_SESSION {
+                        self.invalidate_for_resume()?;
+                        return Ok(());
+                    }
+                    status(code, "VideoToolbox property")?;
+                }
+                let code = VTSessionSetProperty(
+                    self.session,
+                    kVTCompressionPropertyKey_ProfileLevel,
+                    if self.hdr.is_some() {
+                        kVTProfileLevel_HEVC_Main10_AutoLevel
+                    } else {
+                        kVTProfileLevel_H264_High_AutoLevel
+                    },
+                );
                 if code == INVALID_SESSION {
                     self.invalidate_for_resume()?;
                     return Ok(());
                 }
-                status(code, "VideoToolbox property")?;
+                status(code, "VideoToolbox profile")?;
             }
-            let code = VTSessionSetProperty(
-                self.session,
-                kVTCompressionPropertyKey_ProfileLevel,
-                kVTProfileLevel_H264_High_AutoLevel,
-            );
-            if code == INVALID_SESSION {
-                self.invalidate_for_resume()?;
-                return Ok(());
+            if let Some(transfer) = self.hdr {
+                for (key, value) in [
+                    (kVTCompressionPropertyKey_ColorPrimaries, kCVImageBufferColorPrimaries_ITU_R_2020),
+                    (kVTCompressionPropertyKey_TransferFunction, transfer_value(transfer)),
+                    (kVTCompressionPropertyKey_YCbCrMatrix, kCVImageBufferYCbCrMatrix_ITU_R_2020),
+                ] {
+                    let code = VTSessionSetProperty(self.session, key, value);
+                    if code == INVALID_SESSION {
+                        self.invalidate_for_resume()?;
+                        return Ok(());
+                    }
+                    status(code, "VideoToolbox HDR color property")?;
+                }
             }
-            status(code, "VideoToolbox profile")?;
             // Limit the encoder's compression window so the producer can stop
             // at its bounded in-flight limit without waiting for a future frame.
             let delay = number((MAX_IN_FLIGHT_VIDEO - 2) as i64);
@@ -646,7 +818,7 @@ impl Encoder {
         Ok(())
     }
 
-    /// Acquire a reusable Metal-compatible BGRA8 IOSurface. The caller must
+    /// Acquire a reusable Metal-compatible IOSurface. The caller must
     /// drop temporary texture aliases after completing GPU writes so the pool
     /// can recycle the surface when the encoder releases its input ownership.
     pub fn pixel_buffer(&mut self, pcm16: &[u8]) -> Result<PixelBuffer> {
@@ -715,7 +887,7 @@ impl Encoder {
             ensure!(
                 CVPixelBufferGetWidth(pixel.as_ptr()) == self.width as usize
                     && CVPixelBufferGetHeight(pixel.as_ptr()) == self.height as usize
-                    && CVPixelBufferGetPixelFormatType(pixel.as_ptr()) == BGRA,
+                    && CVPixelBufferGetPixelFormatType(pixel.as_ptr()) == pixel_format(self.hdr, self.prores),
                 "wrong VideoToolbox pixel buffer size or format"
             );
         }
@@ -745,7 +917,7 @@ impl Encoder {
             ensure!(
                 CVPixelBufferGetWidth(pixel.as_ptr()) == self.width as usize
                     && CVPixelBufferGetHeight(pixel.as_ptr()) == self.height as usize
-                    && CVPixelBufferGetPixelFormatType(pixel.as_ptr()) == BGRA,
+                    && CVPixelBufferGetPixelFormatType(pixel.as_ptr()) == pixel_format(self.hdr, self.prores),
                 "wrong VideoToolbox pixel buffer size or format"
             );
         }
@@ -782,7 +954,7 @@ impl Encoder {
             state.pixels.insert(token, FrameInput { frame, pixel });
         }
         let mut flags = 0;
-        let properties = if self.force_next_keyframe {
+        let properties = if self.force_next_keyframe && self.prores.is_none() {
             self.keyframe_properties.0 as Ref
         } else {
             null_mut()
@@ -931,6 +1103,137 @@ impl Encoder {
 
     // CPU compatibility and the native baseline tests use the same pool and
     // asynchronous scheduler. Production Metal submits frame_pixel directly.
+    pub(crate) fn write_hdr_pixel(&self, pixel: &PixelBuffer, p010: &[u8]) -> Result<()> {
+        let transfer = self.hdr.context("HDR encoder is required for P010 frames")?;
+        let row_bytes = self.width as usize * 2;
+        let y_bytes = row_bytes * self.height as usize;
+        ensure!(p010.len() == y_bytes + y_bytes / 2, "wrong P010 frame size");
+        let buffer = pixel.as_ptr();
+        unsafe {
+            status(CVPixelBufferLockBaseAddress(buffer, 0), "10-bit pixel buffer lock")?;
+            let result: Result<()> = (|| {
+                ensure!(CVPixelBufferGetPlaneCount(buffer) == 2, "invalid x420 plane count");
+                let (luma, chroma) = p010.split_at(y_bytes);
+                for (plane, source) in [luma, chroma].into_iter().enumerate() {
+                    let base = CVPixelBufferGetBaseAddressOfPlane(buffer, plane) as *mut u8;
+                    let stride = CVPixelBufferGetBytesPerRowOfPlane(buffer, plane);
+                    ensure!(!base.is_null() && stride >= row_bytes, "invalid x420 plane layout");
+                    for (row, data) in source.chunks_exact(row_bytes).enumerate() {
+                        std::ptr::copy_nonoverlapping(data.as_ptr(), base.add(row * stride), row_bytes);
+                    }
+                }
+                Ok(())
+            })();
+            let unlock = CVPixelBufferUnlockBaseAddress(buffer, 0);
+            result?;
+            status(unlock, "10-bit pixel buffer unlock")?;
+            for (key, value) in [
+                (kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_2020),
+                (kCVImageBufferTransferFunctionKey, transfer_value(transfer)),
+                (kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_2020),
+            ] {
+                CVBufferSetAttachment(buffer, key, value, 1);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn write_prores_pixel(&self, pixel: &PixelBuffer, rgba: &[u8]) -> Result<()> {
+        let profile = self.prores.context("ProRes encoder is required")?;
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let bpp = if self.hdr.is_some() { 8 } else { 4 };
+        ensure!(rgba.len() == width * height * bpp, "wrong ProRes RGBA frame size");
+        let read = |sample: &[u8]| {
+            let [r, g, b, a] = if let Some(transfer) = self.hdr {
+                let [r, g, b, a] = [0, 2, 4, 6].map(|offset| {
+                    half::f16::from_bits(u16::from_ne_bytes([sample[offset], sample[offset + 1]])).to_f32()
+                });
+                let [r, g, b] = transfer.encode_rgb([r, g, b]);
+                [r, g, b, a]
+            } else {
+                std::array::from_fn(|index| f32::from(sample[index]) / 255.0)
+            };
+            let (kr, kb) = if self.hdr.is_some() { (0.2627, 0.0593) } else { (0.2126, 0.0722) };
+            let y = r * kr + g * (1.0 - kr - kb) + b * kb;
+            [a, y, (b - y) / (2.0 * (1.0 - kb)), (r - y) / (2.0 * (1.0 - kr))]
+        };
+        let buffer = pixel.as_ptr();
+        unsafe {
+            status(CVPixelBufferLockBaseAddress(buffer, 0), "ProRes pixel buffer lock")?;
+            let result = (|| {
+                if profile.is_4444() {
+                    let base = CVPixelBufferGetBaseAddress(buffer).cast::<u8>();
+                    let stride = CVPixelBufferGetBytesPerRow(buffer);
+                    ensure!(!base.is_null() && stride >= width * 8, "invalid y416 layout");
+                    for (row, source) in rgba.chunks_exact(width * bpp).enumerate() {
+                        let destination = std::slice::from_raw_parts_mut(base.add(row * stride), width * 8);
+                        for (sample, output) in source.chunks_exact(bpp).zip(destination.chunks_exact_mut(8)) {
+                            let [a, y, cb, cr] = read(sample);
+                            let a = if profile.alpha { (a.clamp(0.0, 1.0) * 65535.0).round() as u16 } else { u16::MAX };
+                            let channels = [
+                                a,
+                                (4096.0 + 56064.0 * y).round() as u16,
+                                (32768.0 + 57344.0 * cb).round() as u16,
+                                (32768.0 + 57344.0 * cr).round() as u16,
+                            ];
+                            for (channel, target) in channels.into_iter().zip(output.chunks_exact_mut(2)) {
+                                target.copy_from_slice(&channel.to_le_bytes());
+                            }
+                        }
+                    }
+                } else {
+                    ensure!(width % 2 == 0 && CVPixelBufferGetPlaneCount(buffer) == 2, "invalid x422 layout");
+                    let bases = [0, 1].map(|plane| CVPixelBufferGetBaseAddressOfPlane(buffer, plane).cast::<u8>());
+                    let strides = [0, 1].map(|plane| CVPixelBufferGetBytesPerRowOfPlane(buffer, plane));
+                    ensure!(bases.iter().all(|base| !base.is_null()) && strides.iter().all(|&stride| stride >= width * 2),
+                        "invalid x422 plane layout");
+                    for (row, source) in rgba.chunks_exact(width * bpp).enumerate() {
+                        let [luma, chroma] = [0, 1].map(|plane| {
+                            std::slice::from_raw_parts_mut(bases[plane].add(row * strides[plane]), width * 2)
+                        });
+                        for (pair, samples) in source.chunks_exact(bpp * 2).enumerate() {
+                            let [_, y0, cb0, cr0] = read(&samples[..bpp]);
+                            let [_, y1, cb1, cr1] = read(&samples[bpp..]);
+                            let codes = [
+                                [64.0 + 876.0 * y0, 64.0 + 876.0 * y1],
+                                [512.0 + 448.0 * (cb0 + cb1), 512.0 + 448.0 * (cr0 + cr1)],
+                            ];
+                            for (destination, values) in [&mut *luma, &mut *chroma].into_iter().zip(codes) {
+                                for (offset, value) in values.into_iter().enumerate() {
+                                    let start = pair * 4 + offset * 2;
+                                    destination[start..start + 2].copy_from_slice(&((value.round() as u16) << 6).to_le_bytes());
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            })();
+            let unlock = CVPixelBufferUnlockBaseAddress(buffer, 0);
+            result?;
+            status(unlock, "ProRes pixel buffer unlock")?;
+            if let Some(transfer) = self.hdr {
+                for (key, value) in [
+                    (kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_2020),
+                    (kCVImageBufferTransferFunctionKey, transfer_value(transfer)),
+                    (kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_2020),
+                ] {
+                    CVBufferSetAttachment(buffer, key, value, 1);
+                }
+            } else {
+                for (key, value) in [
+                    (kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2),
+                    (kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2),
+                    (kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2),
+                ] {
+                    CVBufferSetAttachment(buffer, key, value, 1);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn frame(&mut self, rgba: &[u8], frame: u64, pcm16: &[u8]) -> Result<()> {
         ensure!(
             rgba.len() == self.width as usize * self.height as usize * 4,
@@ -1093,16 +1396,66 @@ impl Encoder {
         unsafe {
             let media = string("vide");
             let hint = CMSampleBufferGetFormatDescription(sample.0);
+            ensure!(!hint.is_null(), "VideoToolbox returned no video format description");
+            if let Some(profile) = self.prores {
+                ensure!(CMFormatDescriptionGetMediaSubType(hint) == profile.tag,
+                    "VideoToolbox returned a different ProRes profile");
+                if profile.alpha {
+                    let block = CMSampleBufferGetDataBuffer(sample.0);
+                    let mut header = [0_u8; 26];
+                    ensure!(!block.is_null(), "ProRes sample contains no encoded frame");
+                    status(CMBlockBufferCopyDataBytes(block, 0, header.len(), header.as_mut_ptr().cast()),
+                        "ProRes frame header read")?;
+                    ensure!(&header[4..8] == b"icpf" && matches!(header[25] & 15, 1 | 2),
+                        "VideoToolbox did not encode a ProRes alpha plane");
+                }
+            }
+            if let Some(transfer) = self.hdr {
+                if self.prores.is_none() {
+                    let mut count = 0;
+                    let mut bytes = std::ptr::null();
+                    let mut length = 0;
+                    status(
+                        CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                            hint, 0, &mut bytes, &mut length, &mut count, null_mut(),
+                        ),
+                        "VideoToolbox HEVC parameter set query",
+                    )?;
+                    let mut main10 = false;
+                    for index in 0..count {
+                        status(
+                            CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                                hint, index, &mut bytes, &mut length, null_mut(), null_mut(),
+                            ),
+                            "VideoToolbox HEVC parameter set read",
+                        )?;
+                        if !bytes.is_null() && is_10_bit_420_sps(std::slice::from_raw_parts(bytes, length)) == Some(true) {
+                            main10 = true;
+                            break;
+                        }
+                    }
+                    ensure!(main10, "VideoToolbox did not produce 10-bit 4:2:0 HEVC. Try a different device or choose SDR.");
+                }
+                for (key, expected) in [
+                    (kCMFormatDescriptionExtension_ColorPrimaries, kCVImageBufferColorPrimaries_ITU_R_2020),
+                    (kCMFormatDescriptionExtension_TransferFunction, transfer_value(transfer)),
+                    (kCMFormatDescriptionExtension_YCbCrMatrix, kCVImageBufferYCbCrMatrix_ITU_R_2020),
+                ] {
+                    let actual = CMFormatDescriptionGetExtension(hint, key);
+                    ensure!(!actual.is_null() && CFEqual(actual, expected) != 0,
+                        "VideoToolbox did not preserve HDR color signaling. Try a different device or choose SDR.");
+                }
+            }
             let video: *mut Object = msg_send![class!(AVAssetWriterInput), assetWriterInputWithMediaType:media.0 outputSettings:null_mut::<Object>() sourceFormatHint:hint];
-            ensure!(!video.is_null(), "Cannot create the H.264 track");
+            ensure!(!video.is_null(), "Cannot create the compressed video track");
             let _: () = msg_send![video, retain];
             let video = Obj(video);
             let _: () = msg_send![video.0,setExpectsMediaDataInRealTime:NO];
             let can: objc::runtime::BOOL = msg_send![self.writer.0,canAddInput:video.0];
-            ensure!(can == YES, "AVAssetWriter rejected the H.264 track");
+            ensure!(can == YES, "AVAssetWriter rejected the compressed video track");
             let _: () = msg_send![self.writer.0,addInput:video.0];
             let started: objc::runtime::BOOL = msg_send![self.writer.0, startWriting];
-            ensure!(started == YES, "Cannot start MP4 writer: {}", self.error());
+            ensure!(started == YES, "Cannot start AVAssetWriter: {}", self.error());
             let _: () = msg_send![self.writer.0,startSessionAtSourceTime:Time::new(0,self.fps)];
             self.video = Some(video);
         }
@@ -1141,7 +1494,7 @@ impl Encoder {
         if ok != YES {
             let time = unsafe { CMSampleBufferGetPresentationTimeStamp(sample.0) };
             anyhow::bail!(
-                "Cannot append MP4 {track} sample, PTS={}/{}: {}",
+                "Cannot append {track} sample, PTS={}/{}: {}",
                 time.value,
                 time.scale,
                 self.error()
@@ -1233,7 +1586,7 @@ impl Encoder {
             let state: i64 = unsafe { msg_send![self.writer.0, status] };
             ensure!(
                 state == 1,
-                "MP4 writer stopped during {goal:?}: {}",
+                "AVAssetWriter stopped during {goal:?}: {}",
                 self.error()
             );
             let mut progressed = false;
@@ -1295,7 +1648,7 @@ impl Encoder {
             } else {
                 ensure!(
                     idle_since.elapsed() < Duration::from_secs(30),
-                    "MP4 writer stalled during {goal:?}: video_ready={} audio_ready={}; {}",
+                    "AVAssetWriter stalled during {goal:?}: video_ready={} audio_ready={}; {}",
                     Self::ready(self.video.as_ref().unwrap()),
                     Self::ready(&self.audio),
                     self.error()
@@ -1307,7 +1660,7 @@ impl Encoder {
     pub fn finish(&mut self, pcm16: &[u8]) -> Result<()> {
         ensure!(
             self.try_finish(pcm16)?,
-            "VideoToolbox interrupted; resume before finalizing MP4"
+            "VideoToolbox interrupted; resume before finalizing the video"
         );
         Ok(())
     }
@@ -1360,7 +1713,7 @@ impl Encoder {
         self.pump(pcm16, PumpGoal::Finish)?;
         unsafe {
             let ok: objc::runtime::BOOL = msg_send![self.writer.0, finishWriting];
-            ensure!(ok == YES, "Cannot finalize MP4: {}", self.error());
+            ensure!(ok == YES, "Cannot finalize video: {}", self.error());
         }
         self.complete = true;
         Ok(true)
@@ -1714,7 +2067,7 @@ mod tests {
             const RATE: u32 = 48_000;
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("native.mp4");
-            let mut encoder = Encoder::new(&path, width, height, fps, 4_000_000, RATE).unwrap();
+            let mut encoder = Encoder::new(&path, width, height, fps, 4_000_000, RATE, None).unwrap();
             let red = [255u8, 0, 0, 255].repeat(width as usize * height as usize);
             let blue = [0u8, 0, 255, 255].repeat(width as usize * height as usize);
             // Nonzero stereo PCM lets the decoder test both sample count and

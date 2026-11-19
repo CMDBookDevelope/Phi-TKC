@@ -172,11 +172,11 @@ onMounted(() => {
   flex-direction: row;
   flex-shrink: 0;
   overflow: hidden;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.2s cubic-bezier(0.65, 0, 0.35, 1), box-shadow 0.2s cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 .chart-card:hover {
-  transform: translateY(-2px);
+  transform: none;
 }
 
 .chart-cover {

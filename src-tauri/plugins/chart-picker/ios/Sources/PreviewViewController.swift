@@ -1,6 +1,82 @@
 import UIKit
 import AVFoundation
+import Metal
+import QuartzCore
 import PhiTKCNativeBridge
+
+@available(iOS 16.0, *)
+private final class HDRPreviewView: UIView {
+    override class var layerClass: AnyClass { CAMetalLayer.self }
+
+    private let texture: MTLTexture
+    private let queue: MTLCommandQueue
+    private let availableTexture = DispatchSemaphore(value: 1)
+    private var pixels: Data
+
+    init?(width: Int, height: Int) {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let queue = device.makeCommandQueue(),
+              let colorSpace = CGColorSpace(name: CGColorSpace.extendedLinearITUR_2020) else { return nil }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba16Float, width: width, height: height, mipmapped: false
+        )
+        descriptor.storageMode = .shared
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        self.texture = texture
+        self.queue = queue
+        pixels = Data(count: width * height * 8)
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        isOpaque = true
+        let metalLayer = layer as! CAMetalLayer
+        metalLayer.device = device
+        metalLayer.pixelFormat = .rgba16Float
+        metalLayer.framebufferOnly = false
+        metalLayer.colorspace = colorSpace
+        metalLayer.wantsExtendedDynamicRangeContent = true
+        // Both preview modes share the renderer's display-referred linear
+        // output. Let Core Animation adapt that luminance to the screen.
+        metalLayer.edrMetadata = .hdr10(displayInfo: nil, contentInfo: nil, opticalOutputScale: 100)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    // Returns -1 for a finished session, 0 when there's no new presentation,
+    // and 1 once an HDR frame has been queued for the display.
+    func presentFrame(session: UInt64) -> Int32 {
+        guard availableTexture.wait(timeout: .now()) == .success else { return 0 }
+        var committed = false
+        defer {
+            if !committed { availableTexture.signal() }
+        }
+        let status = pixels.withUnsafeMutableBytes { bytes in
+            phi_tkc_preview_read_frame_hdr(session, bytes.bindMemory(to: UInt8.self).baseAddress,
+                                           numericCast(bytes.count))
+        }
+        guard status == 1 else { return status }
+        let metalLayer = layer as! CAMetalLayer
+        let renderSize = CGSize(width: texture.width, height: texture.height)
+        if metalLayer.drawableSize != renderSize { metalLayer.drawableSize = renderSize }
+        guard let drawable = metalLayer.nextDrawable(),
+              let command = queue.makeCommandBuffer(),
+              let blit = command.makeBlitCommandEncoder() else { return 0 }
+        let region = MTLRegionMake2D(0, 0, texture.width, texture.height)
+        pixels.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) in
+            texture.replace(region: region, mipmapLevel: 0, withBytes: bytes.baseAddress!,
+                            bytesPerRow: texture.width * 8)
+        }
+        blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0,
+                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0), sourceSize: region.size,
+                  to: drawable.texture, destinationSlice: 0, destinationLevel: 0,
+                  destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+        blit.endEncoding()
+        command.addCompletedHandler { [availableTexture] _ in availableTexture.signal() }
+        command.present(drawable)
+        command.commit()
+        committed = true
+        return 1
+    }
+}
 
 // UIKit owns the full-screen presentation. Its aspect-fit rectangle is shared
 // by drawing and touch conversion, including after a device rotation.
@@ -8,6 +84,15 @@ private final class PreviewImageView: UIView {
     let imageView = UIImageView()
     let session: UInt64
     let imageSize: CGSize
+    var hdrView: UIView? {
+        didSet {
+            oldValue?.removeFromSuperview()
+            if let hdrView = hdrView {
+                insertSubview(hdrView, aboveSubview: imageView)
+                hdrView.frame = imageRect
+            }
+        }
+    }
     init(session: UInt64, width: Int, height: Int) {
         self.session = session
         imageSize = CGSize(width: width, height: height)
@@ -22,6 +107,7 @@ private final class PreviewImageView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         imageView.frame = bounds
+        hdrView?.frame = imageRect
     }
     private var imageRect: CGRect {
         let scale = min(bounds.width / imageSize.width, bounds.height / imageSize.height)
@@ -54,6 +140,7 @@ final class PreviewViewController: UIViewController {
     private let width: Int
     private let height: Int
     private let showFps: Bool
+    private let wantsHDR: Bool
     private let previousOrientation: UIInterfaceOrientation
     private let completed: () -> Void
     private var pixels: Data
@@ -68,12 +155,13 @@ final class PreviewViewController: UIViewController {
     private weak var previewScene: UIWindowScene?
     private weak var presenter: UIViewController?
 
-    init(session: UInt64, width: Int, height: Int, showFps: Bool,
+    init(session: UInt64, width: Int, height: Int, showFps: Bool, colorSpace: String?,
          previousOrientation: UIInterfaceOrientation, completed: @escaping () -> Void) {
         self.session = session
         self.width = width
         self.height = height
         self.showFps = showFps
+        wantsHDR = ["rec2100_pq", "rec2100-pq", "rec2100_hlg", "rec2100-hlg"].contains(colorSpace ?? "")
         self.previousOrientation = previousOrientation
         self.completed = completed
         pixels = Data(count: width * height * 4)
@@ -159,8 +247,22 @@ final class PreviewViewController: UIViewController {
     }
     private func setActive(_ active: Bool) {
         if active { configureFrameRate() }
+        updateHDR(active: active)
         phi_tkc_preview_active(session, active ? 1 : 0)
         link?.isPaused = !active
+    }
+    private func updateHDR(active: Bool) {
+        guard let image = view as? PreviewImageView else { return }
+        if active && wantsHDR, #available(iOS 16.0, *),
+           let screen = image.window?.screen, screen.potentialEDRHeadroom > 1.0 {
+            if image.hdrView == nil, let hdrView = HDRPreviewView(width: width, height: height) {
+                image.hdrView = hdrView
+                phi_tkc_preview_set_hdr(session, 1)
+            }
+        } else if image.hdrView != nil {
+            phi_tkc_preview_set_hdr(session, 0)
+            image.hdrView = nil
+        }
     }
     @objc private func frame(_ link: CADisplayLink) {
         // The display link presents the latest completed frame. Rust renders
@@ -168,6 +270,16 @@ final class PreviewViewController: UIViewController {
         if let label = fpsLabel {
             let text = String(format: "%.1f FPS", phi_tkc_preview_fps(session))
             if text != label.text { label.text = text }
+        }
+        guard let image = view as? PreviewImageView else { return }
+        if #available(iOS 16.0, *), let hdrView = image.hdrView as? HDRPreviewView {
+            let status = hdrView.presentFrame(session: session)
+            if status < 0 { close(); return }
+            if status == 1 {
+                loading?.removeFromSuperview()
+                loading = nil
+            }
+            return
         }
         let status = pixels.withUnsafeMutableBytes { bytes in
             phi_tkc_preview_read_frame(session, bytes.bindMemory(to: UInt8.self).baseAddress,
@@ -183,7 +295,7 @@ final class PreviewViewController: UIViewController {
                   shouldInterpolate: true, intent: .defaultIntent) else { return }
         loading?.removeFromSuperview()
         loading = nil
-        (view as? PreviewImageView)?.imageView.image = UIImage(cgImage: cgImage)
+        image.imageView.image = UIImage(cgImage: cgImage)
     }
     @objc private func close() {
         guard !closed else { return }
@@ -218,6 +330,7 @@ final class PreviewViewController: UIViewController {
         }
     }
     private func tearDown() {
+        updateHDR(active: false)
         link?.invalidate()
         link = nil
         observers.forEach { NotificationCenter.default.removeObserver($0) }

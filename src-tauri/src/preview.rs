@@ -1,3 +1,6 @@
+#[path = "preview_hdr.rs"]
+mod hdr;
+
 use crate::render::{build_player, RenderParams};
 use anyhow::Result;
 use macroquad::prelude::*;
@@ -9,7 +12,13 @@ use prpr::{
     ui::{FontArc, TextPainter, Ui},
     Main,
 };
-use std::{collections::VecDeque, io::BufRead, time::{Duration, Instant}};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    io::BufRead,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 struct BaseScene(Option<NextScene>, bool);
 impl Scene for BaseScene {
     fn on_result(&mut self, _tm: &mut TimeManager, result: Box<dyn std::any::Any>) -> Result<()> {
@@ -58,6 +67,16 @@ pub async fn main() -> Result<()> {
     let fs = fs::fs_from_file(&params.path)?;
     let info = params.info;
     let mut config = params.config.to_config();
+    // The native Vulkan window may move between HDR and SDR outputs. Keep the
+    // scene in linear HDR and read the current swapchain encoding every frame.
+    config.hdr_output = params.config.is_hdr()
+        && macroquad::window::miniquad_context().rendering_backend()
+            != macroquad::miniquad::conf::RenderingBackend::OpenGL;
+    let hdr_material = config.hdr_output.then(hdr::load).transpose()?;
+    let hdr_frame = Rc::new(RefCell::new(hdr_material.map(|_| {
+        hdr::Frame::new((screen_width() as u32, screen_height() as u32))
+    })));
+    let scene_frame = Rc::clone(&hdr_frame);
     config.mods = config.autoplay.unwrap_or(false).then(|| config.mods | Mods::AUTOPLAY).unwrap_or_else(|| config.mods & !Mods::AUTOPLAY);
 
     let font = FontArc::try_from_vec(load_file("font.ttf").await?)?;
@@ -84,7 +103,7 @@ pub async fn main() -> Result<()> {
             false,
         )),
         ctm,
-        None,
+        move || scene_frame.borrow().as_ref().map(hdr::Frame::scene),
     )
     .await?;
     let mut is_fullscreen = false;
@@ -95,15 +114,41 @@ pub async fn main() -> Result<()> {
     let mut frame_times = VecDeque::with_capacity(100);
     let mut frame_sum = 0.0;
     let mut measured = Vec::new();
+    let mut last_color_space = None;
     loop {
         let frame_start = Instant::now();
         if is_key_pressed(KeyCode::F11) {
             is_fullscreen = !is_fullscreen;
             set_fullscreen(is_fullscreen);
         }
-        main.update()?;
-        let updated = Instant::now();
-        main.render(&mut painter)?;
+        let updated;
+        if let Some(material) = hdr_material {
+            let size = (screen_width() as u32, screen_height() as u32);
+            if size.0 == 0 || size.1 == 0 {
+                next_frame().await;
+                continue;
+            }
+            let mut frame = hdr_frame.borrow_mut();
+            if frame.as_ref().is_some_and(|frame| frame.size() != size) {
+                *frame = Some(hdr::Frame::new(size));
+            }
+            drop(frame);
+            let color_space = hdr::color_space();
+            if last_color_space != Some(color_space) {
+                log::info!("Preview presentation color space: {color_space:?}");
+                last_color_space = Some(color_space);
+            }
+            main.update()?;
+            updated = Instant::now();
+            let frame = hdr_frame.borrow();
+            let frame = frame.as_ref().unwrap();
+            main.render_with_overlay_target(&mut painter, Some(frame.overlay()))?;
+            frame.present(material, color_space);
+        } else {
+            main.update()?;
+            updated = Instant::now();
+            main.render(&mut painter)?;
+        }
         let rendered = Instant::now();
         if main.should_exit() {
             break;

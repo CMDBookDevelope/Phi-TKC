@@ -1,6 +1,5 @@
 prpr::tl_file!("render");
 
-use crate::Path;
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
@@ -12,7 +11,7 @@ use log::{debug, info, warn};
 use term_size::dimensions;
 use macroquad::{miniquad::{MipmapFilter, RenderPass as MQRenderPass, Texture, TextureFormat, TextureParams, TextureWrap}, prelude::*, window::miniquad_context};
 use prpr::{
-    config::{ChallengeModeColor, Config, Mods},
+    config::{BackgroundVideoPlayback, ChallengeModeColor, Config, HdrSettings, Mods},
     core::{MSRenderTarget, RhythmComposite, RhythmLayout, RhythmNoteSelection, RhythmStrip},
     ext::SafeTexture,
     fs,
@@ -29,7 +28,7 @@ use std::{
     collections::{BTreeMap, VecDeque},
     io::{BufRead, BufWriter, Write},
     ops::DerefMut,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     rc::Rc,
     sync::{
@@ -89,6 +88,19 @@ pub struct RenderConfig {
     pub bitrate: String,
     pub watermark: String,
     pub background: bool,
+    /// Background source: `chart`, `solid`, `video`, or `none`.
+    /// `background` remains as a compatibility alias for `chart`.
+    pub background_mode: String,
+    pub background_color: String,
+    pub background_video: Option<String>,
+    pub background_video_playback: BackgroundVideoPlayback,
+    /// Output transfer/colour signalling. SDR defaults to Rec.709.
+    pub color_space: String,
+    /// Per-layer HDR tone mapping controls. Kept as JSON so older clients can
+    /// omit the field while newer clients can add controls independently.
+    pub hdr_settings: HdrSettings,
+    pub stereo_enabled: bool,
+    pub stereo_strength: f32,
     pub video: bool,
     pub audio_bit: Option<u32>,
     pub audio_format: String,
@@ -141,6 +153,216 @@ pub struct RenderConfig {
     pub gpu_yuv: bool,
 }
 
+#[tauri::command]
+pub async fn get_encoder_availability(
+    color_space: Option<String>,
+) -> Result<std::collections::HashMap<String, Vec<String>>, tauri::ipc::InvokeError> {
+    let color_space = ExportColorSpace::parse(color_space.as_deref().unwrap_or("rec709"));
+    tokio::task::spawn_blocking(move || query_encoder_availability(color_space))
+        .await
+        .map_err(|error| tauri::ipc::InvokeError::from(error.to_string()))?
+        .map_err(tauri::ipc::InvokeError::from_anyhow)
+}
+
+fn query_encoder_availability(
+    color_space: ExportColorSpace,
+) -> Result<std::collections::HashMap<String, Vec<String>>> {
+    let mut support = std::collections::HashMap::<String, Vec<String>>::new();
+    #[cfg(target_os = "android")]
+    {
+        use crate::android_render::mobile_hdr::Transfer;
+        let (codecs, transfer): (&[&str], _) = match color_space {
+            ExportColorSpace::Rec2100Pq => (&["hevc"], Some(Transfer::Pq)),
+            ExportColorSpace::Rec2100Hlg => (&["hevc"], Some(Transfer::Hlg)),
+            _ => (&["h264", "hevc"], None),
+        };
+        for &codec in codecs {
+            if let Ok(encoder) = crate::android_media::Encoder::video(320, 240, 2_000_000, 30, 1, codec, transfer) {
+                support.insert(codec.to_owned(), vec![encoder.identity().to_owned()]);
+            }
+        }
+        for profile in crate::android_render::prores_availability(transfer)? {
+            support.insert(profile.to_owned(), vec!["cpu".to_owned()]);
+        }
+    }
+    #[cfg(target_os = "ios")]
+    {
+        use crate::apple_media::{Encoder, ProRes};
+        use crate::apple_render::mobile_hdr::Transfer;
+        let (codec, transfer) = match color_space {
+            ExportColorSpace::Rec2100Pq => ("hevc", Some(Transfer::Pq)),
+            ExportColorSpace::Rec2100Hlg => ("hevc", Some(Transfer::Hlg)),
+            _ => ("h264", None),
+        };
+        let directory = tempfile::tempdir()?;
+        if Encoder::probe(&directory.path().join("probe.mp4"), transfer, None).is_ok() {
+            support.insert(codec.to_owned(), vec!["videotoolbox".into()]);
+        }
+        for name in ProRes::NAMES {
+            let profile = ProRes::parse(name).expect("known ProRes profile");
+            if Encoder::probe(&directory.path().join(format!("{name}.mov")), transfer, Some(profile)).is_ok() {
+                support.insert(name.to_owned(), vec!["videotoolbox".into()]);
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if let Some(ffmpeg) = find_ffmpeg()? {
+        let path = Path::new(&ffmpeg);
+        let result = cmd_hidden(path).args(["-hide_banner", "-encoders"]).output()?;
+        let listing = String::from_utf8_lossy(&result.stdout);
+        let known = |name: &str| listing.lines().any(|line| line.split_whitespace().nth(1) == Some(name));
+        for codec in ["h264", "hevc", "av1"] {
+            let mut options = Vec::new();
+            for vendor in ["nvenc", "qsv", "amf", "vulkan"] {
+                if color_space.is_hdr() && vendor == "vulkan" {
+                    continue;
+                }
+                let name = format!("{codec}_{vendor}");
+                if known(&name) && probe_video_encoder_for_color(path, &name, None, color_space) {
+                    options.push(vendor.to_owned());
+                }
+            }
+            if software_encoders(codec).iter().any(|name| known(name) && probe_video_encoder_for_color(path, name, None, color_space)) {
+                options.push("cpu".to_owned());
+            }
+            support.insert(codec.to_owned(), options);
+        }
+        for profile_name in ["prores_422_hq", "prores_422", "prores_422_lt", "prores_422_proxy", "prores_4444", "prores_4444_xq", "prores_4444_alpha"] {
+            let profile = prores_profile(profile_name).unwrap();
+            if color_space.is_hdr() && profile.alpha {
+                continue;
+            }
+            let mut options = Vec::new();
+            if known("prores_ks") && probe_video_encoder_for_color(path, "prores_ks", Some(profile), color_space) {
+                options.push("cpu".to_owned());
+            }
+            if known("prores_videotoolbox") && probe_video_encoder_for_color(path, "prores_videotoolbox", Some(profile), color_space) {
+                options.push("metal".to_owned());
+            }
+            support.insert(profile_name.to_owned(), options);
+        }
+    }
+    Ok(support)
+}
+
+fn software_encoders(codec: &str) -> &'static [&'static str] {
+    match codec {
+        "h264" => &["libx264"],
+        "hevc" => &["libx265"],
+        "av1" => &["libsvtav1", "libaom-av1"],
+        _ => &[],
+    }
+}
+
+fn hdr_encoder_pixel_format(encoder: &str, profile: Option<ProresProfile>) -> &'static str {
+    match profile {
+        Some(profile) => profile.pixel_format,
+        None if encoder.ends_with("_nvenc") || encoder.ends_with("_qsv") || encoder.ends_with("_amf") => "p010le",
+        None => "yuv420p10le",
+    }
+}
+
+fn select_hdr_encoder(ffmpeg: &Path, config: &RenderConfig, color_space: ExportColorSpace) -> Result<String> {
+    let codec = config.video_codec.as_str();
+    let selected = config.encoder.as_str();
+    let software = software_encoders(codec);
+    let mut candidates = Vec::new();
+    match selected {
+        "auto" => {
+            if config.hardware_accel && !software.is_empty() {
+                candidates.extend(["nvenc", "qsv", "amf"].map(|vendor| format!("{codec}_{vendor}")));
+            }
+            candidates.extend(software.iter().map(|name| (*name).to_owned()));
+        }
+        "cpu" => candidates.extend(software.iter().map(|name| (*name).to_owned())),
+        "nvenc" | "qsv" | "amf" if config.hardware_accel && !software.is_empty() => {
+            candidates.push(format!("{codec}_{selected}"));
+        }
+        _ => {}
+    }
+    candidates.into_iter()
+        .find(|name| probe_video_encoder_for_color(ffmpeg, name, None, color_space))
+        .with_context(|| format!("No compatible 10-bit {codec} encoder for {selected} and {}", config.color_space))
+}
+
+fn probe_video_encoder_for_color(
+    ffmpeg: &Path,
+    encoder: &str,
+    profile: Option<ProresProfile>,
+    color_space: ExportColorSpace,
+) -> bool {
+    let mut command = cmd_hidden(ffmpeg);
+    command.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
+    if encoder.ends_with("_vulkan") {
+        command.args(["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"]);
+    }
+    command.args(["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30", "-frames:v", "1"]);
+    if let Some(filter) = color_space.ffmpeg_filter(profile.map_or("yuv420p10le", |profile| profile.pixel_format)) {
+        command.args(["-vf", &format!("format=gbrpf32le,{filter}")]);
+        command.args(["-pix_fmt", hdr_encoder_pixel_format(encoder, profile)]);
+        command.args(color_space.ffmpeg_signaling().split_whitespace());
+    } else if encoder.ends_with("_vulkan") {
+        command.args(["-vf", "format=nv12,hwupload"]);
+    }
+    if let Some(profile) = profile {
+        command.args(["-profile:v", &profile.number.to_string(), "-pix_fmt", profile.pixel_format]);
+    }
+    command.args(["-c:v", encoder, "-f", "null", "-"]);
+    if color_space.is_hdr() {
+        // FFmpeg can accept an incompatible requested pixel format and choose 8-bit.
+        command.args(["-loglevel", "warning"]);
+        return command.stdout(Stdio::null()).output().is_ok_and(|output| {
+            output.status.success()
+                && !String::from_utf8_lossy(&output.stderr).contains("Incompatible pixel format")
+        });
+    }
+    command.stdout(Stdio::null()).stderr(Stdio::null());
+    command.status().is_ok_and(|status| status.success())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExportColorSpace {
+    Srgb,
+    Rec709,
+    Rec2100Pq,
+    Rec2100Hlg,
+}
+
+impl ExportColorSpace {
+    fn parse(value: &str) -> Self {
+        match value.to_ascii_lowercase().as_str() {
+            "rec2100_pq" | "rec2100-pq" => Self::Rec2100Pq,
+            "rec2100_hlg" | "rec2100-hlg" => Self::Rec2100Hlg,
+            "srgb" => Self::Srgb,
+            _ => Self::Rec709,
+        }
+    }
+
+    fn is_hdr(self) -> bool {
+        matches!(self, Self::Rec2100Pq | Self::Rec2100Hlg)
+    }
+
+    fn ffmpeg_filter(self, pixel_format: &str) -> Option<String> {
+        let transfer = match self {
+            Self::Rec2100Pq => "smpte2084",
+            Self::Rec2100Hlg => "arib-std-b67",
+            Self::Srgb | Self::Rec709 => return None,
+        };
+        Some(format!(
+            "zscale=pin=2020:tin=linear:p=2020:t={transfer}:npl=100:m=2020_ncl:r=limited,format={pixel_format}"
+        ))
+    }
+
+    fn ffmpeg_signaling(self) -> &'static str {
+        match self {
+            Self::Rec2100Pq => "-colorspace bt2020nc -color_primaries bt2020 -color_trc smpte2084 -color_range tv",
+            Self::Rec2100Hlg => "-colorspace bt2020nc -color_primaries bt2020 -color_trc arib-std-b67 -color_range tv",
+            Self::Srgb => "-colorspace bt709 -color_primaries bt709 -color_trc iec61966-2-1 -color_range tv",
+            Self::Rec709 => "-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv",
+        }
+    }
+}
+
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
@@ -166,6 +388,14 @@ impl Default for RenderConfig {
             bitrate: "28".to_string(),
             watermark: "".to_string(),
             background: false,
+            background_mode: "chart".into(),
+            background_color: "#000000".into(),
+            background_video: None,
+            background_video_playback: BackgroundVideoPlayback::Normal,
+            color_space: "rec709".into(),
+            hdr_settings: HdrSettings::default(),
+            stereo_enabled: false,
+            stereo_strength: 1.0,
             aggressive: false,
             challenge_color: ChallengeModeColor::Golden,
             challenge_rank: 45,
@@ -214,6 +444,20 @@ impl Default for RenderConfig {
 }
 
 impl RenderConfig {
+    pub(crate) fn is_hdr(&self) -> bool {
+        ExportColorSpace::parse(&self.color_space).is_hdr()
+    }
+
+    pub(crate) fn output_extension(&self) -> &'static str {
+        if prores_profile(&self.video_codec).is_some()
+            || (self.video && !self.audio_format.eq_ignore_ascii_case("flac"))
+        {
+            "mov"
+        } else {
+            "mp4"
+        }
+    }
+
     /// Keep the requested canvas intact; encoders require even dimensions.
     pub fn output_resolution(&self) -> Result<(u32, u32)> {
         self.validate_rhythm_speed()?;
@@ -241,6 +485,13 @@ impl RenderConfig {
     }
 
     pub fn to_config(&self) -> Config {
+        let background_mode = match self.background_mode.to_ascii_lowercase().as_str() {
+            "solid" => "solid",
+            "video" => "video",
+            "none" => "none",
+            _ => "chart",
+        };
+        let background_color = parse_background_color(&self.background_color);
         Config {
             aggressive: self.aggressive,
             challenge_color: self.challenge_color.clone(),
@@ -267,6 +518,12 @@ impl RenderConfig {
             autoplay: self.autoplay,
             watermark: self.watermark.clone(),
             background: self.background.clone(),
+            background_mode: background_mode.to_owned(),
+            background_color,
+            background_video: self.background_video.clone(),
+            background_video_playback: self.background_video_playback,
+            color_space: self.color_space.clone(),
+            hdr_settings: self.hdr_settings.clone(),
             disable_loading: self.disable_loading,
             hand_split: self.hand_split,
             note_speed_factor: self.note_speed_factor,
@@ -291,6 +548,23 @@ impl RenderConfig {
             rhythm_colors: self.rhythm_colors.clone(),
             ..Default::default()
         }
+    }
+}
+
+pub(crate) fn set_background_video_interval(config: &mut Config, fps: u32, skip: u64, frames: u64) {
+    if config.background_mode == "video" {
+        let fps = f64::from(fps.max(1));
+        config.background_video_interval = Some((skip as f64 / fps, frames.saturating_sub(skip) as f64 / fps));
+    }
+}
+
+fn parse_background_color(value: &str) -> [f32; 4] {
+    let hex = value.trim().trim_start_matches('#');
+    let parse = |s: &str| u8::from_str_radix(s, 16).unwrap_or(0) as f32 / 255.0;
+    match hex.len() {
+        6 if hex.bytes().all(|byte| byte.is_ascii_hexdigit()) => [parse(&hex[0..2]), parse(&hex[2..4]), parse(&hex[4..6]), 1.0],
+        8 if hex.bytes().all(|byte| byte.is_ascii_hexdigit()) => [parse(&hex[0..2]), parse(&hex[2..4]), parse(&hex[4..6]), parse(&hex[6..8])],
+        _ => [0.0, 0.0, 0.0, 1.0],
     }
 }
 
@@ -965,6 +1239,110 @@ fn encoder_qp(config: &RenderConfig, width: u32, height: u32) -> u8 {
 
 const KEYFRAME_INTERVAL_SECS: u32 = 2;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProresProfile {
+    pub(crate) number: u8,
+    pixel_format: &'static str,
+    pub(crate) alpha: bool,
+}
+
+pub(crate) fn prores_profile(codec: &str) -> Option<ProresProfile> {
+    let (number, pixel_format, alpha) = match codec {
+        "prores_422_proxy" => (0, "yuv422p10le", false),
+        "prores_422_lt" => (1, "yuv422p10le", false),
+        "prores_422" => (2, "yuv422p10le", false),
+        "prores_422_hq" => (3, "yuv422p10le", false),
+        "prores_4444" => (4, "yuv444p10le", false),
+        "prores_4444_alpha" => (4, "yuva444p10le", true),
+        "prores_4444_xq" => (5, "yuva444p12le", true),
+        _ => return None,
+    };
+    Some(ProresProfile { number, pixel_format, alpha })
+}
+
+pub(crate) fn stereo_pan(normalized_x: f32, strength: f32) -> f32 {
+    if !normalized_x.is_finite() || !strength.is_finite() {
+        return 0.0;
+    }
+    (normalized_x * strength.clamp(0.0, 1.0)).clamp(-1.0, 1.0)
+}
+
+pub(crate) fn stereo_gains(pan: f32) -> (f32, f32) {
+    let pan = if pan.is_finite() { pan.clamp(-1.0, 1.0) } else { 0.0 };
+    (1.0 - pan.max(0.0), 1.0 + pan.min(0.0))
+}
+
+#[cfg(test)]
+mod render_config_tests {
+    use super::*;
+
+    #[test]
+    fn prores_profiles_match_ffmpeg_profile_and_alpha_formats() {
+        let cases = [
+            ("prores_422_proxy", 0, "yuv422p10le", false),
+            ("prores_422_lt", 1, "yuv422p10le", false),
+            ("prores_422", 2, "yuv422p10le", false),
+            ("prores_422_hq", 3, "yuv422p10le", false),
+            ("prores_4444", 4, "yuv444p10le", false),
+            ("prores_4444_xq", 5, "yuva444p12le", true),
+            ("prores_4444_alpha", 4, "yuva444p10le", true),
+        ];
+        for (name, number, pixel_format, alpha) in cases {
+            assert_eq!(prores_profile(name), Some(ProresProfile { number, pixel_format, alpha }));
+        }
+        assert_eq!(prores_profile("h264"), None);
+    }
+
+    #[test]
+    fn stereo_pan_preserves_center_and_moves_notes_to_the_correct_channel() {
+        assert_eq!(stereo_pan(0.0, 1.0), 0.0);
+        assert_eq!(stereo_gains(0.0), (1.0, 1.0));
+        assert_eq!(stereo_pan(-0.75, 0.5), -0.375);
+        assert_eq!(stereo_gains(-1.0), (1.0, 0.0));
+        assert_eq!(stereo_gains(1.0), (0.0, 1.0));
+        assert_eq!(stereo_pan(f32::NAN, 1.0), 0.0);
+        assert_eq!(stereo_pan(2.0, 1.0), 1.0);
+    }
+
+    #[test]
+    fn legacy_and_partial_render_configs_keep_background_hdr_and_stereo_defaults() {
+        let legacy: RenderConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.background_mode, "chart");
+        assert!(!legacy.stereo_enabled);
+        assert_eq!(legacy.hdr_settings.ui.len(), 12);
+        let partial: RenderConfig = serde_json::from_str(r#"{"hdrSettings":{"ui":{"score":{"mode":"mapped"}}}}"#).unwrap();
+        assert_eq!(partial.hdr_settings.ui.get("score").unwrap().mode, "mapped");
+        assert_eq!(partial.hdr_settings.ui.len(), 1);
+    }
+
+    #[test]
+    fn background_colors_decode_and_reject_invalid_strings_without_panicking() {
+        assert_eq!(parse_background_color("#00FF80"), [0., 1., 128. / 255., 1.]);
+        assert_eq!(parse_background_color("FF0080CC"), [1., 0., 128. / 255., 204. / 255.]);
+        assert_eq!(parse_background_color("#12zzab"), [0., 0., 0., 1.]);
+        assert_eq!(parse_background_color("ééé"), [0., 0., 0., 1.]);
+    }
+
+    #[test]
+    fn local_prores_encoder_accepts_all_declared_profiles_and_selects_mov() {
+        let ffmpeg = find_ffmpeg().unwrap().unwrap();
+        for name in ["prores_422_proxy", "prores_422_lt", "prores_422", "prores_422_hq", "prores_4444", "prores_4444_xq", "prores_4444_alpha"] {
+            let profile = prores_profile(name).unwrap();
+            assert!(probe_video_encoder_for_color(Path::new(&ffmpeg), "prores_ks", Some(profile), ExportColorSpace::Rec709), "profile {name}");
+        }
+        let mut config = RenderConfig::default();
+        config.video_codec = "prores_422_hq".to_owned();
+        assert_eq!(config.output_extension(), "mov");
+        config.video = false;
+        assert_eq!(config.output_extension(), "mov");
+        config.video_codec = "h264".to_owned();
+        assert_eq!(config.output_extension(), "mp4");
+        config.video = true;
+        config.audio_format = "flac".to_owned();
+        assert_eq!(config.output_extension(), "mp4");
+    }
+}
+
 pub async fn main() -> Result<()> {
     use crate::ipc::client::*;
 
@@ -1022,6 +1400,13 @@ async fn render_impl(
     let process_start = Instant::now();
     let (vw, vh) = params.config.output_resolution()?;
     let (game_width, game_height) = params.config.canvas_resolution()?;
+    let prores = prores_profile(&params.config.video_codec);
+    let color_space = ExportColorSpace::parse(&params.config.color_space);
+    if color_space.is_hdr() && prores.is_some_and(|profile| profile.alpha) {
+        bail!("HDR output is not supported with alpha ProRes profiles");
+    }
+    let hdr_filter = color_space.ffmpeg_filter(prores.map_or("yuv420p10le", |profile| profile.pixel_format));
+    let output_path = if prores.is_some() { output_path.with_extension("mov") } else { output_path };
     let path = params.path;
     info!("Preparing chart: {}", path.display());
 
@@ -1033,10 +1418,28 @@ async fn render_impl(
         bail!("FFmpeg not found")
     };
     debug!("Using ffmpeg: {}", ffmpeg);
+    let ffmpeg_path = Path::new(&ffmpeg);
+    if let Some(profile) = prores {
+        let encoder = match params.config.encoder.as_str() {
+            "auto" | "cpu" => "prores_ks",
+            "metal" | "videotoolbox" => "prores_videotoolbox",
+            selected => bail!("encoder '{selected}' does not support ProRes"),
+        };
+        if !probe_video_encoder_for_color(ffmpeg_path, encoder, Some(profile), color_space) {
+            bail!("FFmpeg ProRes encoder '{encoder}' cannot encode profile {} ({}) on this device", profile.number, profile.pixel_format);
+        }
+    }
+
+    let hdr_encoder = if color_space.is_hdr() && prores.is_none() {
+        Some(select_hdr_encoder(ffmpeg_path, &params.config, color_space)?)
+    } else {
+        None
+    };
 
     let mut painter = TextPainter::new(font);
 
     let mut config = params.config.to_config();
+    config.hdr_output = color_space.is_hdr();
     config.mods = Mods::AUTOPLAY;
     config.interactive = false;
 
@@ -1152,7 +1555,7 @@ async fn render_impl(
         debug!("music Time:{:?}", start_time.elapsed());
     }
 
-    let mut place = |pos: f64, clip: &AudioClip, volume: f32| {
+    let mut place = |pos: f64, clip: &AudioClip, volume: f32, pan: f32| {
         let position = (pos * sample_rate_f64).round() as usize * 2;
         if position >= output.len() {
             return 0;
@@ -1164,11 +1567,12 @@ async fn render_impl(
         let output_ptr = unsafe { output.as_mut_ptr().add(position) };
         let frames_ptr = clip.frames().as_ptr();
 
+        let (left_gain, right_gain) = stereo_gains(pan);
         for i in 0..valid_frames {
             unsafe {
                 let sample = (*frames_ptr.add(i)).0 * volume;
-                *output_ptr.add(i * 2) += sample;
-                *output_ptr.add(i * 2 + 1) += sample;
+                *output_ptr.add(i * 2) += sample * left_gain;
+                *output_ptr.add(i * 2 + 1) += sample * right_gain;
             }
         }
         valid_frames
@@ -1179,6 +1583,9 @@ async fn render_impl(
 
         let offset_f64 = offset as f64;
         let o_offset = O + offset_f64 + audio_delay;
+        let hit_positions = params.config.stereo_enabled.then(||
+            chart.note_hit_positions(&config, game_width as f32 / game_height as f32)
+        );
 
         //debug!("SFX mixing: offset={:.6}s (includes {:.6}s delay)", o_offset, audio_delay);
 
@@ -1194,6 +1601,7 @@ async fn render_impl(
             let lines_ptr = chart.lines.as_ptr();
             let lines_len = chart.lines.len();
 
+            let mut note_offset = 0;
             for i in 0..lines_len {
                 let line = &*lines_ptr.add(i);
                 let notes_ptr = line.notes.as_ptr();
@@ -1203,9 +1611,18 @@ async fn render_impl(
                     if !note.fake {
                         let sfx = &*sfx_lut[note.kind.order() as usize];
                         let time = o_offset + note.time as f64;
-                        place(time, sfx, volume_sfx);
+                        let pan = if let Some(hit_positions) = &hit_positions {
+                            stereo_pan(
+                                hit_positions[note_offset + j].x,
+                                params.config.stereo_strength,
+                            )
+                        } else {
+                            0.0
+                        };
+                        place(time, sfx, volume_sfx, pan);
                     }
                 }
+                note_offset += notes_len;
             }
         }
 
@@ -1215,15 +1632,19 @@ async fn render_impl(
     let mut pos = O + length + A + audio_delay;
     debug!("Ending music start: {:.6}s", pos);
 
-    while place(pos, &ending, volume_music) != 0 && params.config.ending_length > 0.1 {
+    while place(pos, &ending, volume_music, 0.0) != 0 && params.config.ending_length > 0.1 {
         pos += ending.frame_count() as f64 / sample_rate_f64;
     }
     let mixing_s = mark!("mixing");
 
     let audio_bit = params.config.audio_bit;
-    let audio_format = params.config.audio_format.to_lowercase();
+    let mut audio_format = params.config.audio_format.to_lowercase();
+    if prores.is_some() && matches!(audio_format.as_str(), "flac" | "opus") {
+        info!("Using 24-bit PCM audio for ProRes MOV compatibility");
+        audio_format = "pcm".into();
+    }
 
-    let supported_formats = ["flac", "mp3", "aac", "opus", "wav"];
+    let supported_formats = ["flac", "mp3", "aac", "opus", "wav", "pcm"];
     if !supported_formats.contains(&audio_format.as_str()) {
         bail!
         ("Unsupported audio format: {}. Supported formats are: {}",
@@ -1243,7 +1664,7 @@ async fn render_impl(
 
     let (audio_mux_args, output_format) = if let Some(bit) = audio_bit {
         (
-            format!("-c:a pcm_f{}le", bit),
+            format!("-c:a pcm_s{}le", bit),
             "wav".to_string(),
         )
     } else {
@@ -1256,7 +1677,8 @@ async fn render_impl(
             "mp3" => ("-c:a libmp3lame".to_string(), "mp3".to_string()),
             "aac" => ("-c:a aac".to_string(), "mp4".to_string()),
             "opus" => ("-c:a libopus".to_string(), "opus".to_string()),
-            "wav" => ("-c:a pcm_f16le".to_string(), "wav".to_string()),
+            "wav" => ("-c:a pcm_s16le".to_string(), "wav".to_string()),
+            "pcm" => ("-c:a pcm_s24le".to_string(), "wav".to_string()),
             _ => {
                 warn!("Unknown audio format '{}', using AAC/MP4 as default", audio_format);
                 ("-c:a aac".to_string(), "mp4".to_string())
@@ -1333,6 +1755,7 @@ async fn render_impl(
         info!("AMD GPU: using FFmpeg AMF instead of Vulkan Video; software encoding is the fallback");
     }
     let want_vulkan_video = params.config.hardware_accel
+        && !color_space.is_hdr()
         && params.config.video_codec == "h264"
         && !headless_vulkan
         && !amd_gpu
@@ -1371,7 +1794,9 @@ async fn render_impl(
         }
     }
 
-    let yuv_count = if !vulkan_video && vw % 2 == 0 && vh % 2 == 0 {
+    let yuv_count = if prores.is_some() {
+        0
+    } else if !vulkan_video && vw % 2 == 0 && vh % 2 == 0 {
         2
     } else {
         1
@@ -1379,7 +1804,8 @@ async fn render_impl(
     let yuvs: Vec<YuvTarget> = (0..yuv_count)
         .filter_map(|_| YuvTarget::new(vw, vh).ok())
         .collect();
-    let force_rgba_readback = std::env::var("PHITK_READBACK").is_ok_and(|mode| mode == "rgba");
+    let force_rgba_readback = color_space.is_hdr()
+        || std::env::var("PHITK_READBACK").is_ok_and(|mode| mode == "rgba");
     let mut ffmpeg_nv12 = if !force_rgba_readback && !vulkan_video && yuvs.len() == 2 {
         match crate::vulkan_readback::Nv12Readback::new(vw, vh, 8) {
             Some(readback) => {
@@ -1402,28 +1828,37 @@ async fn render_impl(
     };
     let nv12_mode = ffmpeg_nv12.is_some();
     let mst_count = if nv12_mode { 2 } else { 1 };
+    let alpha = prores.is_some_and(|profile| profile.alpha);
+    config.transparent_background = alpha;
     let msts: Vec<Rc<MSRenderTarget>> = (0..mst_count)
-        .map(|_| Rc::new(MSRenderTarget::new((game_width, game_height), config.sample_count)))
+        .map(|_| {
+            let size = (game_width, game_height);
+            Rc::new(if config.hdr_output { MSRenderTarget::new_hdr(size, 1) }
+                else if alpha { MSRenderTarget::new_rgba(size, config.sample_count) }
+                else { MSRenderTarget::new(size, config.sample_count) })
+        })
         .collect();
-    let rhythm = RhythmComposite::new(game_width, game_height, rhythm_strip, mst_count)?;
-    let rgba_readback = (!nv12_mode && !vulkan_video).then(|| RgbaReadback::new(vw, vh));
+    let rhythm = if config.hdr_output {
+        RhythmComposite::new_hdr(game_width, game_height, rhythm_strip, mst_count)?
+    } else {
+        RhythmComposite::new_with_alpha(game_width, game_height, rhythm_strip, mst_count, alpha)?
+    };
+    let rgba_readback = (!nv12_mode && !vulkan_video && !config.hdr_output).then(|| RgbaReadback::new(vw, vh));
     let mst_slot = Rc::new(Cell::new(0usize));
     let my_time: Rc<RefCell<f64>> = Rc::new(RefCell::new(0.));
     let tm = TimeManager::manual(Box::new({
         let my_time = Rc::clone(&my_time);
         move || *(*my_time).borrow()
     }));
-    if headless_vulkan && !nv12_mode {
-        bail!(
-            "headless Vulkan export needs even dimensions and the NV12 readback path \
-             (got {vw}x{vh}); use an even resolution or run with a display"
-        );
-    }
-    if nv12_mode && !crate::vulkan_readback::enable_offscreen_video() {
+    if (nv12_mode || headless_vulkan) && !crate::vulkan_readback::enable_offscreen_video() {
         bail!("failed to enable the Vulkan offscreen video mode");
     }
     mark!("offscreen/readback setup");
-    //static MSAA: AtomicBool = AtomicBool::new(false);
+    let fps = params.config.fps;
+    let frames = (video_length * fps as f64).ceil() as u64;
+    let out_frames = frames.saturating_sub(skip);
+    anyhow::ensure!(out_frames > 0, "render duration contains no output frames");
+    set_background_video_interval(&mut config, fps, skip, frames);
     let player = build_player(&params.config).await?;
     let mut main = Main::new(
         Box::new(
@@ -1447,9 +1882,6 @@ async fn render_impl(
     const O: f64 = LoadingScene::TOTAL_TIME as f64 + GameScene::BEFORE_TIME as f64;
     const A: f64 = 1.0;
 
-    let fps = params.config.fps;
-    let frames = (video_length * fps as f64).ceil() as u64;
-    let out_frames = frames.saturating_sub(skip);
     send(IPCEvent::StartRender(out_frames));
 
     static VULKAN_PROBE_LOCK: Mutex<()> = Mutex::new(());
@@ -1620,6 +2052,7 @@ async fn render_impl(
         }
     };
     let vendors: Vec<[&str; 3]> = match params.config.encoder.as_str() {
+        _ if prores.is_some() || color_space.is_hdr() => vec![],
         "cpu" => vec![],
         "auto" | "vulkan" if amd_vulkan_fallback => vec![V_AMF, V_NV, V_QSV],
         "amf" => vec![V_AMF, V_NV, V_QSV, V_VK],
@@ -1672,7 +2105,7 @@ async fn render_impl(
         }
         if ok_for_codec { break; }
     }
-    if params.config.video_codec == "av1" {
+    if params.config.video_codec == "av1" && !color_space.is_hdr() {
         match test_encoder(ffmpeg.as_ref(), "libsvtav1") {
             Ok((ok, err)) => {
                 encoder_availability.av1_svt = ok;
@@ -1692,7 +2125,7 @@ async fn render_impl(
     ];
 
     for (name, detected, availability_flag) in cuvid_to_test {
-        if detected {
+        if detected && !color_space.is_hdr() {
             let (encoder_name, container_format) = if name == "h264_cuvid" {
                 ("libx264", "mpegts")
             } else if name == "hevc_cuvid" {
@@ -1768,7 +2201,7 @@ async fn render_impl(
             }
         }
     }
-    if !vulkan_video {
+    if !vulkan_video && !color_space.is_hdr() {
         if let Ok((ok, err)) = test_encoder(ffmpeg.as_ref(), "libsvtav1") {
             encoder_availability.av1_svt = ok;
             if !ok {
@@ -1801,7 +2234,7 @@ async fn render_impl(
         }
     };
 
-    let want_dx = params.config.hardware_accel
+    let want_dx = !color_space.is_hdr() && params.config.hardware_accel
         && !vulkan_video
         && match encoder_type {
             "dx12" => true,
@@ -1818,7 +2251,7 @@ async fn render_impl(
     };
     let mut dx_selected: Option<DxEncoder> = None;
     let mut dx_codec_switched: Option<&str> = None;
-    if want_dx {
+    if want_dx && prores.is_none() {
         let mut tried = String::new();
         for enc in &dx_candidates {
             if probe_dx_encoder(ffmpeg.as_ref(), *enc) {
@@ -1996,18 +2429,30 @@ async fn render_impl(
     };
 
 
-    let mut ffmpeg_encoder = candidates
+    let mut ffmpeg_encoder = if let Some(encoder) = hdr_encoder.as_deref() {
+        encoder
+    } else if let Some(profile) = prores {
+        match encoder_type {
+            "metal" | "videotoolbox" => "prores_videotoolbox",
+            _ => {
+                let _ = profile;
+                "prores_ks"
+            }
+        }
+    } else { candidates
         .iter()
         .find(|&&(_name, available, _)| available)
         .map(|&(name, _, _)| name)
-        .expect("At least one software encoder is available.");
+        .expect("At least one software encoder is available.") };
 
     let dx_selected = match encoder_type {
         "dx12" => dx_selected,
         _ => dx_selected.filter(|_| matches!(ffmpeg_encoder, "libx264" | "libx265" | "libaom-av1")),
     };
+    if prores.is_none() {
     if let Some(enc) = &dx_selected {
         ffmpeg_encoder = enc.name;
+    }
     }
 
     if vulkan_video {
@@ -2065,7 +2510,8 @@ async fn render_impl(
         ffmpeg_encoder
     });
     let probe_s = mark!("encoder probe");
-    if ffmpeg_encoder == "libsvtav1"
+    if !color_space.is_hdr()
+        && ffmpeg_encoder == "libsvtav1"
         && encoder_type == "auto"
         && (encoder_availability.av1_nvenc
             || encoder_availability.av1_qsv
@@ -2184,7 +2630,7 @@ async fn render_impl(
         "-b:v"
     };
 
-    if params.config.hardware_accel && encoder_type != "cpu" {
+    if !color_space.is_hdr() && prores.is_none() && params.config.hardware_accel && encoder_type != "cpu" {
         let dx_ok = dx_selected.is_some();
         let any4 = |a: bool, b: bool, c: bool, d: bool| a || b || c || d || dx_ok;
 
@@ -2310,9 +2756,10 @@ async fn render_impl(
         }
         write!(&mut input_args, " -i {video_url} -i")?;
     } else {
+        let pixel_format = if color_space.is_hdr() { "gbrpf32le" } else { "rgba" };
         write!(
             &mut input_args,
-            "-f rawvideo -c:v rawvideo -s {vw}x{vh} -r {fps} -pix_fmt rgba"
+            "-f rawvideo -c:v rawvideo -s {vw}x{vh} -r {fps} -pix_fmt {pixel_format}"
         )?;
         if params.config.ffmpeg_thread {
             input_args.push_str(" -thread_queue_size 2048");
@@ -2320,14 +2767,7 @@ async fn render_impl(
         write!(&mut input_args, " -i {video_url} -i")?;
     }
 
-    let video = if audio_format == "flac" && params.config.video {
-        warn!("FLAC audio is not supported in MOV; muxing into MP4 instead");
-        "mp4"
-    } else if params.config.video {
-        "mov"
-    } else {
-        "mp4"
-    };
+    let video = params.config.output_extension();
 
     let null_sink = std::env::var_os("PHITK_NULL_SINK").is_some();
     let video_mux = if null_sink { "null" } else { video };
@@ -2346,7 +2786,15 @@ async fn render_impl(
             | "av1_amf"
     );
     let dx = dx_selected;
-    let vf_arg = if nv12_mode {
+    let vf_arg = if let Some(profile) = prores {
+        let filter = hdr_filter
+            .clone()
+            .unwrap_or_else(|| format!("format={}", profile.pixel_format));
+        format!("-vf {filter} -profile:v {} -alpha_bits {}",
+            profile.number, if profile.alpha { 16 } else { 0 })
+    } else if let Some(filter) = hdr_filter.as_ref() {
+        format!("-vf {filter}")
+    } else if nv12_mode {
         // The pipe already carries NV12.  Only the GPU-upload encoders need a
         // filter; software encoders negotiate NV12 directly.
         if dx.is_some() || is_vulkan_encoder {
@@ -2389,20 +2837,30 @@ async fn render_impl(
     out_extra.push_str(av1_quality_extra);
     if !av1_quality_extra.is_empty() {
         debug!("  AV1 quality:{}", av1_quality_extra);
-        if speed_rank(preset_words.first().copied().unwrap_or("medium")) <= 3 { debug!("  Note: for the best AV1 quality pick the VerySlow speed preset (SVT-AV1 preset 2)"); }
-    out_extra.push_str(if vh > 576 {
+        if speed_rank(preset_words.first().copied().unwrap_or("medium")) <= 3 {
+            debug!("  Note: for the best AV1 quality pick the VerySlow speed preset (SVT-AV1 preset 2)");
+        }
+    }
+    if color_space.is_hdr() || color_space == ExportColorSpace::Srgb {
+        out_extra.push(' ');
+        out_extra.push_str(color_space.ffmpeg_signaling());
+    } else {
+        out_extra.push_str(if vh > 576 {
         " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv" } else
-    {
+        {
         " -colorspace smpte170m -color_primaries smpte170m -color_trc smpte170m -color_range tv"
-    });
-    if dx.is_none()
+        });
+    }
+    if color_space.is_hdr() {
+        out_extra.push_str(" -pix_fmt ");
+        out_extra.push_str(hdr_encoder_pixel_format(ffmpeg_encoder, prores));
+    } else if dx.is_none()
         && matches!(
             ffmpeg_encoder,
             "libsvtav1" | "libaom-av1" | "librav1e" | "av1_nvenc"
         )
     {
         out_extra.push_str(" -pix_fmt yuv420p10le");
-    }
     }
 
     let async_depth = "-async_depth 4"; // the "4" parallel process 4 frames (vulkan encoder)
@@ -2414,6 +2872,8 @@ async fn render_impl(
             "{} -c:v copy -map 0:v:0 -map 1:a:0 -t {duration:.6} -f {}",
             audio_mux_args, video_mux,
         )
+    } else if prores.is_some() {
+        format!("{audio_mux_args} -c:v {ffmpeg_encoder} -map 0:v:0 -map 1:a:0 -shortest {out_extra} -f mov")
     } else if is_vulkan_encoder {
         format!(
             "{} -c:v {} {} {} {} -map 0:v:0 -map 1:a:0 -shortest {} {} {} -f {}",
@@ -2471,7 +2931,8 @@ async fn render_impl(
 
     let video_stderr = drain_stderr_with_progress(proc.stderr.take().unwrap(), ffmpeg_frames.clone());
 
-    let frame_size = vw as usize * vh as usize * 4;
+    let frame_size = vw as usize * vh as usize * if color_space.is_hdr() { 12 } else { 4 };
+    let mut hdr_staging = if color_space.is_hdr() { vec![0; vw as usize * vh as usize * 8] } else { Vec::new() };
 
     let mut ffmpeg_stdin = Some(proc.stdin.take().unwrap());
     let keyframe_interval = (fps.saturating_mul(KEYFRAME_INTERVAL_SECS)).max(1) as u64;
@@ -2654,7 +3115,7 @@ async fn render_impl(
             (None, Some(pipeline), Some(writer), None, None, None)
         };
 
-    fn submit_frame(pipeline: &FramePipeline, target: &RenderTarget, rgba: &RgbaReadback, frame_size: usize, ) -> Result<(f64, f64)> {
+    fn submit_frame(pipeline: &FramePipeline, target: &RenderTarget, rgba: Option<&RgbaReadback>, hdr_staging: &mut [u8], frame_size: usize) -> Result<(f64, f64)> {
         let acquire_start = Instant::now();
         let buf = pipeline.acquire_buf();
         let pool_wait = acquire_start.elapsed().as_secs_f64();
@@ -2664,11 +3125,20 @@ async fn render_impl(
         let quad_context = miniquad_context();
         let dma_start = Instant::now();
         let out = unsafe { std::slice::from_raw_parts_mut(base, frame_size) };
-        quad_context.copy_render_target(target.render_pass, rgba.0.render_pass);
-        rgba.0
-            .texture
-            .raw_miniquad_texture_handle()
-            .read_pixels(quad_context, out);
+        if let Some(rgba) = rgba {
+            quad_context.copy_render_target(target.render_pass, rgba.0.render_pass);
+            rgba.0.texture.raw_miniquad_texture_handle().read_pixels(quad_context, out);
+        } else {
+            target.texture.raw_miniquad_texture_handle().read_pixels(quad_context, hdr_staging);
+            let plane_size = frame_size / 3;
+            for (plane, channel) in out.chunks_exact_mut(plane_size).zip([1, 2, 0]) {
+                for (destination, pixel) in plane.chunks_exact_mut(4).zip(hdr_staging.chunks_exact(8)) {
+                    let offset = channel * 2;
+                    let bits = u16::from_ne_bytes([pixel[offset], pixel[offset + 1]]);
+                    destination.copy_from_slice(&half::f16::from_bits(bits).to_f32().to_le_bytes());
+                }
+            }
+        }
         let dma_wait = dma_start.elapsed().as_secs_f64();
 
         pipeline.push_job(buf);
@@ -2735,6 +3205,9 @@ async fn render_impl(
                 pipe.current_read = Some(read_slot);
                 nv12_frame_slot = Some(frame_slot);
                 frame_slot
+            } else if headless_vulkan {
+                miniquad_context().vulkan_context().unwrap().begin_offscreen_frame();
+                0
             } else {
                 0
             };
@@ -2814,7 +3287,10 @@ async fn render_impl(
             }
         } else {
             let (dma, pool) =
-                submit_frame(pipeline.as_ref().unwrap(), &rendered, rgba_readback.as_ref().unwrap(), frame_size)?;
+                submit_frame(pipeline.as_ref().unwrap(), &rendered, rgba_readback.as_ref(), &mut hdr_staging, frame_size)?;
+            if headless_vulkan {
+                miniquad_context().vulkan_context().unwrap().finish_offscreen_frame();
+            }
             dma_wait_time += dma;
             pool_wait_time += pool;
         }

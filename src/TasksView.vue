@@ -46,6 +46,8 @@ en:
   show-in-folder: Open Folder
   save-log: Save Log
   log-saved: Log saved
+  remove-record: Remove record
+  task-actions: Task actions
 
   source-local: This device
   source-remote: Server
@@ -101,6 +103,8 @@ zh-CN:
   show-in-folder: 打开文件夹
   save-log: 保存日志
   log-saved: 日志已保存
+  remove-record: 删除记录
+  task-actions: 任务操作
 
   source-local: 本机
   source-remote: 服务器
@@ -412,6 +416,8 @@ const contextMenu = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const contextMenuRow = ref<Row | null>(null);
+const swipedRow = ref<string | null>(null);
+let touchStart: { key: string; x: number; y: number } | null = null;
 
 async function showInFolder(path: string) {
   try { await invoke('show_in_folder', { path }); } catch (e) { toastError(e); }
@@ -436,6 +442,41 @@ async function cancelRow(row: Row) {
   } finally {
     canceling.value.delete(row.key);
   }
+}
+
+async function removeRow(row: Row) {
+  if (row.source !== 'local' || row.status.type !== 'done' || !row.task) return;
+  try {
+    await invoke('remove_task', { id: row.task.id });
+    swipedRow.value = null;
+    closeContextMenu();
+    await updateList();
+  } catch (e) {
+    toastError(e);
+  }
+}
+
+function beginSwipe(event: TouchEvent, row: Row) {
+  if (!mobile || row.source !== 'local' || row.status.type !== 'done') return;
+  if (swipedRow.value !== row.key) swipedRow.value = null;
+  const touch = event.changedTouches[0];
+  if (touch) touchStart = { key: row.key, x: touch.clientX, y: touch.clientY };
+}
+
+function finishSwipe(event: TouchEvent, row: Row) {
+  if (!touchStart || touchStart.key !== row.key) return;
+  const touch = event.changedTouches[0];
+  if (!touch) return;
+  const dx = touch.clientX - touchStart.x;
+  const dy = touch.clientY - touchStart.y;
+  if (Math.abs(dx) > 52 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+    swipedRow.value = dx < 0 ? row.key : null;
+  }
+  touchStart = null;
+}
+
+function cancelSwipe() {
+  touchStart = null;
 }
 
 async function downloadRemote(row: Row) {
@@ -525,10 +566,26 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
       <div
         v-for="row in rows"
         :key="row.key"
-        class="task-card glass fluent-glass"
-        v-glass
-        @contextmenu="showContextMenu($event, row)"
+        class="task-row-shell"
+        :class="{ 'is-swipe-open': swipedRow === row.key }"
+        @touchstart.passive="beginSwipe($event, row)"
+        @touchend="finishSwipe($event, row)"
+        @touchcancel="cancelSwipe"
       >
+        <button
+          v-if="mobile && row.source === 'local' && row.status.type === 'done'"
+          class="swipe-delete"
+          type="button"
+          :aria-label="t('remove-record')"
+          :title="t('remove-record')"
+          @click="removeRow(row)"
+        ><v-icon icon="mdi-delete-outline" size="20" /></button>
+        <div
+          class="task-card glass fluent-glass"
+          v-glass
+          @contextmenu="showContextMenu($event, row)"
+          @click="swipedRow = null"
+        >
         <!-- Cover (left 35%) -->
         <div class="task-cover">
           <div
@@ -551,11 +608,13 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
               {{ t('chip.' + row.status.type) }}
             </span>
             <v-btn
+              v-if="row.status.type === 'done'"
               icon="mdi-dots-vertical"
               variant="text"
               size="x-small"
               class="task-menu-btn"
-              :title="t('details')"
+              :title="t('task-actions')"
+              :aria-label="t('task-actions')"
               @click.stop="showContextMenuFromButton($event, row)"
             />
           </div>
@@ -611,6 +670,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
             </template>
           </div>
         </div>
+        </div>
       </div>
 
       <!-- Empty state -->
@@ -664,6 +724,14 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
             <v-icon>mdi-information</v-icon>
           </template>
           <v-list-item-title>{{ t('details') }}</v-list-item-title>
+        </v-list-item>
+        <v-list-item
+          v-if="contextMenuRow?.source === 'local' && contextMenuRow.status.type === 'done'"
+          class="text-error"
+          @click="removeRow(contextMenuRow!)"
+        >
+          <template v-slot:prepend><v-icon>mdi-delete-outline</v-icon></template>
+          <v-list-item-title>{{ t('remove-record') }}</v-list-item-title>
         </v-list-item>
       </v-list>
     </v-menu>
@@ -756,7 +824,18 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  touch-action: pan-y;
   overscroll-behavior: none;
+}
+
+.task-row-shell {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.swipe-delete {
+  display: none;
 }
 
 /* ===== Task Card ===== */
@@ -764,16 +843,15 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
   display: flex;
   flex-direction: row;
   overflow: hidden;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  position: relative;
+  transition: transform 0.24s cubic-bezier(0.65, 0, 0.35, 1), box-shadow 0.2s cubic-bezier(0.65, 0, 0.35, 1);
   height: 180px;
   /* The list is a scrolling flex column: keep cards at their intended height
      instead of shrinking them all to fit one screen. */
   flex-shrink: 0;
 }
 
-.task-card:hover {
-  transform: translateY(-2px);
-}
+.task-card:hover { transform: none; }
 
 .task-cover {
   width: 35%;
@@ -984,6 +1062,18 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
      information (name/status/actions) is what people come here for, and a
      phone screen only fits a couple of cards otherwise. */
   .task-card { flex-direction: row; height: auto; min-height: 124px; }
+  .task-row-shell { overflow: hidden; border-radius: 16px; }
+  .task-row-shell.is-swipe-open .task-card { transform: translateX(-72px); }
+  .swipe-delete {
+    position: absolute;
+    inset: 0 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 72px;
+    border: 0;
+    color: white;
+    background: rgb(190, 42, 53);
+  }
   .task-cover { width: 92px; min-height: 92px; align-self: stretch; }
   .cover-image { min-height: 92px; }
   .task-info { width: auto; flex: 1; padding: 10px 12px; gap: 4px; }

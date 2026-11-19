@@ -35,10 +35,11 @@ class ChartPickerPlugin(private val activity: Activity) : Plugin(activity) {
         val width = args.getInt("width")
         val height = args.getInt("height")
         val showFps = args.optBoolean("showFps", false)
+        val colorSpace = args.optString("colorSpace", "rec709")
         activity.runOnUiThread {
             if (preview != null) { invoke.reject("A preview is already open"); return@runOnUiThread }
             try {
-                val dialog = PreviewDialog(activity, session, width, height, showFps) {
+                val dialog = PreviewDialog(activity, session, width, height, showFps, colorSpace) {
                     preview = null
                     invoke.resolve(JSObject())
                 }
@@ -108,9 +109,18 @@ class ChartPickerPlugin(private val activity: Activity) : Plugin(activity) {
     fun pick(invoke: Invoke) {
         // GET_CONTENT can be intercepted by the Android photo picker. Charts
         // are documents, including archives whose extensions have no MIME type.
+        pickDocument(invoke, "*/*")
+    }
+
+    @Command
+    fun pickVideo(invoke: Invoke) {
+        pickDocument(invoke, "video/*")
+    }
+
+    private fun pickDocument(invoke: Invoke, mimeType: String) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
             .addCategory(Intent.CATEGORY_OPENABLE)
-            .setType("*/*")
+            .setType(mimeType)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         startActivityForResult(invoke, intent, "picked")
     }

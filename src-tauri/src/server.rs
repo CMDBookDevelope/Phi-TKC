@@ -470,7 +470,9 @@ async fn download(
         .unwrap_or("output.mp4");
     // Browsers need a video MIME type to play the file in a <video> tag.
     let inline = query.is_inline();
-    let content_type = if inline {
+    let content_type = if inline && output.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("mov")) {
+        "video/quicktime"
+    } else if inline {
         "video/mp4"
     } else {
         "application/octet-stream"
@@ -529,6 +531,7 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
     // render finishes (see `cleanup_inputs`).
     let mut respack: Option<PathBuf> = None;
     let mut avatar: Option<PathBuf> = None;
+    let mut background_video: Option<PathBuf> = None;
     let mut fields: HashMap<String, String> = HashMap::new();
 
     loop {
@@ -538,7 +541,7 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
             Err(e) => return (StatusCode::BAD_REQUEST, format!("bad multipart: {e}")).into_response(),
         };
         let name = field.name().unwrap_or("").to_string();
-        if matches!(name.as_str(), "file" | "respack" | "avatar") {
+        if matches!(name.as_str(), "file" | "respack" | "avatar" | "backgroundVideo") {
             let original = field.file_name().unwrap_or("upload.bin").to_string();
             let ext = Path::new(&original)
                 .extension()
@@ -548,6 +551,7 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
             let file_name = match name.as_str() {
                 "file" => format!("input.{ext}"),
                 "respack" => "respack.zip".to_owned(),
+                "backgroundVideo" => format!("background.{ext}"),
                 _ => format!("avatar.{ext}"),
             };
             let path = dir.join(file_name);
@@ -564,6 +568,7 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
             match name.as_str() {
                 "file" => input = Some(path),
                 "respack" => respack = Some(path),
+                "backgroundVideo" => background_video = Some(path),
                 _ => avatar = Some(path),
             }
         } else if let Ok(text) = field.text().await {
@@ -612,6 +617,11 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
     if let Some(path) = avatar.as_deref() {
         config.player_avatar = Some(path.display().to_string());
     }
+    if config.background_mode == "video" && background_video.is_none() {
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        return (StatusCode::BAD_REQUEST, "missing background video upload").into_response();
+    }
+    config.background_video = background_video.map(|path| path.display().to_string());
     // The uploaded archive is the source of truth for the paths *inside* it
     // (`chart`, `music`, `illustration`); the client only owns the editable
     // metadata. Trusting the posted struct wholesale made "Cannot find chart
@@ -636,7 +646,7 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
         }
     }
 
-    let ext = if config.video { "mov" } else { "mp4" };
+    let ext = config.output_extension();
     let safe_name: String = info
         .name
         .chars()

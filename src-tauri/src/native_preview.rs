@@ -64,6 +64,10 @@ struct Session {
     // The producer replaces the pending frame; the main thread cannot build a
     // backlog even when its display loop is slower than the renderer.
     frame: Mutex<Option<Vec<u8>>>,
+    hdr_frames: AtomicBool,
+    hdr_selected: AtomicBool,
+    #[cfg(target_os = "android")]
+    android_hdr: Option<crate::android_preview_hdr::Converter>,
     touches: Mutex<VecDeque<macroquad::input::Touch>>,
     reset_touches: AtomicBool,
     fps: AtomicU32,
@@ -158,12 +162,17 @@ pub async fn start(
     let guard =
         NativeGraphicsGuard::try_acquire().context("请等待当前渲染或预览结束后再打开预览／游玩")?;
     let (width, height) = preview_size(params.config.resolution)?;
+    let color_space = params.config.color_space.clone();
     let session = Arc::new(Session {
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         closed: AtomicBool::new(false),
         active: AtomicBool::new(false),
         finished: AtomicBool::new(false),
         frame: Mutex::new(None),
+        hdr_frames: AtomicBool::new(false),
+        hdr_selected: AtomicBool::new(false),
+        #[cfg(target_os = "android")]
+        android_hdr: crate::android_preview_hdr::Converter::new(&color_space),
         touches: Mutex::new(VecDeque::new()),
         reset_touches: AtomicBool::new(false),
         fps: AtomicU32::new(0f32.to_bits()),
@@ -203,7 +212,7 @@ pub async fn start(
         // Native invocation resolves when the full-screen view is dismissed.
         let shown = app
             .state::<tauri_plugin_chart_picker::ChartPicker<tauri::Wry>>()
-            .preview(session.id, width, height, show_fps)
+            .preview(session.id, width, height, show_fps, &color_space)
             .map_err(|error| anyhow::anyhow!(error.to_string()));
         session.close();
         let joined = worker
@@ -300,6 +309,9 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
     let chart_fs = fs::fs_from_file(&params.path)?;
     let mut config = params.config.to_config();
     config.interactive = true;
+    config.hdr_output = session.hdr_selected.load(Ordering::Acquire);
+    let hdr_output = config.hdr_output;
+    session.hdr_frames.store(hdr_output, Ordering::Release);
     config.mods = if config.autoplay.unwrap_or(false) {
         config.mods | Mods::AUTOPLAY
     } else {
@@ -311,10 +323,11 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
     if !wait_for_view(&session) {
         return Ok(());
     }
-    let target = Rc::new(MSRenderTarget::new(
-        (width, height),
-        params.config.sample_count,
-    ));
+    let target = Rc::new(if hdr_output {
+        MSRenderTarget::new_hdr((width, height), 1)
+    } else {
+        MSRenderTarget::new((width, height), params.config.sample_count)
+    });
     let context = macroquad::window::miniquad_context();
     context.begin_pass(
         target.input().render_pass,
@@ -325,7 +338,7 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
         },
     );
     context.end_render_pass();
-    let presentation = render_target(width, height);
+    let presentation = (!hdr_output).then(|| render_target(width, height));
     let tm = TimeManager::from_config(&config);
     let scene = LoadingScene::new(
         GameMode::Normal,
@@ -403,25 +416,34 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
         unsafe {
             macroquad::window::get_internal_gl().flush();
         }
-        macroquad::window::miniquad_context()
-            .copy_render_target(target.output().render_pass, presentation.render_pass);
-        let mut image = presentation.texture.get_texture_data();
+        let mut pixels = if let Some(presentation) = presentation {
+            macroquad::window::miniquad_context()
+                .copy_render_target(target.output().render_pass, presentation.render_pass);
+            presentation.texture.get_texture_data().bytes
+        } else {
+            let mut pixels = vec![0; width as usize * height as usize * 8];
+            target.output().texture.raw_miniquad_texture_handle().read_pixels(
+                macroquad::window::miniquad_context(),
+                &mut pixels,
+            );
+            pixels
+        };
         // Metal's shader conversion flips vertex Y to preserve GL coordinates.
         // UIKit needs top-first rows. Vulkan already produces that orientation.
         #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
         {
-            let stride = width as usize * 4;
+            let stride = width as usize * if hdr_output { 8 } else { 4 };
             for row in 0..height as usize / 2 {
-                let (upper, lower) = image
-                    .bytes
-                    .split_at_mut((height as usize - row - 1) * stride);
+                let (upper, lower) = pixels.split_at_mut((height as usize - row - 1) * stride);
                 upper[row * stride..(row + 1) * stride].swap_with_slice(&mut lower[..stride]);
             }
         }
-        for pixel in image.bytes.chunks_exact_mut(4) {
-            pixel[3] = 255;
+        if !hdr_output {
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel[3] = 255;
+            }
         }
-        *session.frame.lock().unwrap() = Some(image.bytes);
+        *session.frame.lock().unwrap() = Some(pixels);
         fps.rendered(&session);
         if main.should_exit() {
             break;
@@ -431,7 +453,9 @@ async fn play(params: RenderParams, width: u32, height: u32, session: Arc<Sessio
     }
     // Pausing also stops the native audio stream before textures/scenes drop.
     main.pause()?;
-    presentation.delete();
+    if let Some(presentation) = presentation {
+        presentation.delete();
+    }
     Ok(())
 }
 
@@ -465,6 +489,22 @@ pub unsafe extern "C" fn phi_tkc_preview_read_frame(
     bytes: *mut u8,
     capacity: usize,
 ) -> i32 {
+    preview_read_frame(id, bytes, capacity, false)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn phi_tkc_preview_read_frame_hdr(id: u64, bytes: *mut u8, capacity: usize) -> i32 {
+    preview_read_frame(id, bytes, capacity, true)
+}
+
+#[no_mangle]
+pub extern "C" fn phi_tkc_preview_set_hdr(id: u64, active: i32) {
+    if let Some(session) = current(id) {
+        session.hdr_selected.store(active != 0, Ordering::Release);
+    }
+}
+
+unsafe fn preview_read_frame(id: u64, bytes: *mut u8, capacity: usize, hdr: bool) -> i32 {
     let Some(session) = current(id) else {
         return -1;
     };
@@ -475,12 +515,43 @@ pub unsafe extern "C" fn phi_tkc_preview_read_frame(
     let Some(data) = frame.as_ref() else {
         return 0;
     };
-    if bytes.is_null() || capacity < data.len() {
+    let hdr_source = session.hdr_frames.load(Ordering::Acquire);
+    if bytes.is_null() || (hdr && !hdr_source) {
         return 0;
     }
-    std::ptr::copy_nonoverlapping(data.as_ptr(), bytes, data.len());
+    if hdr_source && !hdr {
+        if capacity < data.len() / 2 {
+            return 0;
+        }
+        let output = std::slice::from_raw_parts_mut(bytes, data.len() / 2);
+        for (destination, pixel) in output.chunks_exact_mut(4).zip(data.chunks_exact(8)) {
+            let [r, g, b] = read_linear_bt2020(pixel);
+            let srgb = [
+                1.660491 * r - 0.587641 * g - 0.072850 * b,
+                -0.124550 * r + 1.132900 * g - 0.008349 * b,
+                -0.018151 * r - 0.100579 * g + 1.118730 * b,
+            ];
+            for (channel, linear) in destination.iter_mut().zip(srgb) {
+                let linear = linear.clamp(0., 1.);
+                let encoded = if linear <= 0.0031308 { linear * 12.92 } else { 1.055 * linear.powf(1. / 2.4) - 0.055 };
+                *channel = (encoded * 255.).round() as u8;
+            }
+            destination[3] = 255;
+        }
+    } else {
+        if capacity < data.len() {
+            return 0;
+        }
+        std::ptr::copy_nonoverlapping(data.as_ptr(), bytes, data.len());
+    }
     frame.take();
     1
+}
+
+pub(crate) fn read_linear_bt2020(pixel: &[u8]) -> [f32; 3] {
+    [0, 2, 4].map(|offset| {
+        half::f16::from_bits(u16::from_ne_bytes([pixel[offset], pixel[offset + 1]])).to_f32()
+    })
 }
 #[no_mangle]
 pub extern "C" fn phi_tkc_preview_close(id: u64) {
@@ -572,6 +643,33 @@ mod android {
             return 0;
         };
         phi_tkc_preview_read_frame(id as u64, bytes, size)
+    }
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_com_cnmdbook_chartpicker_PreviewBridge_readHdrFrame(
+        env: JNIEnv,
+        _: JObject,
+        id: jlong,
+        buffer: JObject,
+    ) -> jint {
+        let Some(session) = current(id as u64) else { return -1 };
+        if session.finished.load(Ordering::Acquire) {
+            return -1;
+        }
+        let mut frame = session.frame.lock().unwrap();
+        let Some(data) = frame.as_ref() else { return 0 };
+        let Some(converter) = session.android_hdr.as_ref() else { return -2 };
+        let hdr_source = session.hdr_frames.load(Ordering::Acquire);
+        if crate::android_preview_hdr::write_buffer(env, buffer, data, converter, hdr_source).is_err() {
+            return -2;
+        }
+        frame.take();
+        1
+    }
+    #[no_mangle]
+    pub extern "system" fn Java_com_cnmdbook_chartpicker_PreviewBridge_setHdr(
+        _: JNIEnv, _: JObject, id: jlong, active: jint,
+    ) {
+        phi_tkc_preview_set_hdr(id as u64, active);
     }
     #[no_mangle]
     pub extern "system" fn Java_com_cnmdbook_chartpicker_PreviewBridge_close(

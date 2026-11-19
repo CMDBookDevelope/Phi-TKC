@@ -115,6 +115,42 @@ jobs:
           cp "${SRC}" "${DEST}/libc++_shared.so"
           ls -l "${DEST}"
 
+      - name: Build Android CPU ProRes encoder
+        env:
+          ANDROID_PRORES_BUILD_DIR: ${{ runner.temp }}/android-prores-build
+        run: scripts/build-android-prores.sh
+
+      - name: Prepare Android ProRes corresponding source
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_DIR="$RUNNER_TEMP/android-prores-source"
+          mkdir -p "$SOURCE_DIR/scripts" "$SOURCE_DIR/src-tauri/src"
+          cp "$RUNNER_TEMP/android-prores-build/ffmpeg-7.1.4.tar.xz" "$SOURCE_DIR/"
+          cp scripts/build-android-prores.sh "$SOURCE_DIR/scripts/"
+          cp src-tauri/src/android_prores.c "$SOURCE_DIR/src-tauri/src/"
+          cp LICENSE "$SOURCE_DIR/Phi-TKC-LICENSE-GPL-3.0.txt"
+          cat > "$SOURCE_DIR/BUILD.txt" <<'EOF'
+          Android arm64 ProRes encoder source
+
+          FFmpeg 7.1.4 source is included as ffmpeg-7.1.4.tar.xz. The build script verifies
+          SHA-256 71f4aac3573ed9060489cb62526a6c7dda815ae10993789611acd7be9fa9fbf4.
+          FFmpeg is configured for the LGPL 2.1-or-later license. Its license text is in
+          COPYING.LGPLv2.1 inside the included source archive. Phi-TKC is GPL-3.0.
+
+          Requirements: Android NDK r27c or compatible, clang, make, tar, xz, and sha256sum.
+          From this extracted directory, run:
+
+              ANDROID_HOME=/path/to/android-sdk \
+              ANDROID_NDK_HOME=/path/to/android-sdk/ndk/27.2.12479018 \
+              ANDROID_PRORES_BUILD_DIR="$PWD" \
+              scripts/build-android-prores.sh "$PWD/jniLibs/arm64-v8a"
+
+          The generated libphitkc_prores.so is loaded dynamically by Phi-TKC on Android.
+          EOF
+          tar -cJf Phi-TKC-android-prores-source.tar.xz \
+            -C "$RUNNER_TEMP" android-prores-source
+
       - name: Build unsigned release APK
         shell: bash
         run: |
@@ -145,6 +181,7 @@ jobs:
           name: android-apk
           path: |
             Phi-TKC-android-arm64.apk
+            Phi-TKC-android-prores-source.tar.xz
           if-no-files-found: error
 
   ios:
@@ -311,6 +348,7 @@ jobs:
             - **Windows (x86_64)** — NSIS installer or portable `.zip` / `.7z`, including renderer assets and WebView2Loader.dll. The GUI requires the WebView2 Runtime.
             - **macOS (Apple Silicon)** — `.dmg`, macOS 11 or newer; unsigned, so right-click → Open the first time.
             - **Android (arm64-v8a)** — `.apk`, signed with a persistent release key. Updates from v1.3.8 onward install over the existing app; older releases need one reinstall because they used temporary signing keys.
+            - **Android ProRes source** — GPL/LGPL source archive and reproducible FFmpeg build script for `libphitkc_prores.so`.
             - **iOS / iPadOS** — unsigned `.ipa`; re-sign it with your own Apple team before sideloading.
 
             ## Notes

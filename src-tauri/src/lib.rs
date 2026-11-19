@@ -51,6 +51,8 @@ mod vulkan_video;
 #[cfg(target_os = "android")]
 mod android_media;
 #[cfg(target_os = "android")]
+mod android_preview_hdr;
+#[cfg(target_os = "android")]
 pub mod android_render;
 #[cfg(target_os = "android")]
 pub mod android_uri;
@@ -202,10 +204,12 @@ pub async fn run() -> Result<()> {
             parse_chart,
             pick_chart,
             pick_chart_folder,
+            pick_background_video,
             batch_add_tasks,
             post_render,
             get_tasks,
             cancel_task,
+            remove_task,
             get_respacks,
             open_respack_folder,
             get_presets,
@@ -223,6 +227,7 @@ pub async fn run() -> Result<()> {
             extract_rhythm_colors,
             sample_rhythm_color,
             get_msaa_sample_counts,
+            render::get_encoder_availability,
             remote_status,
             remote_jobs,
             remote_post_render,
@@ -430,6 +435,22 @@ async fn pick_chart(app: tauri::AppHandle) -> Result<Option<String>, InvokeError
 }
 
 #[tauri::command]
+async fn pick_background_video(app: tauri::AppHandle) -> Result<Option<String>, InvokeError> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        return tokio::task::spawn_blocking(move || {
+            app.state::<tauri_plugin_chart_picker::ChartPicker<tauri::Wry>>()
+                .pick_video().map_err(|error| InvokeError::from(error.to_string()))
+        }).await.map_err(|error| InvokeError::from(error.to_string()))?;
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = app;
+        Err(InvokeError::from("Use the desktop file dialog to select a background video"))
+    }
+}
+
+#[tauri::command]
 async fn pick_chart_folder(app: tauri::AppHandle) -> Result<Option<String>, InvokeError> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -464,6 +485,11 @@ async fn preview_chart(app: tauri::AppHandle, mut params: RenderParams, show_fps
     prepare_platform_assets(app.clone(), false).await?;
     wrap_async(async move {
         params.path = localize_chart_path(&params.path)?;
+        if let Some(background) = params.config.background_video.clone() {
+            params.config.background_video = Some(
+                localize_chart_path(Path::new(&background))?.to_string_lossy().into_owned(),
+            );
+        }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
             let assets = ASSET_PATH.get().cloned().context("Renderer assets are unavailable")?;
@@ -473,6 +499,11 @@ async fn preview_chart(app: tauri::AppHandle, mut params: RenderParams, show_fps
         {
         let _ = show_fps;
         let mut command = Command::new(std::env::current_exe()?);
+        if params.config.is_hdr() {
+            command.env("PRPR_PREVIEW_HDR", &params.config.color_space);
+        } else {
+            command.env_remove("PRPR_PREVIEW_HDR");
+        }
         #[cfg(target_os = "windows")]
         command.creation_flags(0x08000000);
         let mut child = command
@@ -498,6 +529,11 @@ async fn post_render(app: tauri::AppHandle, queue: State<'_, TaskQueue>, mut par
     prepare_platform_assets(app, true).await?;
     wrap_async(async move {
         params.path = localize_chart_path(&params.path)?;
+        if let Some(background) = params.config.background_video.clone() {
+            params.config.background_video = Some(
+                localize_chart_path(Path::new(&background))?.to_string_lossy().into_owned(),
+            );
+        }
         // Mobile output lives in the app's accessible output directory. A stale
         // desktop setting cannot grant Files/SAF access to an external folder.
         #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -517,6 +553,11 @@ async fn get_tasks(queue: State<'_, TaskQueue>) -> Result<Vec<TaskView>, InvokeE
 async fn cancel_task(queue: State<'_, TaskQueue>, id: u32) -> Result<(), InvokeError> {
     queue.cancel(id).await;
     Ok(())
+}
+
+#[tauri::command]
+async fn remove_task(queue: State<'_, TaskQueue>, id: u32) -> Result<(), InvokeError> {
+    wrap_async(async move { queue.remove_completed(id).await }).await
 }
 
 #[derive(Serialize)]
@@ -1043,6 +1084,13 @@ async fn remote_render_upload(base: String, params: RenderParams) -> Result<serd
             let Ok(data) = tokio::fs::read(path).await else { continue };
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or(field);
             multipart_file(&boundary, field, name, &data, &mut body);
+        }
+        if params.config.background_mode == "video" {
+            let source = params.config.background_video.as_deref().context("Choose a background video")?;
+            let path = localize_chart_path(Path::new(source))?;
+            let data = tokio::fs::read(&path).await.context("Cannot read the background video")?;
+            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("video");
+            multipart_file(&boundary, "backgroundVideo", name, &data, &mut body);
         }
         body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
 

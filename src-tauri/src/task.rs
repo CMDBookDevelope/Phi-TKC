@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -84,10 +84,7 @@ impl Task {
         let mut fs = fs::fs_from_file(&params.path)?;
         let info = fs::load_info(fs.deref_mut()).await?;
         let mut cover = create_task_cover(cover_dir)?;
-        let video = match params.config.video {
-            true => "mov",
-            false => "mp4",
-        };
+        let video = params.config.output_extension();
         cover.write_all(&fs.load_file(&info.illustration).await?)?;
 
         let level: String = info
@@ -500,6 +497,7 @@ pub struct TaskQueue {
 
     tasks: Mutex<Vec<Arc<Task>>>,
     cover_dir: Option<PathBuf>,
+    next_id: AtomicU64,
 }
 impl TaskQueue {
     pub fn new(cover_dir: Option<PathBuf>) -> Self {
@@ -521,12 +519,14 @@ impl TaskQueue {
 
             tasks: Mutex::default(),
             cover_dir,
+            next_id: AtomicU64::new(0),
         }
     }
 
     pub async fn post(&self, params: RenderParams, output_path: Option<PathBuf>) -> Result<u32> {
         let mut guard = self.tasks.lock().await;
-        let id = guard.len() as u32;
+        let id = u32::try_from(self.next_id.fetch_add(1, Ordering::Relaxed))
+            .context("Task ID space exhausted")?;
         let task = Arc::new(Task::new(id, params, output_path, self.cover_dir.as_deref()).await?);
         guard.push(Arc::clone(&task));
         self.sender.send(task)?;
@@ -545,9 +545,28 @@ impl TaskQueue {
     }
 
     pub async fn cancel(&self, id: u32) {
-        if let Some(task) = self.tasks.lock().await.get(id as usize) {
+        if let Some(task) = self.tasks.lock().await.iter().find(|task| task.id == id) {
             task.cancel();
         }
+    }
+
+    pub async fn remove_completed(&self, id: u32) -> Result<()> {
+        let mut tasks = self.tasks.lock().await;
+        let index = tasks
+            .iter()
+            .position(|task| task.id == id)
+            .context("Task not found")?;
+        let task = &tasks[index];
+        let status = task.status.lock().await;
+        if !matches!(
+            &*status,
+            TaskStatus::Done { .. } | TaskStatus::Canceled | TaskStatus::Failed { .. }
+        ) {
+            anyhow::bail!("Only completed tasks can be removed");
+        }
+        drop(status);
+        tasks.remove(index);
+        Ok(())
     }
 }
 
@@ -559,8 +578,35 @@ impl Drop for TaskQueue {
 
 #[cfg(test)]
 mod tests {
-    use super::{create_task_cover, Task, TaskStatus};
+    use super::{create_task_cover, Task, TaskQueue, TaskStatus};
     use std::io::Write;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    fn write_test_chart(root: &Path) -> prpr::info::ChartInfo {
+        let info = prpr::info::ChartInfo::default();
+        std::fs::write(root.join("info.yml"), serde_yaml::to_string(&info).unwrap()).unwrap();
+        std::fs::write(root.join(&info.illustration), b"cover").unwrap();
+        std::fs::write(root.join(&info.chart), b"{}").unwrap();
+        std::fs::write(root.join(&info.music), b"music").unwrap();
+        info
+    }
+
+    async fn test_task(id: u32, root: &Path) -> Task {
+        let info = write_test_chart(root);
+        Task::new(
+            id,
+            crate::render::RenderParams {
+                path: root.to_owned(),
+                info,
+                config: Default::default(),
+            },
+            Some(root.join("output")),
+            Some(root),
+        )
+        .await
+        .unwrap()
+    }
 
     #[tokio::test]
     async fn task_view_preserves_edited_metadata_and_completed_average() {
@@ -592,6 +638,30 @@ mod tests {
         assert_eq!(view["level"], "AT Lv.17.5");
         assert_eq!(view["status"]["average_fps"], 40.0);
         assert_eq!(view["status"]["duration"], 2.5);
+    }
+
+    #[tokio::test]
+    async fn removing_finished_task_keeps_other_task_ids_stable() {
+        let finished_root = tempfile::tempdir().unwrap();
+        let pending_root = tempfile::tempdir().unwrap();
+        let finished = Arc::new(test_task(7, finished_root.path()).await);
+        let pending = Arc::new(test_task(8, pending_root.path()).await);
+        *finished.status.lock().await = TaskStatus::Canceled;
+
+        let queue = TaskQueue::new(None);
+        queue.tasks.lock().await.extend([finished, pending]);
+
+        assert!(queue.remove_completed(8).await.is_err());
+        queue.remove_completed(7).await.unwrap();
+        let remaining = queue.tasks.lock().await;
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, 8);
+        drop(remaining);
+
+        queue.cancel(8).await;
+        assert!(queue.tasks.lock().await[0]
+            .request_cancel
+            .load(std::sync::atomic::Ordering::Relaxed));
     }
 
     #[test]

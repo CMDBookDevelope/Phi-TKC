@@ -1,8 +1,12 @@
+#[path = "mobile_hdr.rs"]
+pub(crate) mod mobile_hdr;
+use mobile_hdr::{P010, Transfer};
+
 use crate::{
     apple_frames::{initialize_render_target, MetalFrames},
     apple_lifecycle::RenderActivity,
-    apple_media::Encoder,
-    render::{build_player, RenderParams},
+    apple_media::{Encoder, ProRes},
+    render::{build_player, stereo_gains, stereo_pan, RenderParams},
 };
 use anyhow::{bail, Context, Result};
 use log::info;
@@ -112,12 +116,17 @@ async fn render_async(
     let check_cancel = || check_canceled(&request.request_cancel);
     activity.checkpoint(check_cancel, finish_gpu)?;
     let params = request.params;
+    let transfer = Transfer::from_config(&params.config);
+    let prores = ProRes::parse(&params.config.video_codec);
+    let alpha = prores.is_some_and(|profile| profile.alpha);
     let (game_width, game_height) = params.config.canvas_resolution()?;
     let path = params.path.clone();
     let font = FontArc::try_from_vec(load_file("font.ttf").await?)?;
     let mut painter = TextPainter::new(font);
 
     let mut config = params.config.to_config();
+    config.hdr_output = transfer.is_some();
+    config.transparent_background = alpha;
     config.mods = Mods::AUTOPLAY;
     config.interactive = false;
 
@@ -218,7 +227,7 @@ async fn render_async(
     }
 
     info!("music Time:{:?}", music_start.elapsed());
-    let mut place = |pos: f64, clip: &AudioClip, volume: f32| {
+    let mut place = |pos: f64, clip: &AudioClip, volume: f32, pan: f32| {
         let position = (pos * SAMPLE_RATE as f64).round() as usize * 2;
         if position >= output.len() {
             return 0;
@@ -228,11 +237,12 @@ async fn render_async(
         let valid = (output_len / 2).min(len);
         let output_ptr = unsafe { output.as_mut_ptr().add(position) };
         let frames_ptr = clip.frames().as_ptr();
+        let (left_gain, right_gain) = stereo_gains(pan);
         for i in 0..valid {
             unsafe {
                 let sample = (*frames_ptr.add(i)).0 * volume;
-                *output_ptr.add(i * 2) += sample;
-                *output_ptr.add(i * 2 + 1) += sample;
+                *output_ptr.add(i * 2) += sample * left_gain;
+                *output_ptr.add(i * 2 + 1) += sample * right_gain;
             }
         }
         valid
@@ -247,15 +257,23 @@ async fn render_async(
             &sfx_click as *const _,
             &sfx_flick as *const _,
         ];
+        let hit_positions = params.config.stereo_enabled.then(||
+            chart.note_hit_positions(&config, game_width as f32 / game_height as f32)
+        );
         unsafe {
+            let mut note_offset = 0;
             for line in chart.lines.iter() {
-                for note in line.notes.iter() {
+                for (note_index, note) in line.notes.iter().enumerate() {
                     if !note.above {
                         continue;
                     }
                     let clip = &*sfx[note.kind.order() as usize];
-                    place(o_offset + note.time as f64, clip, volume_sfx);
+                    let pan = hit_positions.as_ref().map_or(0.0, |positions| {
+                        stereo_pan(positions[note_offset + note_index].x, params.config.stereo_strength)
+                    });
+                    place(o_offset + note.time as f64, clip, volume_sfx, pan);
                 }
+                note_offset += line.notes.len();
             }
         }
     }
@@ -264,7 +282,7 @@ async fn render_async(
     let mut pos = O + length + A + audio_delay;
     info!("Ending music start: {:.6}s", pos);
     if params.config.ending_length > 0.1 {
-        while place(pos, &ending, volume_music) != 0 {
+        while place(pos, &ending, volume_music, 0.0) != 0 {
             pos += ending.length() as f64;
         }
     }
@@ -299,18 +317,37 @@ async fn render_async(
         start_bytes as f64 / 4. / sample_rate as f64
     ));
 
-    let bitrate = bitrate_bps(&params.config)?;
+    let bitrate = if prores.is_some() { 0 } else { bitrate_bps(&params.config)? };
     activity.checkpoint(check_cancel, finish_gpu)?;
-    let mut encoder = Encoder::new(
+    let mut encoder = Encoder::new_with_prores(
         &request.output_path,
         vw,
         vh,
         fps,
         bitrate,
         sample_rate as u32,
+        transfer,
+        prores,
     )?;
-    let target = Rc::new(MSRenderTarget::new((game_width, game_height), params.config.sample_count));
-    let rhythm = RhythmComposite::new(game_width, game_height, rhythm_strip, 1)?;
+    let size = (game_width, game_height);
+    let target = Rc::new(if transfer.is_some() {
+        MSRenderTarget::new_hdr(size, 1)
+    } else if alpha {
+        MSRenderTarget::new_rgba(size, params.config.sample_count)
+    } else {
+        MSRenderTarget::new(size, params.config.sample_count)
+    });
+    let rhythm = if transfer.is_some() {
+        RhythmComposite::new_hdr_with_alpha(game_width, game_height, rhythm_strip, 1, alpha)?
+    } else {
+        RhythmComposite::new_with_alpha(game_width, game_height, rhythm_strip, 1, alpha)?
+    };
+    let mut hdr = transfer.filter(|_| prores.is_none()).map(|transfer| P010::new(vw, vh, transfer));
+    let mut prores_rgba = prores.map(|_| {
+        let bytes_per_pixel = if transfer.is_some() { 8 } else { 4 };
+        vec![0; vw as usize * vh as usize * bytes_per_pixel]
+    });
+    let mut p010 = if hdr.is_some() { vec![0; vw as usize * vh as usize * 3] } else { Vec::new() };
     initialize_render_target(
         miniquad_context()
             .metal_context()
@@ -323,6 +360,13 @@ async fn render_async(
         move || *clock.borrow()
     }));
     let player = build_player(&params.config).await?;
+    let skip = (ss * fps_f64 - 1e-6).ceil().max(0.) as u64;
+    let frames = (video_length * fps_f64).ceil() as u64;
+    let output_frames = frames.saturating_sub(skip);
+    if output_frames == 0 {
+        bail!("render duration contains no output frames");
+    }
+    crate::render::set_background_video_interval(&mut config, fps, skip, frames);
     let mut main = Main::new(
         Box::new(
             LoadingScene::new(
@@ -346,12 +390,6 @@ async fn render_async(
     main.top_level = false;
     main.viewport = Some((0, 0, game_width as i32, game_height as i32));
     main.update()?;
-    let skip = (ss * fps_f64 - 1e-6).ceil().max(0.) as u64;
-    let frames = (video_length * fps_f64).ceil() as u64;
-    let output_frames = frames.saturating_sub(skip);
-    if output_frames == 0 {
-        bail!("render duration contains no output frames");
-    }
     let mut gpu_frames = MetalFrames::new(
         miniquad_context()
             .metal_context()
@@ -382,6 +420,9 @@ async fn render_async(
             unsafe { get_internal_gl() }
                 .quad_gl
                 .render_pass(Some(target.input().render_pass));
+            if alpha {
+                clear_background(BLANK);
+            }
             main.render(&mut painter)?;
             let rendered = rhythm.compose(0, &target,
                 main.scenes.last().and_then(|scene| scene.chart_time()), &mut painter);
@@ -410,7 +451,17 @@ async fn render_async(
                     Err(error) => return Err(error),
                 }
             };
-            gpu_frames
+            if let Some(rgba) = &mut prores_rgba {
+                texture.read_pixels(miniquad_context(), rgba);
+                encoder.write_prores_pixel(&pixel, rgba)?;
+                encoder.frame_pixel(pixel, output_index, pcm16)?;
+            } else if let Some(hdr) = &mut hdr {
+                texture.read_pixels(miniquad_context(), &mut hdr.rgba);
+                hdr.convert(&mut p010);
+                encoder.write_hdr_pixel(&pixel, &p010)?;
+                encoder.frame_pixel(pixel, output_index, pcm16)?;
+            } else {
+                gpu_frames
                 .enqueue(
                     miniquad_context()
                         .metal_context()
@@ -424,6 +475,7 @@ async fn render_async(
                         "Metal video frame {output_index}/{output_frames}, {vw}x{vh} @ {fps} fps"
                     )
                 })?;
+            }
             if output_index % 10 == 9 {
                 realtime_fps = 10. / fps_timer.elapsed().as_secs_f64().max(1e-9);
                 fps_timer = Instant::now();
@@ -550,12 +602,18 @@ fn resample_pcm(input: &[f32], from: usize, to: usize) -> Vec<f32> {
     out
 }
 fn normalize_config(config: &mut crate::render::RenderConfig) -> Result<()> {
+    config.target_audio = 48_000;
+    if let Some(profile) = ProRes::parse(&config.video_codec) {
+        if config.is_hdr() && profile.alpha {
+            bail!("HDR output is not supported with alpha ProRes profiles");
+        }
+        return Ok(());
+    }
     if config.bitrate.trim().is_empty() || config.bitrate_control.eq_ignore_ascii_case("CRF") {
         config.bitrate = "8M".to_owned();
     }
     config.bitrate_control = "CBR".to_owned();
-    config.target_audio = 48_000;
-    config.video_codec = "h264".to_owned();
+    config.video_codec = if config.is_hdr() { "hevc" } else { "h264" }.to_owned();
     bitrate_bps(config)?;
     Ok(())
 }

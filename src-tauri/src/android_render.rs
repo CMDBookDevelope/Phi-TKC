@@ -1,6 +1,19 @@
+#[path = "mobile_hdr.rs"]
+pub(crate) mod mobile_hdr;
+use mobile_hdr::{P010, Transfer};
+#[path = "android_prores.rs"]
+mod prores;
+
+pub(crate) fn prores_availability(transfer: Option<Transfer>) -> Result<Vec<&'static str>> {
+    let directory = tempfile::tempdir()?;
+    Ok(prores::PROFILES.into_iter().filter(|name| {
+        prores::probe(name, &directory.path().join(format!("{name}.mov")), transfer).is_ok()
+    }).collect())
+}
+
 use crate::{
     android_media::{pcm_f32_to_i16, Encoder, Muxer},
-    render::{build_player, RenderParams},
+    render::{build_player, stereo_gains, stereo_pan, RenderParams},
 };
 use anyhow::{bail, Context, Result};
 use log::info;
@@ -119,12 +132,17 @@ async fn render_async(
     };
     check_cancel()?;
     let params = request.params;
+    let transfer = Transfer::from_config(&params.config);
+    let prores = crate::render::prores_profile(&params.config.video_codec);
+    let alpha = prores.is_some_and(|profile| profile.alpha);
     let (game_width, game_height) = params.config.canvas_resolution()?;
     let path = params.path.clone();
     let font = FontArc::try_from_vec(load_file("font.ttf").await?)?;
     let mut painter = TextPainter::new(font);
 
     let mut config = params.config.to_config();
+    config.hdr_output = transfer.is_some();
+    config.transparent_background = alpha;
     config.mods = Mods::AUTOPLAY;
     config.interactive = false;
 
@@ -220,7 +238,7 @@ async fn render_async(
     }
 
     info!("music Time:{:?}", music_start.elapsed());
-    let mut place = |pos: f64, clip: &AudioClip, volume: f32| {
+    let mut place = |pos: f64, clip: &AudioClip, volume: f32, pan: f32| {
         let position = (pos * SAMPLE_RATE as f64).round() as usize * 2;
         if position >= output.len() {
             return 0;
@@ -230,11 +248,12 @@ async fn render_async(
         let valid = (output_len / 2).min(len);
         let output_ptr = unsafe { output.as_mut_ptr().add(position) };
         let frames_ptr = clip.frames().as_ptr();
+        let (left_gain, right_gain) = stereo_gains(pan);
         for i in 0..valid {
             unsafe {
                 let sample = (*frames_ptr.add(i)).0 * volume;
-                *output_ptr.add(i * 2) += sample;
-                *output_ptr.add(i * 2 + 1) += sample;
+                *output_ptr.add(i * 2) += sample * left_gain;
+                *output_ptr.add(i * 2 + 1) += sample * right_gain;
             }
         }
         valid
@@ -249,15 +268,23 @@ async fn render_async(
             &sfx_click as *const _,
             &sfx_flick as *const _,
         ];
+        let hit_positions = params.config.stereo_enabled.then(||
+            chart.note_hit_positions(&config, game_width as f32 / game_height as f32)
+        );
         unsafe {
+            let mut note_offset = 0;
             for line in chart.lines.iter() {
-                for note in line.notes.iter() {
+                for (note_index, note) in line.notes.iter().enumerate() {
                     if !note.above {
                         continue;
                     }
                     let clip = &*sfx[note.kind.order() as usize];
-                    place(o_offset + note.time as f64, clip, volume_sfx);
+                    let pan = hit_positions.as_ref().map_or(0.0, |positions| {
+                        stereo_pan(positions[note_offset + note_index].x, params.config.stereo_strength)
+                    });
+                    place(o_offset + note.time as f64, clip, volume_sfx, pan);
                 }
+                note_offset += line.notes.len();
             }
         }
     }
@@ -266,7 +293,7 @@ async fn render_async(
     let mut pos = O + length + A + audio_delay;
     info!("Ending music start: {:.6}s", pos);
     if params.config.ending_length > 0.1 {
-        while place(pos, &ending, volume_music) != 0 {
+        while place(pos, &ending, volume_music, 0.0) != 0 {
             pos += ending.length() as f64;
         }
     }
@@ -298,6 +325,121 @@ async fn render_async(
         pcm16.len() as f64 / 4. / sample_rate as f64,
         start_bytes as f64 / 4. / sample_rate as f64
     ));
+
+    let msts: Vec<Rc<MSRenderTarget>> = (0..2)
+        .map(|_| Rc::new(if transfer.is_some() {
+            MSRenderTarget::new_hdr((game_width, game_height), 1)
+        } else if alpha {
+            MSRenderTarget::new_rgba((game_width, game_height), params.config.sample_count)
+        } else {
+            MSRenderTarget::new((game_width, game_height), params.config.sample_count)
+        }))
+        .collect();
+    let rhythm_strip = if params.config.rhythm_analysis {
+        let cover = chart_fs.load_file(&info.illustration).await?;
+        Some(RhythmStrip::from_chart_bytes_with_audio(
+            &chart, RhythmNoteSelection::from(&config), &cover, &music, config.rhythm_auto_bpm,
+            chart.offset + config.offset + info.offset,
+        )?.with_speed(config.rhythm_speed).with_colors(config.rhythm_colors.as_ref()))
+    } else { None };
+    let rhythm = if transfer.is_some() {
+        RhythmComposite::new_hdr_with_alpha(game_width, game_height, rhythm_strip, 2, alpha)?
+    } else {
+        RhythmComposite::new_with_alpha(game_width, game_height, rhythm_strip, 2, alpha)?
+    };
+    let mst_slot = Rc::new(Cell::new(0usize));
+    let my_time: Rc<RefCell<f64>> = Rc::new(RefCell::new(0.));
+    let tm = TimeManager::manual(Box::new({
+        let my_time = Rc::clone(&my_time);
+        move || *(*my_time).borrow()
+    }));
+
+    if !crate::vulkan_readback::enable_offscreen_video() {
+        bail!("failed to enable the Vulkan offscreen video mode")
+    }
+
+    mark!("offscreen/readback setup");
+    let skip = (ss * fps_f64 - 1e-6).ceil().max(0.) as u64;
+    let frames = (video_length * fps_f64).ceil() as u64;
+    let out_frames = frames.saturating_sub(skip);
+    if out_frames == 0 {
+        bail!("render duration contains no output frames");
+    }
+    crate::render::set_background_video_interval(&mut config, fps, skip, frames);
+    let player = build_player(&params.config).await?;
+    let mut main = Main::new(
+        Box::new(
+            LoadingScene::new(
+                GameMode::Normal,
+                info.clone(),
+                config,
+                chart_fs,
+                Some(player),
+                None,
+                None,
+            )
+            .await?,
+        ),
+        tm,
+        {
+            let msts = Rc::new(msts.iter().cloned().collect::<Vec<_>>());
+            let mst_slot = Rc::clone(&mst_slot);
+            move || Some(msts[mst_slot.get()].input())
+        },
+    )
+    .await?;
+    main.top_level = false;
+    main.viewport = Some((0, 0, game_width as _, game_height as _));
+
+    *my_time.borrow_mut() = 0.;
+    main.update()?;
+
+    mark!("player + scene load");
+    let render_start = Instant::now();
+    info!("rendering {out_frames} frames");
+
+    if let Some(profile) = prores {
+        let mut writer = prores::Writer::new(
+            &request.output_path, vw, vh, fps, sample_rate as u32, profile, transfer,
+        )?;
+        let mut rgba = vec![0; vw as usize * vh as usize * if transfer.is_some() { 8 } else { 4 }];
+        info!("Video codec: {} (CPU ProRes)", params.config.video_codec);
+        info!("Audio format: 16-bit PCM, {sample_rate} Hz");
+        for frame in 0..frames {
+            check_cancel()?;
+            *my_time.borrow_mut() = frame as f64 * frame_duration;
+            let slot = miniquad_context().vulkan_context().unwrap().begin_offscreen_frame();
+            if frame != 0 {
+                main.update()?;
+            }
+            if frame < skip {
+                miniquad_context().vulkan_context().unwrap().finish_offscreen_frame();
+                continue;
+            }
+            mst_slot.set(slot);
+            unsafe { get_internal_gl() }.quad_gl.render_pass(Some(msts[slot].input().render_pass));
+            if alpha {
+                clear_background(BLANK);
+            }
+            main.render(&mut painter)?;
+            let rendered = rhythm.compose(slot, &msts[slot],
+                main.scenes.last().and_then(|scene| scene.chart_time()), &mut painter);
+            unsafe { get_internal_gl() }.flush();
+            let context = miniquad_context();
+            context.vulkan_context().unwrap().finish_offscreen_frame();
+            rendered.texture.raw_miniquad_texture_handle().read_pixels(context, &mut rgba);
+            writer.frame(&rgba, pcm16)?;
+            let done = frame - skip + 1;
+            on_progress(done as f32 / out_frames as f32,
+                done as f64 / render_start.elapsed().as_secs_f64().max(1e-9));
+        }
+        check_cancel()?;
+        writer.finish(pcm16)?;
+        return Ok(crate::common::RenderStats {
+            frames: out_frames,
+            duration: process_start.elapsed().as_secs_f64(),
+        });
+    }
 
     let mut muxer = Muxer::new(&request.output_path)?;
     let bitrate_audio = 192_000u32;
@@ -332,90 +474,26 @@ async fn render_async(
 
     let bitrate = bitrate_bps(&params.config)?;
     let keyframe_interval = fps.saturating_mul(2).max(1);
-    let mut video_encoder = Encoder::video(vw, vh, bitrate, fps, 2, &params.config.video_codec)?;
+    let mut video_encoder = Encoder::video(vw, vh, bitrate, fps, 2, &params.config.video_codec, transfer)?;
     info!("video encoder: {vw}x{vh} {}bps @ {fps}fps", bitrate);
     info!("Video codec: {}", params.config.video_codec);
     info!("Bitrate: CBR {} bps", bitrate);
     info!("Audio format: AAC, 192000 bps, {} Hz", sample_rate);
     let probe_s = mark!("encoder probe");
-    let yuvs: Vec<YuvTarget> = (0..2)
+    let yuvs: Vec<YuvTarget> = (0..if transfer.is_some() { 0 } else { 2 })
         .map(|_| YuvTarget::new(vw, vh))
         .collect::<Result<Vec<_>>>()?;
-    let msts: Vec<Rc<MSRenderTarget>> = (0..2)
-        .map(|_| Rc::new(MSRenderTarget::new((game_width, game_height), params.config.sample_count)))
-        .collect();
-    let rhythm_strip = if params.config.rhythm_analysis {
-        let cover = chart_fs.load_file(&info.illustration).await?;
-        Some(RhythmStrip::from_chart_bytes_with_audio(
-            &chart, RhythmNoteSelection::from(&config), &cover, &music, config.rhythm_auto_bpm,
-            chart.offset + config.offset + info.offset,
-        )?.with_speed(config.rhythm_speed).with_colors(config.rhythm_colors.as_ref()))
-    } else { None };
-    let rhythm = RhythmComposite::new(game_width, game_height, rhythm_strip, 2)?;
-    let mst_slot = Rc::new(Cell::new(0usize));
-    let my_time: Rc<RefCell<f64>> = Rc::new(RefCell::new(0.));
-    let tm = TimeManager::manual(Box::new({
-        let my_time = Rc::clone(&my_time);
-        move || *(*my_time).borrow()
-    }));
-
-    let mut readback = crate::vulkan_readback::Nv12Readback::new(vw, vh, 3)
-        .context("failed to create the Vulkan NV12 readback ring")?;
-    let frame_bytes = readback.frame_size();
-    let slot_count = readback.slot_count();
-    let ptrs = readback.writer_ptrs();
-    crate::android_uri::debug_log(&format!(
-        "render: frame_bytes={frame_bytes} expected_nv12={} slots={slot_count}",
-        vw as usize * vh as usize * 3 / 2
-    ));
-    if !crate::vulkan_readback::enable_offscreen_video() {
-        bail!("failed to enable the Vulkan offscreen video mode")
-    }
-
-    mark!("offscreen/readback setup");
-    let player = build_player(&params.config).await?;
-    let mut main = Main::new(
-        Box::new(
-            LoadingScene::new(
-                GameMode::Normal,
-                info.clone(),
-                config,
-                chart_fs,
-                Some(player),
-                None,
-                None,
-            )
-            .await?,
-        ),
-        tm,
-        {
-            let msts = Rc::new(msts.iter().cloned().collect::<Vec<_>>());
-            let mst_slot = Rc::clone(&mst_slot);
-            move || Some(msts[mst_slot.get()].input())
-        },
-    )
-    .await?;
-    main.top_level = false;
-    main.viewport = Some((0, 0, game_width as _, game_height as _));
-
-    *my_time.borrow_mut() = 0.;
-    main.update()?;
-
-    mark!("player + scene load");
-    let skip_source = if params.config.disable_loading {
-        O
+    let readback = if transfer.is_none() {
+        Some(crate::vulkan_readback::Nv12Readback::new(vw, vh, 3)
+            .context("failed to create the Vulkan NV12 readback ring")?)
     } else {
-        0.1
+        None
     };
-    let skip = ((skip_source * fps_f64 - 1e-6).ceil().max(0.)) as u64;
-    let frames = (video_length * fps_f64).ceil() as u64;
-    let out_frames = frames.saturating_sub(skip);
-    if out_frames == 0 {
-        bail!("render duration contains no output frames");
-    }
-    let render_start = Instant::now();
-    info!("rendering {out_frames} frames");
-
+    let mut hdr = transfer.map(|transfer| P010::new(vw, vh, transfer));
+    let slot_count = readback.as_ref().map_or(2, |ring| ring.slot_count());
+    let frame_bytes = readback.as_ref().map_or(vw as usize * vh as usize * 3, |ring| ring.frame_size());
+    let mut p010 = [(); 2].map(|_| vec![0; if hdr.is_some() { frame_bytes } else { 0 }]);
+    let ptrs = readback.as_ref().map_or_else(Vec::new, |ring| ring.writer_ptrs());
     let mut pending: [Option<(u64, usize)>; 2] = [None, None];
     let mut free_slots: Vec<usize> = (0..slot_count).collect();
     let mut video_packets = Vec::new();
@@ -465,8 +543,11 @@ async fn render_async(
         fence_wait_time += wait_start.elapsed().as_secs_f64();
 
         if let Some((output_index, read_slot)) = pending[frame_slot].take() {
-            let data =
-                unsafe { std::slice::from_raw_parts(ptrs[read_slot] as *const u8, frame_bytes) };
+            let data = if hdr.is_some() {
+                &p010[read_slot]
+            } else {
+                unsafe { std::slice::from_raw_parts(ptrs[read_slot] as *const u8, frame_bytes) }
+            };
             let time_us = output_index as i64 * 1_000_000 / fps as i64;
             let encode_start = Instant::now();
             video_encoder.submit(data, time_us, output_index % keyframe_interval as u64 == 0)?;
@@ -544,20 +625,32 @@ async fn render_async(
             main.scenes.last().and_then(|scene| scene.chart_time()), &mut painter);
         scene_render_time += scene_start.elapsed().as_secs_f64();
 
-        let read_slot = free_slots.pop().context("NV12 readback ring exhausted")?;
-        let yuv = &yuvs[frame_slot];
+        let read_slot = free_slots.pop().context("frame readback ring exhausted")?;
         let convert_start = Instant::now();
-        yuv.convert(&rendered);
-        yuv_convert_time += convert_start.elapsed().as_secs_f64();
-        let submit_start = Instant::now();
-        context.record_yuv_copy_to_staging(
-            yuv.y_index,
-            yuv.uv_index,
-            readback.buffer_raw(read_slot),
-            vw,
-            vh,
-        );
-        context.finish_offscreen_frame();
+        let submit_start;
+        if let Some(hdr) = &mut hdr {
+            unsafe { get_internal_gl() }.flush();
+            let ctx = miniquad_context();
+            ctx.vulkan_context().unwrap().finish_offscreen_frame();
+            rendered.texture.raw_miniquad_texture_handle().read_pixels(ctx, &mut hdr.rgba);
+            hdr.convert(&mut p010[read_slot]);
+            yuv_convert_time += convert_start.elapsed().as_secs_f64();
+            submit_start = Instant::now();
+        } else {
+            let yuv = &yuvs[frame_slot];
+            yuv.convert(&rendered);
+            yuv_convert_time += convert_start.elapsed().as_secs_f64();
+            submit_start = Instant::now();
+            let context = miniquad_context().vulkan_context().unwrap();
+            context.record_yuv_copy_to_staging(
+                yuv.y_index,
+                yuv.uv_index,
+                readback.as_ref().unwrap().buffer_raw(read_slot),
+                vw,
+                vh,
+            );
+            context.finish_offscreen_frame();
+        }
         pending[frame_slot] = Some((frame - skip, read_slot));
         nv12_submit_time += submit_start.elapsed().as_secs_f64();
 
@@ -595,7 +688,11 @@ async fn render_async(
     let mut drained: Vec<(u64, usize)> = (0..2).filter_map(|slot| pending[slot].take()).collect();
     drained.sort_by_key(|(index, _)| *index);
     for (output_index, read_slot) in drained {
-        let data = unsafe { std::slice::from_raw_parts(ptrs[read_slot] as *const u8, frame_bytes) };
+        let data = if hdr.is_some() {
+            &p010[read_slot]
+        } else {
+            unsafe { std::slice::from_raw_parts(ptrs[read_slot] as *const u8, frame_bytes) }
+        };
         let time_us = output_index as i64 * 1_000_000 / fps as i64;
         video_encoder.submit(data, time_us, output_index % keyframe_interval as u64 == 0)?;
         submitted += 1;
@@ -608,6 +705,9 @@ async fn render_async(
     }
     encoded += video_packets.len() as u64;
     encoder_time += drain_start.elapsed().as_secs_f64();
+    if hdr.is_some() && encoded != out_frames {
+        bail!("Android HEVC encoder returned {encoded} frames for {out_frames} HDR inputs");
+    }
     let mux_start = Instant::now();
     if video_track.is_none() {
         if let Some(format) = video_encoder.take_format() {
@@ -645,9 +745,10 @@ async fn render_async(
         .unwrap_or(0.);
     info!("Swapchain frame fence wait: {:.2}s ({:.1}% of scene render) -> CPU-side scene recording {:.2}s",
         swap_wait_s, swap_wait_s / scene_render_time.max(1e-9) * 100., (scene_render_time - swap_wait_s).max(0.));
-    info!("NV12 handoff: ring {} x {:.1} MiB | MediaCodec {} submissions, {} packets, {:.2}s (max {:.1}ms) | backlog when loop ended {} frames",
+    let pixel_format = if hdr.is_some() { "P010" } else { "NV12" };
+    info!("{pixel_format} handoff: ring {} x {:.1} MiB | MediaCodec {} submissions, {} packets, {:.2}s (max {:.1}ms) | backlog when loop ended {} frames",
         slot_count, frame_bytes as f64 / (1 << 20) as f64, submitted, encoded, encoder_time, encode_max * 1000., backlog_at_end);
-    info!("prpr stage times: update {:.2}s ({:.0} fps) | scene render {:.2}s ({:.0} fps) | YUV convert {:.2}s ({:.0} fps) | NV12 copy/submit {:.2}s ({:.0} fps)",
+    info!("prpr stage times: update {:.2}s ({:.0} fps) | scene render {:.2}s ({:.0} fps) | YUV convert {:.2}s ({:.0} fps) | Frame copy/submit {:.2}s ({:.0} fps)",
         update_time, out_frames as f64 / update_time.max(1e-9), scene_render_time, out_frames as f64 / scene_render_time.max(1e-9),
         yuv_convert_time, out_frames as f64 / yuv_convert_time.max(1e-9), nv12_submit_time, out_frames as f64 / nv12_submit_time.max(1e-9));
     show(out_frames, "Final frame", &mut step_time);
@@ -839,16 +940,18 @@ void main() {
 }
 
 
-/// Android has no ffmpeg, so the encoder only accepts a constant bitrate: turn
-/// a CRF-ish configuration into a sane CBR one before opening MediaCodec.
+/// Normalize bitrate settings before opening MediaCodec.
 fn normalize_config(config: &mut crate::render::RenderConfig) -> Result<()> {
+    config.target_audio = 48_000;
+    if crate::render::prores_profile(&config.video_codec).is_some() {
+        return Ok(());
+    }
     if config.bitrate.trim().is_empty() || config.bitrate_control.eq_ignore_ascii_case("CRF") {
         config.bitrate = "8M".to_owned();
     }
     config.bitrate_control = "CBR".to_owned();
-    config.target_audio = 48_000;
-    config.video_codec = match config.video_codec.to_ascii_lowercase().as_str() {
-        "hevc" | "h265" => "hevc".to_owned(),
+    config.video_codec = match (config.is_hdr(), config.video_codec.to_ascii_lowercase().as_str()) {
+        (true, _) | (false, "hevc" | "h265") => "hevc".to_owned(),
         _ => "h264".to_owned(),
     };
     bitrate_bps(config)?;

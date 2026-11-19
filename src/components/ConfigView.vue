@@ -14,13 +14,80 @@ en:
   rhythm-canvas: 'Chart canvas: {width} × {height}; bottom strip: {strip}px (width / 10, rounded to an even height).'
   ffmpeg-preset: Preset
   video-codec: Encoder
-  encoder-select: Hardware Encoder
+  encoder-select: Encoder
+  encoder-unavailable: No encoder is available for this color space.
+  encoder-probe-failed: Could not check encoder support.
+  encoder-checking: Checking encoder support…
   encoder-auto: Auto
   encoder-nvenc: NVIDIA NVENC
   encoder-qsv: Intel QSV
   encoder-amf: AMD AMF
   encoder-vulkan: Vulkan
+  encoder-videotoolbox: Apple VideoToolbox
+  encoder-metal: Apple Metal
+  encoder-mediacodec: Android MediaCodec
+  encoder-qualcomm: Qualcomm MediaCodec
+  encoder-mediatek: MediaTek MediaCodec
   encoder-cpu: CPU Software
+  codec-prores-hq: Apple ProRes 422 HQ
+  codec-prores: Apple ProRes 422
+  codec-prores-lt: Apple ProRes 422 LT
+  codec-prores-proxy: Apple ProRes 422 Proxy
+  codec-prores-4444: Apple ProRes 4444
+  codec-prores-4444-xq: Apple ProRes 4444 XQ
+  codec-prores-4444-alpha: Apple ProRes 4444 With Alpha
+  prores-flac-adjusted: ProRes MOV uses AAC audio; the audio format was changed from FLAC.
+  color-space: Color Space
+  color-space-rec2100-pq: Rec.2100 PQ
+  color-space-rec2100-hlg: Rec.2100 HLG
+  color-space-rec709: Rec.709
+  color-space-srgb: sRGB
+  hdr: HDR
+  hdr-disabled: HDR controls require Rec.2100 PQ or HLG.
+  hdr-block-area: Block Area
+  hdr-note: Note
+  hdr-background: Background
+  hdr-ui: UI Elements
+  hdr-ui-score: Score
+  hdr-ui-combo: Combo
+  hdr-ui-name: Name
+  hdr-ui-level: Level
+  hdr-ui-line: Judge Line
+  hdr-ui-pb: Progress Bar
+  hdr-ui-pause: Pause
+  hdr-ui-progress-text: Progress Text
+  hdr-ui-time-text: Time Text
+  hdr-ui-bar: Judge Bar
+  hdr-ui-score-aim: Score Aim
+  hdr-ui-watermark: Watermark
+  hdr-sdr: SDR
+  hdr-mapped: Map SDR to HDR
+  hdr-custom: Custom
+  hdr-tone-mapping: Tone Mapping
+  hdr-peak: Target Peak Brightness (nits)
+  hdr-knee: Knee
+  hdr-power: Curve Power
+  hdr-shadow: Shadow Gain
+  hdr-gamut: Gamut
+  hdr-chroma: Chroma Scale
+  hdr-gamut-clip: Gamut Mapping
+  hdr-hard: Hard Clip
+  hdr-soft: Soft Compression
+  background-tab: Background
+  background-chart: Chart Illustration
+  background-solid: Solid
+  background-video: Video
+  background-none: None
+  background-color: Background Color
+  background-video-path: Video File
+  background-choose-video: Choose Video
+  background-video-playback: Playback
+  background-video-normal: Normal
+  background-video-repeat: Repeat
+  background-video-stretch: Stretch
+  background-video-required: Choose a background video file.
+  stereo: Stereo
+  stereo-strength: Stereo Effect Strength
   fps: FPS
   hw-accel: Hardware Acceleration
   hw-accel-tips: Improve speed, slightly reduce quality
@@ -95,6 +162,7 @@ en:
     effect: Effect
     player: Player
     analysis: Rhythm/HandSplit
+    hdr: HDR
     debug: Debug
   section:
     output: Resolution & Frame Rate
@@ -128,13 +196,80 @@ zh-CN:
   rhythm-canvas: '谱面画面：{width} × {height}；底栏：{strip}px（宽度的 1/10，取最近偶数）。'
   ffmpeg-preset: 编码预设
   video-codec: 编码器
-  encoder-select: 硬件编码器
+  encoder-select: 编码器
+  encoder-unavailable: 当前色彩空间没有可用的编码器。
+  encoder-probe-failed: 无法检测编码器支持情况。
+  encoder-checking: 正在检测编码器…
   encoder-auto: 自动选择
   encoder-nvenc: NVIDIA NVENC
   encoder-qsv: Intel QSV
   encoder-amf: AMD AMF
   encoder-vulkan: Vulkan
+  encoder-videotoolbox: Apple VideoToolbox
+  encoder-metal: Apple Metal
+  encoder-mediacodec: Android MediaCodec
+  encoder-qualcomm: 高通 MediaCodec
+  encoder-mediatek: 联发科 MediaCodec
   encoder-cpu: CPU 软编码
+  codec-prores-hq: Apple ProRes 422 HQ
+  codec-prores: Apple ProRes 422
+  codec-prores-lt: Apple ProRes 422 LT
+  codec-prores-proxy: Apple ProRes 422 Proxy
+  codec-prores-4444: Apple ProRes 4444
+  codec-prores-4444-xq: Apple ProRes 4444 XQ
+  codec-prores-4444-alpha: Apple ProRes 4444 带 Alpha
+  prores-flac-adjusted: ProRes MOV 使用 AAC 音频，已将音频格式从 FLAC 切换为 AAC。
+  color-space: 色彩空间
+  color-space-rec2100-pq: Rec.2100 PQ
+  color-space-rec2100-hlg: Rec.2100 HLG
+  color-space-rec709: Rec.709
+  color-space-srgb: sRGB
+  hdr: HDR
+  hdr-disabled: 需要选择 Rec.2100 PQ 或 HLG 后才能调整 HDR 设置。
+  hdr-block-area: 噪域
+  hdr-note: 音符
+  hdr-background: 背景
+  hdr-ui: UI 元素
+  hdr-ui-score: 分数
+  hdr-ui-combo: 连击
+  hdr-ui-name: 玩家名称
+  hdr-ui-level: 难度等级
+  hdr-ui-line: 判定线
+  hdr-ui-pb: 进度条
+  hdr-ui-pause: 暂停按钮
+  hdr-ui-progress-text: 进度文本
+  hdr-ui-time-text: 时间文本
+  hdr-ui-bar: 判定条
+  hdr-ui-score-aim: 分数目标
+  hdr-ui-watermark: 水印
+  hdr-sdr: SDR
+  hdr-mapped: 映射 HDR
+  hdr-custom: 自定义
+  hdr-tone-mapping: 亮度映射
+  hdr-peak: 目标峰值亮度（nits）
+  hdr-knee: 拐点
+  hdr-power: 曲线幂次
+  hdr-shadow: 阴影增益
+  hdr-gamut: 色域
+  hdr-chroma: 色度缩放
+  hdr-gamut-clip: 色域裁切
+  hdr-hard: 硬裁切
+  hdr-soft: 软压缩
+  background-tab: 背景
+  background-chart: 谱面曲绘
+  background-solid: 纯色
+  background-video: 视频
+  background-none: 无
+  background-color: 背景颜色
+  background-video-path: 视频文件
+  background-choose-video: 选择视频
+  background-video-playback: 播放方式
+  background-video-normal: 一般
+  background-video-repeat: 重复
+  background-video-stretch: 拉伸
+  background-video-required: 请选择背景视频文件。
+  stereo: 立体声
+  stereo-strength: 立体声效果强度
   fps: 帧率
   hw-accel: 硬件加速
   hw-accel-tips: 提升速度，略微降低质量
@@ -209,6 +344,7 @@ zh-CN:
     effect: 效果
     player: 玩家
     analysis: 节奏/手序
+    hdr: HDR
     debug: 调试
   section:
     output: 分辨率与帧率
@@ -242,7 +378,9 @@ import type { RenderConfig } from '@/model';
 import { RHYTHM_DEFAULTS, RHYTHM_SPEED_MIN, RHYTHM_SPEED_MAX, isRhythmSpeed, withRhythmDefaults, type RhythmColors } from '@/rhythmConfig';
 import TipSwitch from './TipSwitch.vue';
 import RhythmColorPicker from './RhythmColorPicker.vue';
+import { isMobile } from '@/platform';
 const props = defineProps<{ initialConfig?: RenderConfig; chartPath?: string; chartLabel?: string; chartCover?: string | null; presetTarget?: string }>();
+const mobile = isMobile();
 
 // Phi-TKC's preset list, plus the 1920x1080 default (which was missing from it).
 const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2132', '2388x1668', '1600x1080', '7680x5760'];
@@ -276,15 +414,20 @@ const VIDEO_CODECS = [
   { value: 'h264', title: 'H.264' },
   { value: 'hevc', title: 'HEVC' },
   { value: 'av1', title: 'AV1' },
+  { value: 'prores_422_hq', titleKey: 'codec-prores-hq' },
+  { value: 'prores_422', titleKey: 'codec-prores' },
+  { value: 'prores_422_lt', titleKey: 'codec-prores-lt' },
+  { value: 'prores_422_proxy', titleKey: 'codec-prores-proxy' },
+  { value: 'prores_4444', titleKey: 'codec-prores-4444' },
+  { value: 'prores_4444_xq', titleKey: 'codec-prores-4444-xq' },
+  { value: 'prores_4444_alpha', titleKey: 'codec-prores-4444-alpha' },
 ];
-const encoders = computed(() => [
-  { value: 'auto', title: t('encoder-auto') },
-  { value: 'nvenc', title: t('encoder-nvenc') },
-  { value: 'qsv', title: t('encoder-qsv') },
-  { value: 'amf', title: t('encoder-amf') },
-  { value: 'vulkan', title: t('encoder-vulkan') },
-  { value: 'cpu', title: t('encoder-cpu') },
-]);
+const ENCODER_TITLE_KEYS: Record<string, string> = {
+  nvenc: 'encoder-nvenc', qsv: 'encoder-qsv', amf: 'encoder-amf',
+  vulkan: 'encoder-vulkan', videotoolbox: 'encoder-videotoolbox',
+  metal: 'encoder-metal', mediacodec: 'encoder-mediacodec', cpu: 'encoder-cpu',
+  qualcomm: 'encoder-qualcomm', mediatek: 'encoder-mediatek',
+};
 const AUDIO_FORMATS = ['flac', 'mp3', 'aac', 'opus', 'wav'];
 // The Rust side only accepts 16/24/32 — a 48 option here would be rejected at render time.
 const AUDIO_BITS = [16, 24, 32];
@@ -305,6 +448,7 @@ const categories = [
   { key: 'graphics', icon: 'mdi-palette-outline', labelKey: 'head-categories.effect' },
   { key: 'player', icon: 'mdi-account-outline', labelKey: 'head-categories.player' },
   { key: 'analysis', icon: 'mdi-music-note-eighth', labelKey: 'head-categories.analysis' },
+  { key: 'hdr', icon: 'mdi-white-balance-sunny', labelKey: 'head-categories.hdr' },
   { key: 'debug', icon: 'mdi-bug-outline', labelKey: 'head-categories.debug' },
 ];
 
@@ -368,7 +512,6 @@ loadMsaaSupport();
 const videoCodec = ref('h264');
 const encoder = ref('auto');
 const ffmpegPreset = ref('medium');
-
 const bitrateControl = ref('CRF');
 const bitrate = ref('28');
 const hwAccel = ref(true);
@@ -376,7 +519,8 @@ const hwAccel = ref(true);
 // Mirrors `encoder_qp()` in src-tauri/src/render.rs: the Rust Vulkan encoder is
 // constant-QP and H.264-only, so the existing CRF value *is* the QP.
 const vulkanEligible = computed(
-  () => hwAccel.value && videoCodec.value === 'h264' && (encoder.value === 'auto' || encoder.value === 'vulkan'),
+  () => hwAccel.value && !hdrEnabled.value && supportedEncoders.value.includes('vulkan')
+    && videoCodec.value === 'h264' && (encoder.value === 'auto' || encoder.value === 'vulkan'),
 );
 const vulkanQp = computed(() => {
   if (bitrateControl.value.toUpperCase() !== 'CRF') return null;
@@ -397,6 +541,115 @@ const endingLength = ref('-2.0');
 const chartRatio = ref(1.0);
 const noteSpeedFactor = ref(1.0);
 const background = ref(false);
+const backgroundMode = ref<'chart' | 'solid' | 'video' | 'none'>('chart');
+const backgroundColor = ref('#000000');
+const backgroundVideo = ref<string | null>(null);
+const backgroundVideoPlayback = ref<RenderConfig['backgroundVideoPlayback']>('normal');
+const backgroundVideoPlaybackOptions = computed(() => [
+  { value: 'normal', title: t('background-video-normal') },
+  { value: 'repeat', title: t('background-video-repeat') },
+  { value: 'stretch', title: t('background-video-stretch') },
+]);
+const colorSpace = ref<RenderConfig['colorSpace']>('rec709');
+const encoderSupport = ref<Record<string, Record<string, string[]>>>({});
+const encoderProbeFailures = ref<Record<string, boolean>>({});
+const encoderColorSpace = computed(() => colorSpace.value === 'srgb' ? 'rec709' : colorSpace.value);
+const encoderAvailability = computed(() => encoderSupport.value[encoderColorSpace.value]);
+const videoCodecs = computed(() => VIDEO_CODECS
+  .filter((item) => encoderAvailability.value?.[item.value]?.length)
+  .map((item) => ({
+    value: item.value,
+    title: 'title' in item ? item.title : t(item.titleKey),
+  })));
+const isProResCodec = computed(() => videoCodec.value.startsWith('prores_'));
+const supportedEncoders = computed(() => encoderAvailability.value?.[videoCodec.value] ?? []);
+const encoders = computed(() => {
+  const hardware = supportedEncoders.value.filter((id) => id !== 'cpu');
+  const options = hwAccel.value ? [...hardware] : [];
+  if (supportedEncoders.value.includes('cpu')) options.push('cpu');
+  if (!mobile && !isProResCodec.value && hwAccel.value && options.length > 1) options.unshift('auto');
+  return options.map((value) => ({
+    value,
+    title: value === 'auto' ? t('encoder-auto') : t(ENCODER_TITLE_KEYS[value] ?? value),
+  }));
+});
+const encoderStatus = computed(() => {
+  if (encoderProbeFailures.value[encoderColorSpace.value]) return t('encoder-probe-failed');
+  if (!encoderAvailability.value) return t('encoder-checking');
+  return videoCodecs.value.length ? '' : t('encoder-unavailable');
+});
+
+watch(encoderColorSpace, async (space) => {
+  if (encoderSupport.value[space]) return;
+  delete encoderProbeFailures.value[space];
+  try {
+    encoderSupport.value[space] = await invoke<Record<string, string[]>>(
+      'get_encoder_availability', { colorSpace: space },
+    );
+  } catch {
+    encoderProbeFailures.value[space] = true;
+  }
+}, { immediate: true });
+
+watch([videoCodec, hwAccel, encoderAvailability], () => {
+  if (!encoderAvailability.value || !videoCodecs.value.length) return;
+  if (!supportedEncoders.value.length) {
+    videoCodec.value = videoCodecs.value[0].value;
+  }
+  if (!supportedEncoders.value.includes('cpu')) hwAccel.value = true;
+  if (!encoders.value.some((option) => option.value === encoder.value)) {
+    encoder.value = encoders.value[0]?.value ?? 'auto';
+  }
+});
+type HdrMode = 'sdr' | 'mapped' | 'custom';
+interface HdrSetting {
+  mode: HdrMode;
+  peakNits: number;
+  knee: number;
+  power: number;
+  shadowGain: number;
+  chromaScale: number;
+  gamutClip: 'hard' | 'soft';
+}
+const HDR_DEFAULT: HdrSetting = { mode: 'sdr', peakNits: 1000, knee: 0.7, power: 1.7, shadowGain: 1, chromaScale: 1, gamutClip: 'hard' };
+type HdrSectionKey = keyof RenderConfig['hdrSettings'];
+const HDR_UI_KEYS = ['score', 'combo', 'name', 'level', 'line', 'pb', 'pause', 'progressText', 'timeText', 'bar', 'scoreAim', 'watermark'] as const;
+const HDR_UI_LABELS: Record<typeof HDR_UI_KEYS[number], string> = {
+  score: 'hdr-ui-score', combo: 'hdr-ui-combo', name: 'hdr-ui-name', level: 'hdr-ui-level',
+  line: 'hdr-ui-line', pb: 'hdr-ui-pb', pause: 'hdr-ui-pause', progressText: 'hdr-ui-progress-text',
+  timeText: 'hdr-ui-time-text', bar: 'hdr-ui-bar', scoreAim: 'hdr-ui-score-aim', watermark: 'hdr-ui-watermark',
+};
+const activeHdrUi = ref<typeof HDR_UI_KEYS[number]>('score');
+function createHdrUiSettings() {
+  return Object.fromEntries(HDR_UI_KEYS.map((key) => [key, { ...HDR_DEFAULT }])) as RenderConfig['hdrSettings']['ui'];
+}
+const hdrSettings = ref<RenderConfig['hdrSettings']>({
+  blockArea: { ...HDR_DEFAULT }, note: { ...HDR_DEFAULT }, background: { ...HDR_DEFAULT }, ui: createHdrUiSettings(),
+});
+const activeHdrSection = ref<HdrSectionKey>('blockArea');
+const hdrEnabled = computed(() => colorSpace.value === 'rec2100_pq' || colorSpace.value === 'rec2100_hlg');
+const activeHdrSetting = computed<HdrSetting>(() => activeHdrSection.value === 'ui'
+  ? hdrSettings.value.ui[activeHdrUi.value]
+  : hdrSettings.value[activeHdrSection.value]);
+const hdrSections = computed<Array<{ value: HdrSectionKey; title: string }>>(() => [
+  { value: 'blockArea', title: t('hdr-block-area') },
+  { value: 'note', title: t('hdr-note') },
+  { value: 'background', title: t('hdr-background') },
+  { value: 'ui', title: t('hdr-ui') },
+]);
+const stereoEnabled = ref(false);
+const stereoStrength = ref(0.5);
+async function chooseBackgroundVideo() {
+  try {
+    const selected = mobile ? await invoke<string | null>('pick_background_video') : await open({
+      multiple: false,
+      filters: [{ name: t('background-video'), extensions: ['mp4', 'mov', 'mkv', 'webm', 'm4v'] }, anyFilter()],
+    });
+    if (selected && typeof selected === 'string') backgroundVideo.value = selected;
+  } catch (error) {
+    toastError(error);
+  }
+}
 const bar = ref(false);
 const noteScale = ref(1);
 const doubleHint = ref(true);
@@ -427,6 +680,11 @@ const videoFormat = ref('mp4');
 const video = ref(false);
 watch([audioFormat, video], ([newAudio, newVideo]) => {
   if (newAudio === 'flac' && newVideo) {
+    if (isProResCodec.value) {
+      audioFormat.value = 'aac';
+      toast(t('prores-flac-adjusted'), 'info');
+      return;
+    }
     video.value = false;
     videoFormat.value = 'mp4';
     toast(t('video-format-flac-error'), 'error');
@@ -434,6 +692,15 @@ watch([audioFormat, video], ([newAudio, newVideo]) => {
 });
 watch(videoFormat, (val) => {
   video.value = val === 'mov';
+});
+watch(videoCodec, (codec) => {
+  if (codec.startsWith('prores_')) {
+    if (audioFormat.value === 'flac') {
+      audioFormat.value = 'aac';
+      toast(t('prores-flac-adjusted'), 'info');
+    }
+    videoFormat.value = 'mov';
+  }
 });
 
 interface Respack {
@@ -477,6 +744,17 @@ const DEFAULT_PRESET: Preset = {
     hardwareAccel: true,
     videoCodec: 'h264',
     encoder: 'auto',
+    colorSpace: 'rec709',
+    backgroundMode: 'chart',
+    backgroundColor: '#000000',
+    backgroundVideo: null,
+    backgroundVideoPlayback: 'normal',
+    stereoEnabled: false,
+    stereoStrength: 0.5,
+    hdrSettings: {
+      blockArea: { ...HDR_DEFAULT }, note: { ...HDR_DEFAULT },
+      background: { ...HDR_DEFAULT }, ui: createHdrUiSettings(),
+    },
     bitrateControl: 'CRF',
     bitrate: '28',
     targetAudio: 48000,
@@ -526,16 +804,40 @@ watch(presetExpanded, (expanded) => {
   gsap.to(presetChevron.value, {
     attr: { points: expanded ? '16 4 8 12 16 20' : '8 4 16 12 8 20' },
     duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.5,
-    ease: 'power2.inOut',
+    ease: 'power1.inOut',
     overwrite: true,
   });
 });
 onUnmounted(() => { if (presetChevron.value) gsap.killTweensOf(presetChevron.value); });
 const settingsScroll = ref<HTMLElement>();
-watch(activeCategory, async () => {
-  await nextTick();
+const categoryDirection = ref<'forward' | 'backward'>('forward');
+let categoryTween: gsap.core.Tween | undefined;
+
+function selectCategory(key: string) {
+  const current = categories.findIndex((category) => category.key === activeCategory.value);
+  const next = categories.findIndex((category) => category.key === key);
+  if (next === current) return;
+  categoryTween?.kill();
+  categoryDirection.value = next > current ? 'forward' : 'backward';
+  activeCategory.value = key;
   if (settingsScroll.value) settingsScroll.value.scrollTop = 0;
-});
+  void nextTick(() => {
+    const panel = settingsScroll.value && [...settingsScroll.value.querySelectorAll<HTMLElement>('.settings-stack')]
+      .find((element) => getComputedStyle(element).display !== 'none');
+    if (!panel) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      gsap.set(panel, { clearProps: 'transform,opacity,visibility' });
+      return;
+    }
+    const direction = categoryDirection.value === 'forward' ? 1 : -1;
+    categoryTween = gsap.fromTo(panel, { x: direction * 24, autoAlpha: 0 }, {
+      x: 0, autoAlpha: 1, duration: 0.24, ease: 'cubic.inOut',
+      clearProps: 'transform,opacity,visibility',
+    });
+  });
+}
+onUnmounted(() => categoryTween?.kill());
+
 
 async function updatePresets() {
   const currentKey = preset.value.key;
@@ -591,6 +893,10 @@ async function buildConfig(): Promise<RenderConfig | null> {
     toast(t('rhythm-speed-invalid'), 'error');
     return null;
   }
+  if (backgroundMode.value === 'video' && !backgroundVideo.value) {
+    toast(t('background-video-required'), 'error');
+    return null;
+  }
   const [w, h] = resolution.value.split(/x/i).map(Number);
   if (!Number.isInteger(w) || !Number.isInteger(h) || w < 16 || h < 16 || w % 2 !== 0 || h % 2 !== 0) {
     toast(t('rules.resolution'), 'error');
@@ -619,10 +925,18 @@ async function buildConfig(): Promise<RenderConfig | null> {
     hardwareAccel: hwAccel.value,
     videoCodec: videoCodec.value,
     encoder: encoder.value,
+    colorSpace: colorSpace.value,
+    backgroundMode: backgroundMode.value,
+    backgroundColor: backgroundColor.value,
+    backgroundVideo: backgroundVideo.value,
+    backgroundVideoPlayback: backgroundVideoPlayback.value,
+    stereoEnabled: stereoEnabled.value,
+    stereoStrength: stereoStrength.value,
+    hdrSettings: JSON.parse(JSON.stringify(hdrSettings.value)),
     bitrateControl: bitrateControl.value,
     bitrate: bitrate.value,
     targetAudio: targetAudio.value,
-    background: background.value,
+    background: backgroundMode.value === 'chart',
     handSplit: handSplit.value,
     noteSpeedFactor: noteSpeedFactor.value,
     video: video.value,
@@ -686,17 +1000,32 @@ function applyConfig(c: RenderConfig) {
   hwAccel.value = c.hardwareAccel;
   videoCodec.value = c.videoCodec;
   encoder.value = c.encoder || 'auto';
+  colorSpace.value = c.colorSpace || 'rec709';
+  backgroundMode.value = c.backgroundMode ?? 'chart';
+  backgroundColor.value = c.backgroundColor || '#000000';
+  backgroundVideo.value = c.backgroundVideo || null;
+  backgroundVideoPlayback.value = c.backgroundVideoPlayback ?? 'normal';
+  stereoEnabled.value = c.stereoEnabled ?? false;
+  stereoStrength.value = c.stereoStrength ?? 0.5;
+  if (c.hdrSettings) {
+    hdrSettings.value = {
+      blockArea: { ...HDR_DEFAULT, ...c.hdrSettings.blockArea },
+      note: { ...HDR_DEFAULT, ...c.hdrSettings.note },
+      background: { ...HDR_DEFAULT, ...c.hdrSettings.background },
+      ui: Object.fromEntries(HDR_UI_KEYS.map((key) => [key, { ...HDR_DEFAULT, ...(c.hdrSettings.ui?.[key] ?? {}) }])) as RenderConfig['hdrSettings']['ui'],
+    };
+  }
   bitrateControl.value = c.bitrateControl;
   bitrate.value = c.bitrate;
   targetAudio.value = c.targetAudio;
-  background.value = c.background ?? false;
+  background.value = backgroundMode.value === 'chart';
   handSplit.value = c.handSplit ?? false;
   noteSpeedFactor.value = c.noteSpeedFactor;
   // Keep the format select and the `video` boolean in sync; buildConfig() sends only
   // the boolean, so a preset with MOV used to be displayed as MP4 (and vice versa).
-  videoFormat.value = c.video ? 'mov' : 'mp4';
-  video.value = c.video;
-  audioFormat.value = c.audioFormat || 'flac';
+  videoFormat.value = c.video || c.videoCodec.startsWith('prores_') ? 'mov' : 'mp4';
+  video.value = videoFormat.value === 'mov';
+  audioFormat.value = c.audioFormat === 'flac' && c.videoCodec.startsWith('prores_') ? 'aac' : (c.audioFormat || 'flac');
   audioBit.value = c.audioBit;
   aggressive.value = c.aggressive;
   const challengeIndex = STD_CHALLENGE_COLORS.indexOf(c.challengeColor);
@@ -797,7 +1126,7 @@ async function replacePreset() {
   <v-form ref="form" class="config-root" @submit.prevent>
     <!-- Category chips -->
     <div class="cat-bar clear-glass">
-      <button v-for="cat in categories" :key="cat.key" type="button" class="cat-chip" :class="{ 'is-active': activeCategory === cat.key }" @click="activeCategory = cat.key" @focus="revealCategory">
+      <button v-for="cat in categories" :key="cat.key" type="button" class="cat-chip" :class="{ 'is-active': activeCategory === cat.key }" @click="selectCategory(cat.key)" @focus="revealCategory">
         <v-icon :icon="cat.icon" size="18" />
         <span>{{ t(cat.labelKey) }}</span>
       </button>
@@ -809,7 +1138,7 @@ async function replacePreset() {
       <div class="settings-col">
         <div ref="settingsScroll" class="settings-scroll">
           <!-- OUTPUT -->
-          <div v-show="activeCategory === 'output'" class="settings-stack">
+            <div v-show="activeCategory === 'output'" class="settings-stack" :inert="activeCategory !== 'output'">
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.output') }}</div>
               <div class="field-row">
@@ -835,13 +1164,28 @@ async function replacePreset() {
                   density="compact"
                   variant="outlined" />
               </div>
+              <div class="field-row">
+                <v-select
+                  v-model="colorSpace"
+                  :items="[
+                    { title: t('color-space-rec2100-pq'), value: 'rec2100_pq' },
+                    { title: t('color-space-rec2100-hlg'), value: 'rec2100_hlg' },
+                    { title: t('color-space-rec709'), value: 'rec709' },
+                    { title: t('color-space-srgb'), value: 'srgb' },
+                  ]"
+                  :label="t('color-space')"
+                  density="compact"
+                  variant="outlined"
+                  hide-details />
+              </div>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.encoder') }}</div>
               <div class="field-row two-col">
                 <v-select
                   v-model="videoCodec"
-                  :items="VIDEO_CODECS"
+                  :disabled="Boolean(encoderStatus)"
+                  :items="videoCodecs"
                   item-title="title"
                   item-value="value"
                   :label="t('video-codec')"
@@ -850,6 +1194,7 @@ async function replacePreset() {
                   hide-details />
                 <v-select
                   v-model="encoder"
+                  :disabled="Boolean(encoderStatus)"
                   :items="encoders"
                   item-title="title"
                   item-value="value"
@@ -858,9 +1203,10 @@ async function replacePreset() {
                   variant="outlined"
                   hide-details />
               </div>
+              <p v-if="encoderStatus" class="field-hint">{{ encoderStatus }}</p>
               <div class="field-row two-col">
                 <v-select v-model="ffmpegPreset" :items="FFMPEG_PRESETS" :label="t('ffmpeg-preset')" density="compact" variant="outlined" hide-details />
-                <v-select v-model="videoFormat" :items="VIDEO_FORMAT" :label="t('video-format')" density="compact" variant="outlined" hide-details />
+                <v-select v-model="videoFormat" :items="VIDEO_FORMAT" :label="t('video-format')" density="compact" variant="outlined" hide-details :disabled="isProResCodec" />
               </div>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
@@ -876,15 +1222,14 @@ async function replacePreset() {
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.performance') }}</div>
               <div class="switch-grid">
-                <TipSwitch v-model="hwAccel" :label="t('hw-accel')" :tooltip="t('hw-accel-tips')" density="compact" color="primary" />
+                <TipSwitch v-model="hwAccel" :disabled="Boolean(encoderStatus) || !supportedEncoders.includes('cpu') || supportedEncoders.length < 2" :label="t('hw-accel')" :tooltip="t('hw-accel-tips')" density="compact" color="primary" />
                 <TipSwitch v-model="fxaa" :label="t('fxaa')" :tooltip="t('fxaa-tips')" density="compact" color="primary" />
                 <TipSwitch v-model="ffmpegThread" :label="t('ffmpeg-thread')" density="compact" color="primary" />
               </div>
             </div>
           </div>
-
           <!-- RECORDING -->
-          <div v-show="activeCategory === 'recording'" class="settings-stack">
+            <div v-show="activeCategory === 'recording'" class="settings-stack" :inert="activeCategory !== 'recording'">
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.volume') }}</div>
               <div class="slider-row">
@@ -913,6 +1258,13 @@ async function replacePreset() {
                   hide-details
                   :disabled="audioFormat !== 'wav'" />
               </div>
+              <div class="switch-grid stereo-option">
+                <TipSwitch v-model="stereoEnabled" :label="t('stereo')" density="compact" color="primary" />
+              </div>
+              <div v-if="stereoEnabled" class="slider-block">
+                <div class="slider-header"><span>{{ t('stereo-strength') }}</span><span class="slider-val">{{ Math.round(stereoStrength * 100) }}%</span></div>
+                <v-slider v-model="stereoStrength" :min="0" :max="1" :step="0.01" hide-details color="primary" />
+              </div>
               <div class="field-row two-col">
                 <v-select v-model="targetAudio" :items="SAMPLE_RATES" :label="t('target_audio')" density="compact" variant="outlined" hide-details />
                 <v-text-field
@@ -926,9 +1278,8 @@ async function replacePreset() {
               </div>
             </div>
           </div>
-
           <!-- GAME -->
-          <div v-show="activeCategory === 'game'" class="settings-stack">
+            <div v-show="activeCategory === 'game'" class="settings-stack" :inert="activeCategory !== 'game'">
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.speed') }}</div>
               <div class="slider-block">
@@ -946,7 +1297,13 @@ async function replacePreset() {
                 <v-slider v-model="noteSpeedFactor" :min="0.1" :max="2" :step="0.01" hide-details color="primary" />
               </div>
               <div class="switch-grid">
-                <v-switch v-model="background" :label="t('background')" density="compact" color="primary" hide-details />
+                <v-switch
+                  :model-value="backgroundMode === 'chart'"
+                  :label="t('background')"
+                  density="compact"
+                  color="primary"
+                  hide-details
+                  @update:model-value="backgroundMode = $event ? 'chart' : 'none'" />
                 <v-switch v-model="bar" :label="t('bar')" density="compact" color="primary" hide-details />
               </div>
             </div>
@@ -961,9 +1318,37 @@ async function replacePreset() {
               </div>
             </div>
           </div>
-
           <!-- GRAPHICS -->
-          <div v-show="activeCategory === 'graphics'" class="settings-stack">
+            <div v-show="activeCategory === 'graphics'" class="settings-stack" :inert="activeCategory !== 'graphics'">
+            <div class="md3-card glass fluent-glass" v-glass>
+              <div class="card-label">{{ t('background-tab') }}</div>
+              <v-btn-toggle v-model="backgroundMode" mandatory color="primary" divided class="background-modes">
+                <v-btn value="chart">{{ t('background-chart') }}</v-btn>
+                <v-btn value="solid">{{ t('background-solid') }}</v-btn>
+                <v-btn value="video">{{ t('background-video') }}</v-btn>
+                <v-btn value="none">{{ t('background-none') }}</v-btn>
+              </v-btn-toggle>
+              <div v-if="backgroundMode === 'solid'" class="field-row background-color-row">
+                <label class="field-label" for="render-background-color">{{ t('background-color') }}</label>
+                <input id="render-background-color" v-model="backgroundColor" class="color-input" type="color" />
+              </div>
+              <div v-if="backgroundMode === 'video'" class="field-row background-video-row">
+                <v-text-field
+                  v-if="!mobile"
+                  v-model="backgroundVideo"
+                  :label="t('background-video-path')"
+                  density="compact"
+                  variant="outlined"
+                  hide-details />
+                <v-btn variant="outlined" prepend-icon="mdi-folder-open-outline" @click="chooseBackgroundVideo">{{ t('background-choose-video') }}</v-btn>
+              </div>
+              <v-btn-toggle v-if="backgroundMode === 'video'" v-model="backgroundVideoPlayback"
+                :aria-label="t('background-video-playback')" mandatory color="primary" divided class="background-modes">
+                <v-btn v-for="option in backgroundVideoPlaybackOptions" :key="option.value" :value="option.value">
+                  {{ option.title }}
+                </v-btn>
+              </v-btn-toggle>
+            </div>
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.respack') }}</div>
               <div class="respack-row">
@@ -1013,9 +1398,8 @@ async function replacePreset() {
               </div>
             </div>
           </div>
-
           <!-- PLAYER -->
-          <div v-show="activeCategory === 'player'" class="settings-stack">
+            <div v-show="activeCategory === 'player'" class="settings-stack" :inert="activeCategory !== 'player'">
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.player') }}</div>
               <div class="avatar-row">
@@ -1038,9 +1422,8 @@ async function replacePreset() {
               </div>
             </div>
           </div>
-
           <!-- RHYTHM / HAND SPLIT -->
-          <div v-show="activeCategory === 'analysis'" class="settings-stack">
+            <div v-show="activeCategory === 'analysis'" class="settings-stack" :inert="activeCategory !== 'analysis'">
             <div class="md3-card glass fluent-glass rhythm-card" v-glass>
               <TipSwitch v-model="rhythmAnalysis" :label="t('rhythm-analysis')" density="compact" color="primary" hide-details />
               <div v-if="rhythmAnalysis" class="rhythm-options">
@@ -1074,9 +1457,52 @@ async function replacePreset() {
               <TipSwitch v-model="handSplit" :label="t('hand-split')" density="compact" color="primary" hide-details />
             </div>
           </div>
-
+          <!-- HDR -->
+            <div v-show="activeCategory === 'hdr'" class="settings-stack" :inert="activeCategory !== 'hdr'">
+            <div class="md3-card glass fluent-glass hdr-card" v-glass :aria-disabled="!hdrEnabled">
+              <div class="card-label">{{ t('hdr') }}</div>
+              <p v-if="!hdrEnabled" class="field-hint">{{ t('hdr-disabled') }}</p>
+              <v-tabs v-model="activeHdrSection" color="primary" density="compact" class="hdr-tabs" :disabled="!hdrEnabled">
+                <v-tab v-for="section in hdrSections" :key="section.value" :value="section.value">{{ section.title }}</v-tab>
+              </v-tabs>
+              <template v-for="section in hdrSections" :key="section.value">
+                <div v-if="activeHdrSection === section.value" class="hdr-section" :class="{ 'is-disabled': !hdrEnabled }">
+                  <v-tabs v-if="section.value === 'ui'" v-model="activeHdrUi" color="primary" density="compact" class="hdr-tabs hdr-ui-tabs" :disabled="!hdrEnabled">
+                    <v-tab v-for="key in HDR_UI_KEYS" :key="key" :value="key">{{ t(HDR_UI_LABELS[key]) }}</v-tab>
+                  </v-tabs>
+                  <v-btn-toggle v-model="activeHdrSetting.mode" mandatory color="primary" divided class="hdr-modes" :disabled="!hdrEnabled">
+                    <v-btn value="sdr">{{ t('hdr-sdr') }}</v-btn>
+                    <v-btn value="mapped">{{ t('hdr-mapped') }}</v-btn>
+                    <v-btn value="custom">{{ t('hdr-custom') }}</v-btn>
+                  </v-btn-toggle>
+                  <template v-if="hdrEnabled && activeHdrSetting.mode === 'custom'">
+                    <div class="card-label">{{ t('hdr-tone-mapping') }}</div>
+                    <div class="field-row">
+                      <v-text-field v-model.number="activeHdrSetting.peakNits" :label="t('hdr-peak')" type="number" :min="100" :max="10000" :rules="[RULES.positive]" density="compact" variant="outlined" hide-details />
+                    </div>
+                    <div v-for="control in ([
+                      { key: 'knee', label: 'hdr-knee', min: 0, max: 1, step: 0.01 },
+                      { key: 'power', label: 'hdr-power', min: 0.1, max: 4, step: 0.01 },
+                      { key: 'shadowGain', label: 'hdr-shadow', min: 0, max: 4, step: 0.01 },
+                    ] as const)" :key="control.key" class="slider-block">
+                      <div class="slider-header"><span>{{ t(control.label) }}</span><span class="slider-val">{{ activeHdrSetting[control.key].toFixed(2) }}</span></div>
+                      <v-slider v-model="activeHdrSetting[control.key]" :min="control.min" :max="control.max" :step="control.step" :disabled="!hdrEnabled" hide-details color="primary" />
+                    </div>
+                    <div class="card-label">{{ t('hdr-gamut') }}</div>
+                    <div class="slider-block">
+                      <div class="slider-header"><span>{{ t('hdr-chroma') }}</span><span class="slider-val">{{ activeHdrSetting.chromaScale.toFixed(2) }}</span></div>
+                      <v-slider v-model="activeHdrSetting.chromaScale" :min="0" :max="2" :step="0.01" :disabled="!hdrEnabled" hide-details color="primary" />
+                    </div>
+                    <v-select v-model="activeHdrSetting.gamutClip" :items="[
+                      { title: t('hdr-hard'), value: 'hard' }, { title: t('hdr-soft'), value: 'soft' },
+                    ]" :label="t('hdr-gamut-clip')" density="compact" variant="outlined" :disabled="!hdrEnabled" hide-details />
+                  </template>
+                </div>
+              </template>
+            </div>
+          </div>
           <!-- DEBUG -->
-          <div v-show="activeCategory === 'debug'" class="settings-stack">
+            <div v-show="activeCategory === 'debug'" class="settings-stack" :inert="activeCategory !== 'debug'">
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.debug') }}</div>
               <div class="switch-grid">
@@ -1174,6 +1600,7 @@ async function replacePreset() {
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s;
+  transition-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
   font-family: inherit;
 }
 .cat-chip:hover {
@@ -1209,6 +1636,7 @@ async function replacePreset() {
   overflow-y: auto;
   overscroll-behavior: none;
   padding-right: 4px;
+  position: relative;
 }
 .settings-stack {
   display: flex;
@@ -1225,8 +1653,39 @@ async function replacePreset() {
   transition:
     border-color 0.2s,
     box-shadow 0.2s;
+  transition-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
   cursor: default;
 }
+.background-modes,
+.hdr-modes {
+  width: 100%;
+  min-height: 40px;
+  height: auto;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+}
+.background-modes :deep(.v-btn),
+.hdr-modes :deep(.v-btn) {
+  min-width: max-content;
+  min-height: 40px;
+  flex: 1 0 auto;
+  text-transform: none;
+}
+.background-color-row { align-items: center; justify-content: space-between; }
+.background-video-row { align-items: center; }
+.field-label { color: rgba(var(--main-color-rgb), 0.75); font-size: 13px; }
+.color-input { width: 52px; height: 36px; border: 1px solid rgba(var(--main-color-rgb), .3); border-radius: 6px; background: transparent; padding: 2px; }
+.hdr-tabs { min-height: 48px; max-width: 100%; overflow-x: auto; }
+.hdr-tabs :deep(.v-slide-group__content) { width: max-content; flex: 0 0 auto; }
+.hdr-tabs :deep(.v-slide-group__container) { min-width: 0; overflow: hidden; }
+.hdr-tabs :deep(.v-tab) { min-width: 88px; min-height: 48px; padding-inline: 12px; flex: 0 0 auto; }
+.hdr-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.hdr-section.is-disabled { opacity: .5; }
+.hdr-card[aria-disabled="true"] :deep(.v-btn-toggle),
+.hdr-card[aria-disabled="true"] :deep(.v-slider) { pointer-events: none; }
+.stereo-option { display: block; }
 .card-label {
   font-size: 11px;
   font-weight: 700;
@@ -1309,7 +1768,7 @@ async function replacePreset() {
   cursor: pointer;
   font-size: 12px;
   color: rgba(var(--main-color-rgb), 0.5);
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.65, 0, 0.35, 1);
   user-select: none;
   white-space: nowrap;
 }
@@ -1365,7 +1824,7 @@ async function replacePreset() {
 .preset-actions { display: flex; align-items: center; gap: 6px; }
 .preset-actions :deep(.v-btn--icon) { width: 32px; height: 32px; }
 .preset-reveal-enter-active,
-.preset-reveal-leave-active { transition: opacity 0.5s cubic-bezier(0.65, 0, 0.35, 1), transform 0.5s cubic-bezier(0.65, 0, 0.35, 1); }
+  .preset-reveal-leave-active { transition: opacity 0.5s cubic-bezier(0.65, 0, 0.35, 1), transform 0.5s cubic-bezier(0.65, 0, 0.35, 1); }
 .preset-reveal-enter-from,
 .preset-reveal-leave-to { opacity: 0; transform: translateX(-10px) scaleX(0.96); }
 @media (max-width: 900px) {

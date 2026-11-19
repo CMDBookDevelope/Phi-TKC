@@ -230,7 +230,6 @@ async function loadChart(file: string) {
     parsingChart.value = true;
     chartPath.value = file;
     renderTaskId = null;
-    renderCover.value = null;
     renderProgress.value = undefined;
     renderDuration.value = undefined;
     chartInfo.value = (await invoke('parse_chart', { path: file })) as ChartInfo;
@@ -241,9 +240,9 @@ async function loadChart(file: string) {
         path: file,
         illustration: chartInfo.value.illustration,
       });
-      if (cover) renderCover.value = cover;
+      renderCover.value = cover || null;
     } catch {
-      /* charts without an illustration keep the placeholder */
+      renderCover.value = null;
     }
     // Keep the Phi-TKC dim slider in sync with the freshly parsed chart.
     pstBackgroundDim.value = Math.round(chartInfo.value.backgroundDim * 100);
@@ -823,7 +822,7 @@ function resetAndGoChoose() {
     </v-overlay>
 
     <!-- Parsing overlay -->
-    <v-overlay v-model="parsingChart" contained class="align-center justify-center parse-overlay" persistent :close-on-content-click="false">
+    <v-overlay v-model="parsingChart" contained :scrim="false" class="align-center justify-center parse-overlay" persistent :close-on-content-click="false">
       <div class="parse-card">
         <v-progress-circular indeterminate color="primary" size="36" width="3" />
         <span>{{ t('parsing') }}</span>
@@ -876,7 +875,7 @@ function resetAndGoChoose() {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  transition: all 0.2s cubic-bezier(0.65, 0, 0.35, 1);
   white-space: nowrap;
   font-family: inherit;
 }
@@ -920,6 +919,9 @@ function resetAndGoChoose() {
 .step-panel {
   position: absolute;
   inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  isolation: isolate;
   padding: 24px;
   opacity: 0;
   transform: translateX(100%);
@@ -977,14 +979,14 @@ function resetAndGoChoose() {
   cursor: pointer;
   position: relative;
   transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease;
+    transform 0.3s cubic-bezier(0.65, 0, 0.35, 1),
+    box-shadow 0.3s cubic-bezier(0.65, 0, 0.35, 1);
   display: flex;
   flex-direction: column;
 }
 
 .book-card:hover {
-  transform: translateY(-4px);
+  transform: none;
 }
 
 .book-face {
@@ -1205,7 +1207,6 @@ function resetAndGoChoose() {
 }
 
 .parse-overlay {
-  background-color: rgba(0, 0, 0, 0.85);
   z-index: 200;
 }
 .parse-card {

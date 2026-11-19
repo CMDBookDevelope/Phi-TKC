@@ -315,11 +315,11 @@ onUnmounted(() => {
   width: 120px;
   height: 120px;
   border-radius: 20px;
-  transition: transform 0.3s ease-in-out;
+  transition: transform 0.3s cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 .app-logo-img:hover {
-  transform: translateY(-4px) scale(1.03);
+  transform: none;
 }
 
 .version-badge {
@@ -352,9 +352,9 @@ onUnmounted(() => {
   --i: 0;
   animation-delay: calc(0.15s * var(--i) + 0.6s);
   transition:
-    transform 0.25s ease-in-out,
-    box-shadow 0.25s ease-in-out,
-    border-color 0.25s ease-in-out;
+    transform 0.25s cubic-bezier(0.65, 0, 0.35, 1),
+    box-shadow 0.25s cubic-bezier(0.65, 0, 0.35, 1),
+    border-color 0.25s cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 /* 偶数卡片从右侧滑入，增加节奏变化 */
@@ -370,7 +370,7 @@ onUnmounted(() => {
 }
 
 .info-card:hover {
-  transform: translateY(-3px) scale(1.02);
+  transform: none;
 }
 
 /* 卡片内部布局 */
@@ -423,7 +423,7 @@ onUnmounted(() => {
 }
 
 .info-card:hover .card-link {
-  transform: translateX(4px);
+  transform: none;
   color: var(--main-color);
   opacity: 1;
 }

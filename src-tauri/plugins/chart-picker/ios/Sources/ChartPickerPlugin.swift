@@ -36,6 +36,7 @@ final class ChartPickerPlugin: Plugin, UIDocumentPickerDelegate {
         let width: Int
         let height: Int
         let showFps: Bool
+        let colorSpace: String?
     }
 
     @objc public func preview(_ invoke: Invoke) {
@@ -50,7 +51,7 @@ final class ChartPickerPlugin: Plugin, UIDocumentPickerDelegate {
                 return
             }
             let controller = PreviewViewController(session: args.session, width: args.width, height: args.height,
-                showFps: args.showFps,
+                showFps: args.showFps, colorSpace: args.colorSpace,
                 previousOrientation: presenter.view.window?.windowScene?.interfaceOrientation ?? .unknown) {
                 self.previewController = nil
                 invoke.resolve([:])
@@ -150,6 +151,10 @@ final class ChartPickerPlugin: Plugin, UIDocumentPickerDelegate {
 
     @objc public func pick(_ invoke: Invoke) {
         presentPicker(invoke, contentTypes: [.item])
+    }
+
+    @objc public func pickVideo(_ invoke: Invoke) {
+        presentPicker(invoke, contentTypes: [.movie, .video])
     }
 
     @objc public func pickFolder(_ invoke: Invoke) {

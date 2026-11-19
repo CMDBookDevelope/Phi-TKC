@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.os.Build
 import android.util.TypedValue
 import android.view.Choreographer
 import android.view.MotionEvent
@@ -24,6 +25,8 @@ import java.util.Locale
 // The library is already loaded by Tauri before any plugin command executes.
 internal object PreviewBridge {
     external fun readFrame(session: Long, buffer: ByteBuffer): Int
+    external fun readHdrFrame(session: Long, buffer: android.hardware.HardwareBuffer): Int
+    external fun setHdr(session: Long, active: Int)
     external fun touch(session: Long, contact: Long, phase: Int, x: Float, y: Float, time: Double)
     external fun active(session: Long, active: Int)
     external fun close(session: Long)
@@ -31,14 +34,17 @@ internal object PreviewBridge {
 }
 
 internal class PreviewDialog(private val activity: Activity, private val session: Long,
-                             width: Int, height: Int, showFps: Boolean,
+                             width: Int, height: Int, showFps: Boolean, colorSpace: String,
                              private val completed: () -> Unit) : Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen) {
     private var finished = false
     private val previousOrientation = activity.requestedOrientation
     private val gameOrientation = if (width >= height) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                                   else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
     private var orientationApplied = false
-    private val preview = PreviewView(activity, session, width, height, showFps) { dismiss() }
+    private val hdr = if (Build.VERSION.SDK_INT >= 33) {
+        HdrPreviewSurface.create(activity, session, width, height, colorSpace)
+    } else null
+    private val preview = PreviewView(activity, session, width, height, showFps, hdr) { dismiss() }
 
     init {
         // The game's pause menu owns normal exit; readFrame(-1) also closes a
@@ -47,6 +53,13 @@ internal class PreviewDialog(private val activity: Activity, private val session
         setCanceledOnTouchOutside(false)
         val content = FrameLayout(activity)
         content.setBackgroundColor(Color.BLACK)
+        if (hdr != null) {
+            content.addView(hdr.view, FrameLayout.LayoutParams(-1, -1))
+            if (Build.VERSION.SDK_INT >= 26) window?.colorMode = ActivityInfo.COLOR_MODE_HDR
+            hdr.onFailure = {
+                if (Build.VERSION.SDK_INT >= 26) window?.colorMode = ActivityInfo.COLOR_MODE_DEFAULT
+            }
+        }
         content.addView(preview, FrameLayout.LayoutParams(-1, -1))
         setContentView(content)
         window?.setBackgroundDrawableResource(android.R.color.transparent)
@@ -108,7 +121,7 @@ internal class PreviewDialog(private val activity: Activity, private val session
 
 private class PreviewView(activity: Activity, private val session: Long,
                           private val imageWidth: Int, private val imageHeight: Int,
-                          private val showFps: Boolean,
+                          private val showFps: Boolean, private val hdr: HdrPreviewSurface?,
                           private val finished: () -> Unit) : View(activity), Choreographer.FrameCallback {
     private val bitmap = Bitmap.createBitmap(imageWidth, imageHeight, Bitmap.Config.ARGB_8888)
     private val pixels = ByteBuffer.allocateDirect(imageWidth * imageHeight * 4)
@@ -137,11 +150,18 @@ private class PreviewView(activity: Activity, private val session: Long,
     }
     override fun doFrame(frameTimeNanos: Long) {
         if (!running) return
-        when (PreviewBridge.readFrame(session, pixels)) {
+        val hdrStatus = hdr?.present(frame) ?: HdrPreviewSurface.FALLBACK
+        val hdrFrame = hdrStatus == 1
+        val status = if (hdrStatus == HdrPreviewSurface.FALLBACK) {
+            PreviewBridge.readFrame(session, pixels)
+        } else hdrStatus
+        when (status) {
             -1 -> { stop(); finished(); return }
             1 -> {
-                pixels.rewind()
-                bitmap.copyPixelsFromBuffer(pixels)
+                if (!hdrFrame) {
+                    pixels.rewind()
+                    bitmap.copyPixelsFromBuffer(pixels)
+                }
                 hasImage = true
                 if (showFps && frameTimeNanos - lastFpsUpdate >= 500_000_000L) {
                     val fps = PreviewBridge.fps(session)
@@ -160,9 +180,11 @@ private class PreviewView(activity: Activity, private val session: Long,
         frame.set((w-rw)/2, (h-rh)/2, (w+rw)/2, (h+rh)/2)
     }
     override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(Color.BLACK)
-        if (hasImage) canvas.drawBitmap(bitmap, null, frame, paint)
-        else {
+        if (hdr?.active != true) {
+            canvas.drawColor(Color.BLACK)
+            if (hasImage) canvas.drawBitmap(bitmap, null, frame, paint)
+        }
+        if (!hasImage) {
             paint.color = Color.WHITE
             paint.textSize = 18 * resources.displayMetrics.scaledDensity
             canvas.drawText("Loading…", 24f, height / 2f, paint)

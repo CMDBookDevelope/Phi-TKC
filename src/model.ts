@@ -78,6 +78,19 @@ export interface RenderConfig {
   combo: string;
   watermark: string;
   background: boolean;
+  backgroundMode: 'chart' | 'solid' | 'video' | 'none';
+  backgroundColor: string;
+  backgroundVideo: string | null;
+  backgroundVideoPlayback: 'normal' | 'repeat' | 'stretch';
+  colorSpace: 'rec709' | 'srgb' | 'rec2100_pq' | 'rec2100_hlg';
+  hdrSettings: {
+    blockArea: HdrLayerSettings;
+    note: HdrLayerSettings;
+    background: HdrLayerSettings;
+    ui: Record<HdrUiKey, HdrLayerSettings>;
+  };
+  stereoEnabled: boolean;
+  stereoStrength: number;
   fps: number;
   hardwareAccel: boolean;
   videoCodec: string;
@@ -121,6 +134,20 @@ export interface RenderConfig {
   bar: boolean;
   ffmpegThread: boolean;
 }
+
+export interface HdrLayerSettings {
+  mode: 'sdr' | 'mapped' | 'custom';
+  peakNits: number;
+  knee: number;
+  power: number;
+  shadowGain: number;
+  chromaScale: number;
+  gamutClip: 'hard' | 'soft';
+}
+
+export type HdrUiKey =
+  | 'score' | 'combo' | 'name' | 'level' | 'line' | 'pb' | 'pause' | 'progressText'
+  | 'timeText' | 'bar' | 'scoreAim' | 'watermark';
 
 export interface RPEChart {
   name: string;

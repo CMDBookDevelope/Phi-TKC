@@ -1,3 +1,4 @@
+use crate::android_render::mobile_hdr::{is_10_bit_420_sps, Transfer};
 use anyhow::{bail, Context, Result};
 use std::{
     ffi::CString,
@@ -159,21 +160,34 @@ unsafe fn libc_free(pointer: *mut c_void) {
     free(pointer);
 }
 
+fn encoder_vendor(name: &str) -> &'static str {
+    let name = name.to_ascii_lowercase();
+    if name.starts_with("c2.qti.") || name.starts_with("omx.qcom.") {
+        "qualcomm"
+    } else if name.starts_with("c2.mtk.") || name.starts_with("omx.mtk.") {
+        "mediatek"
+    } else if name.starts_with("c2.android.") || name.starts_with("omx.google.") {
+        "cpu"
+    } else {
+        "mediacodec"
+    }
+}
+
 fn is_hardware(name: &str) -> bool {
-    name.starts_with("c2.qti") || name.starts_with("OMX.qcom") || name.contains(".qti.")
+    encoder_vendor(name) != "cpu"
 }
 
 fn video_codec_for(codec: &str) -> (&'static str, &'static [&'static str], &'static str) {
     if codec.eq_ignore_ascii_case("hevc") || codec.eq_ignore_ascii_case("h265") {
         (
             "video/hevc",
-            &["c2.qti.hevc.encoder", "OMX.qcom.video.encoder.hevc"],
+            &["c2.qti.hevc.encoder", "OMX.qcom.video.encoder.hevc", "c2.mtk.hevc.encoder", "OMX.MTK.VIDEO.ENCODER.HEVC"],
             "HEVC",
         )
     } else {
         (
             "video/avc",
-            &["c2.qti.avc.encoder", "OMX.qcom.video.encoder.avc"],
+            &["c2.qti.avc.encoder", "OMX.qcom.video.encoder.avc", "c2.mtk.avc.encoder", "OMX.MTK.VIDEO.ENCODER.AVC"],
             "H.264",
         )
     }
@@ -232,6 +246,13 @@ fn create_hardware_video_encoder(
     None
 }
 
+fn hdr_color_transfer(transfer: Transfer) -> i32 {
+    match transfer {
+        Transfer::Pq => 6,
+        Transfer::Hlg => 7,
+    }
+}
+
 fn cstr(value: &str) -> CString {
     CString::new(value).unwrap()
 }
@@ -288,6 +309,7 @@ pub struct Encoder {
     format: Option<TrackFormat>,
     first_config: Option<Vec<u8>>,
     first_buffer_size: Option<usize>,
+    hdr: Option<Transfer>,
     frames_in: u64,
 }
 
@@ -299,6 +321,10 @@ pub struct EncodedPacket {
 }
 
 impl Encoder {
+    pub(crate) fn identity(&self) -> &'static str {
+        codec_name(self.codec).map_or("mediacodec", |name| encoder_vendor(&name))
+    }
+
     pub fn video(
         width: u32,
         height: u32,
@@ -306,19 +332,12 @@ impl Encoder {
         fps: u32,
         keyframe_interval_seconds: u32,
         codec_kind: &str,
+        hdr: Option<Transfer>,
     ) -> Result<Self> {
         let (mime_name, candidates, label) = video_codec_for(codec_kind);
         let mime = cstr(mime_name);
-        let codec =
-            create_hardware_video_encoder(&mime, candidates).unwrap_or(ptr::null_mut());
-        if codec.is_null() {
-            bail!("no {label} encoder is available on this device")
-        }
         let format = unsafe { AMediaFormat_new() };
         if format.is_null() {
-            unsafe {
-                AMediaCodec_delete(codec);
-            }
             bail!("failed to allocate the encoder media format")
         }
         let key_mime = cstr("mime");
@@ -338,29 +357,59 @@ impl Encoder {
             AMediaFormat_setInt32(format, key_bitrate.as_ptr(), bitrate as i32);
             AMediaFormat_setInt32(format, key_fps.as_ptr(), fps.max(1) as i32);
             AMediaFormat_setInt32(format, key_i_frame.as_ptr(), keyframe_interval_seconds.max(1) as i32);
-            AMediaFormat_setInt32(format, key_color.as_ptr(), COLOR_FORMAT_SEMI_PLANAR);
-            AMediaFormat_setInt32(format, key_profile.as_ptr(), 1);
-            AMediaFormat_setInt32(format, key_level.as_ptr(), 0x2000);
+            if let Some(transfer) = hdr {
+                // Android MediaCodec constants: YCbCrP010, HEVC Main10, BT.2020 and limited range.
+                AMediaFormat_setInt32(format, key_color.as_ptr(), 54);
+                AMediaFormat_setInt32(format, key_profile.as_ptr(), 2);
+                for (key, value) in [
+                    ("color-standard", 6),
+                    ("color-range", 2),
+                    ("color-transfer", hdr_color_transfer(transfer)),
+                ] {
+                    AMediaFormat_setInt32(format, cstr(key).as_ptr(), value);
+                }
+            } else {
+                AMediaFormat_setInt32(format, key_color.as_ptr(), COLOR_FORMAT_SEMI_PLANAR);
+                AMediaFormat_setInt32(format, key_profile.as_ptr(), 1);
+                AMediaFormat_setInt32(format, key_level.as_ptr(), 0x2000);
+            }
             AMediaFormat_setInt32(format, key_bitrate_mode.as_ptr(), 2);
         }
-        let status = unsafe {
-            AMediaCodec_configure(codec, format, ptr::null_mut(), ptr::null_mut(), CONFIGURE_FLAG_ENCODE)
-        };
-        unsafe {
-            AMediaFormat_delete(format);
-        }
-        if status < 0 {
-            unsafe {
-                AMediaCodec_delete(codec);
+        let mut failures = Vec::new();
+        let mut codec = ptr::null_mut();
+        let attempts = if hdr.is_some() { candidates.len() + 1 } else { 1 };
+        for index in 0..attempts {
+            let candidate = if hdr.is_none() {
+                create_hardware_video_encoder(&mime, candidates).unwrap_or(ptr::null_mut())
+            } else if let Some(name) = candidates.get(index) {
+                unsafe { AMediaCodec_createCodecByName(cstr(name).as_ptr()) }
+            } else {
+                unsafe { AMediaCodec_createEncoderByType(mime.as_ptr()) }
+            };
+            if candidate.is_null() {
+                continue;
             }
-            bail!("failed to configure the {label} encoder (status {status})")
-        }
-        let status = unsafe { AMediaCodec_start(codec) };
-        if status < 0 {
-            unsafe {
-                AMediaCodec_delete(codec);
+            let name = codec_name(candidate).unwrap_or_else(|| label.to_owned());
+            let status = unsafe {
+                let configure = AMediaCodec_configure(
+                    candidate, format, ptr::null_mut(), ptr::null_mut(), CONFIGURE_FLAG_ENCODE,
+                );
+                if configure == 0 { AMediaCodec_start(candidate) } else { configure }
+            };
+            if status == 0 {
+                codec = candidate;
+                crate::android_uri::debug_log(&format!("Selected encoder: {name}"));
+                break;
             }
-            bail!("failed to start the {label} encoder (status {status})")
+            failures.push(format!("{name} ({status})"));
+            unsafe { AMediaCodec_delete(candidate) };
+        }
+        unsafe { AMediaFormat_delete(format) };
+        if codec.is_null() {
+            if hdr.is_some() {
+                bail!("Android HDR export requires an HEVC Main10 encoder with P010 input at {width}×{height} {fps} fps. Try a lower resolution or frame rate, or choose SDR. Encoder failures: {}", failures.join(", "));
+            }
+            bail!("failed to open the {label} encoder: {}", failures.join(", "));
         }
         crate::android_uri::debug_log(&format!(
             "video encoder: {label} {}x{} {}bps @ {fps}fps keyframe={}",
@@ -375,6 +424,7 @@ impl Encoder {
             format: None,
             first_config: None,
             first_buffer_size: None,
+            hdr,
             frames_in: 0,
         })
     }
@@ -434,6 +484,7 @@ impl Encoder {
             format: None,
             first_config: None,
             first_buffer_size: None,
+            hdr: None,
             frames_in: 0,
         })
     }
@@ -483,20 +534,10 @@ impl Encoder {
 
     pub fn submit(&mut self, data: &[u8], time_us: i64, keyframe: bool) -> Result<()> {
         if self.strided {
-            let expected = (self.width * self.height * 3 / 2) as usize;
+            let bytes_per_pair = if self.hdr.is_some() { 6 } else { 3 };
+            let expected = self.width as usize * self.height as usize / 2 * bytes_per_pair;
             if data.len() != expected {
-                crate::android_uri::debug_log(&format!(
-                    "encoder: frame is {} bytes but {}x{} NV12 needs {expected}",
-                    data.len(),
-                    self.width,
-                    self.height
-                ));
-                bail!(
-                    "frame payload is {} bytes, expected {expected} for {}x{} NV12",
-                    data.len(),
-                    self.width,
-                    self.height
-                );
+                bail!("frame payload is {} bytes, expected {expected} for {}x{}", data.len(), self.width, self.height);
             }
         }
         self.pending.push((data.to_vec(), time_us, if keyframe { 1 } else { 0 }));
@@ -531,6 +572,9 @@ impl Encoder {
                         data.len()
                     ));
                 }
+                if self.hdr.is_some() && size < data.len() {
+                    bail!("Android HDR encoder returned a {size}-byte input buffer for a {}-byte P010 frame. Try a different resolution or choose SDR.", data.len());
+                }
                 let chunk = size.min(data.len() - written);
                 unsafe {
                     ptr::copy_nonoverlapping(data.as_ptr().add(written), buffer, chunk);
@@ -564,6 +608,56 @@ impl Encoder {
         Ok(())
     }
 
+    fn update_output_format(&mut self) -> Result<()> {
+        let format = TrackFormat::from_codec(self.codec)?;
+        if let Some(transfer) = self.hdr {
+            let mut config = ptr::null_mut();
+            let mut size = 0;
+            let has_config = unsafe {
+                AMediaFormat_getBuffer(format.format, cstr("csd-0").as_ptr(), &mut config, &mut size)
+            };
+            let main10 = if has_config && !config.is_null() {
+                let data = unsafe { std::slice::from_raw_parts(config.cast::<u8>(), size) };
+                if data.len() >= 23 && data[0] == 1 {
+                    // HEVCDecoderConfigurationRecord stores both bit depths.
+                    data[16] & 3 == 1 && data[17] & 7 == 2 && data[18] & 7 == 2
+                } else {
+                    let mut units = data;
+                    let mut main10 = false;
+                    while let Some(start) = units.windows(3).position(|bytes| bytes == [0, 0, 1]) {
+                        units = &units[start + 3..];
+                        let end = units.windows(3).position(|bytes| bytes == [0, 0, 1]).unwrap_or(units.len());
+                        if let Some(valid) = is_10_bit_420_sps(&units[..end]) {
+                            main10 = valid;
+                            break;
+                        }
+                    }
+                    main10
+                }
+            } else {
+                false
+            };
+            if !main10 {
+                bail!("Android HEVC encoder did not produce a valid 10-bit 4:2:0 stream. Try a different device or choose SDR.");
+            }
+            for (key, expected) in [
+                ("color-standard", 6),
+                ("color-range", 2),
+                ("color-transfer", hdr_color_transfer(transfer)),
+            ] {
+                let mut actual = 0;
+                let found = unsafe {
+                    AMediaFormat_getInt32(format.format, cstr(key).as_ptr(), &mut actual)
+                };
+                if !found || actual != expected {
+                    bail!("Android HEVC encoder did not preserve HDR metadata ({key}={actual}, expected {expected}). Try a different device or choose SDR.");
+                }
+            }
+        }
+        self.format = Some(format);
+        Ok(())
+    }
+
     pub fn drain(&mut self) -> Result<Vec<EncodedPacket>> {
         let mut out = Vec::new();
         loop {
@@ -576,7 +670,7 @@ impl Encoder {
                 continue;
             }
             if idx == INFO_OUTPUT_FORMAT_CHANGED {
-                self.format = Some(TrackFormat::from_codec(self.codec)?);
+                self.update_output_format()?;
                 continue;
             }
             if idx < 0 {
@@ -619,6 +713,16 @@ impl Encoder {
 
     pub fn flush(&mut self) -> Result<Vec<EncodedPacket>> {
         let mut out = Vec::new();
+        if self.hdr.is_some() {
+            let start = std::time::Instant::now();
+            while !self.pending.is_empty() {
+                self.pump()?;
+                out.extend(self.drain()?);
+                if start.elapsed() > std::time::Duration::from_secs(10) {
+                    bail!("Android HDR encoder stalled while accepting P010 input");
+                }
+            }
+        }
         let mut idle = 0;
         loop {
             let idx = unsafe { AMediaCodec_dequeueInputBuffer(self.codec, 8_000) };
@@ -651,7 +755,7 @@ impl Encoder {
                 continue;
             }
             if idx == INFO_OUTPUT_FORMAT_CHANGED {
-                self.format = Some(TrackFormat::from_codec(self.codec)?);
+                self.update_output_format()?;
                 continue;
             }
             if idx < 0 {

@@ -9,14 +9,31 @@ fn build_conf() -> macroquad::window::Conf {
     // builds a surface-less context (`VulkanContext::new_headless`), so the CLI
     // and the `render` subprocess never create an X11/Wayland window.
     let is_preview = std::env::args().skip(1).next().as_deref() == Some("preview");
+    let rendering_backend = if cfg!(target_os = "macos")
+        && is_preview
+        && std::env::var_os("PRPR_PREVIEW_HDR").is_some()
+    {
+        macroquad::miniquad::conf::RenderingBackend::Metal
+    } else {
+        macroquad::miniquad::conf::RenderingBackend::Vulkan
+    };
     macroquad::window::Conf {
         window_title: "Phi-TKC (GUI/CLI)".to_string(),
         window_width: 1920,
         window_height: 1440,
         headless: !is_preview,
         platform: macroquad::miniquad::conf::Platform {
-            rendering_backend: macroquad::miniquad::conf::RenderingBackend::Vulkan,
+            rendering_backend,
             swap_interval: is_preview.then_some(0),
+            #[cfg(target_os = "linux")]
+            linux_backend: if is_preview
+                && std::env::var_os("PRPR_PREVIEW_HDR").is_some()
+                && std::env::var_os("WAYLAND_DISPLAY").is_some()
+            {
+                macroquad::miniquad::conf::LinuxBackend::WaylandWithX11Fallback
+            } else {
+                macroquad::miniquad::conf::LinuxBackend::X11Only
+            },
             ..Default::default()
         },
         ..Default::default()
