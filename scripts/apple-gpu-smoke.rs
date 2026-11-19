@@ -192,7 +192,7 @@ impl GpuSmoke {
             index_buffer: indices,
             images: vec![],
         };
-        let mut encoder = Encoder::new(&self.path, WIDTH, HEIGHT, FPS, 4_000_000, RATE)?;
+        let mut encoder = Encoder::new(&self.path, WIDTH, HEIGHT, FPS, 4_000_000, RATE, None)?;
         let mut frames = MetalFrames::new(ctx.metal_context().unwrap(), WIDTH, HEIGHT)?;
         // Poison the fresh MSAA target so a missing production initialization
         // produces a purple first-frame quadrant instead of passing by chance
