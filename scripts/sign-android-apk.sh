@@ -69,11 +69,23 @@ fi
 "${BUILD_TOOLS_DIR}/apksigner" sign --ks "${PHI_SIGNING_KEYSTORE}" \
   --ks-pass env:ANDROID_RELEASE_STORE_PASSWORD --key-pass env:ANDROID_RELEASE_KEY_PASSWORD \
   --ks-key-alias "${ANDROID_RELEASE_KEY_ALIAS}" --out "${OUTPUT_APK}" "${SIGNING_DIR}/aligned.apk"
-"${BUILD_TOOLS_DIR}/apksigner" verify --verbose --print-certs "${OUTPUT_APK}" > "${SIGNING_DIR}/verification.txt"
-APK_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "${SIGNING_DIR}/verification.txt")"
-if [[ "${APK_CERT}" != "${EXPECTED_CERT}" ]]; then
-  echo '::error::The APK signer does not match the pinned Android release identity'
-  exit 1
-fi
+"${BUILD_TOOLS_DIR}/apksigner" verify --verbose --print-certs-pem "${OUTPUT_APK}" > "${SIGNING_DIR}/verification.txt"
+# New build-tools change signer labels. Hash the verified
+# certificate itself so the signing identity does not depend on those labels.
+python3 - "${SIGNING_DIR}/verification.txt" "${EXPECTED_CERT}" <<'PY'
+import base64, hashlib, pathlib, re, sys
+
+text = pathlib.Path(sys.argv[1]).read_text()
+certificates = re.findall(r'-----BEGIN CERTIFICATE-----\s*(.*?)\s*-----END CERTIFICATE-----', text, re.S)
+try:
+    fingerprints = {
+        hashlib.sha256(base64.b64decode(re.sub(r'\s+', '', certificate), validate=True)).hexdigest()
+        for certificate in certificates
+    }
+except ValueError:
+    raise SystemExit('::error::Invalid certificate in APK verification output')
+if fingerprints != {sys.argv[2]}:
+    raise SystemExit('::error::The APK signer does not match the pinned Android release identity')
+PY
 cat "${SIGNING_DIR}/verification.txt"
 echo "Signed Android release APK: ${OUTPUT_APK}"
