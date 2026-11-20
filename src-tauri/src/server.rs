@@ -962,7 +962,15 @@ async fn render_one(
             IPCEvent::StartMixing => {
                 job.view.status = "mixing";
             }
+            // Preserve the public API's existing status vocabulary.
+            IPCEvent::PrepareEncoder => job.view.status = "queued",
+            IPCEvent::Finalizing => {
+                job.view.status = "running";
+                job.view.progress = 1.0;
+                job.view.eta = 0.0;
+            }
             IPCEvent::StartRender(count) => {
+                last_fps_time = Instant::now();
                 total = count;
                 job.view.status = "running";
             }

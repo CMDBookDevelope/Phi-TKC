@@ -4,6 +4,15 @@ use std::{path::PathBuf, sync::OnceLock};
 pub static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 pub static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+#[derive(Clone, Copy, Debug)]
+#[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
+pub enum RenderProgress {
+    Preparing,
+    Mixing(f32),
+    Encoding { fraction: f32, fps: f64 },
+    Finalizing,
+}
+
 /// Completed output frames and the renderer's measured wall time through
 /// encoder finalization, matching the duration shown on the task.
 pub struct RenderStats {

@@ -92,8 +92,9 @@ EXPORT int phitkc_prores_open(const char *path, int width, int height, int fps,
     video->time_base = (AVRational){1, fps};
     video->framerate = (AVRational){fps, 1};
     video->profile = profile;
+    // prores_ks in the bundled FFmpeg accepts 10-bit input for all profiles, including XQ.
     video->pix_fmt = profile < 4 ? AV_PIX_FMT_YUV422P10LE
-                                 : alpha ? AV_PIX_FMT_YUVA444P10LE : AV_PIX_FMT_YUV444P10LE;
+                                  : (alpha ? AV_PIX_FMT_YUVA444P10LE : AV_PIX_FMT_YUV444P10LE);
     video->color_primaries = transfer ? AVCOL_PRI_BT2020 : AVCOL_PRI_BT709;
     video->color_trc = transfer == 1 ? AVCOL_TRC_SMPTE2084
                      : transfer == 2 ? AVCOL_TRC_ARIB_STD_B67 : AVCOL_TRC_BT709;
@@ -102,7 +103,7 @@ EXPORT int phitkc_prores_open(const char *path, int width, int height, int fps,
     video->thread_count = 4;
     if (profile >= 0 && profile <= 5) {
         video->profile = profile;
-        video->bits_per_raw_sample = profile == 4 ? 10 : profile == 5 ? 12 : 10;
+        video->bits_per_raw_sample = 10;
     } else {
         video->profile = AV_PROFILE_UNKNOWN;
         video->bits_per_raw_sample = 10;
@@ -187,19 +188,30 @@ static void convert(ProRes *writer, const uint8_t *sample, float *y, float *cb,
     float kg = 1.0f - kr - kb;
     float rgb[3];
     if (!writer->transfer) {
-        for (int c = 0; c < 3; c++)
+        *alpha = writer->alpha ? sample[3] / 255.0f : 1.0f;
+        for (int c = 0; c < 3; c++) {
             rgb[c] = sample[c] / 255.0f;
-        *alpha = sample[3] / 255.0f;
+            if (writer->alpha)
+                rgb[c] = *alpha > 0.0f ? fminf(rgb[c] / *alpha, 1.0f) : 0.0f;
+        }
     } else {
         uint16_t bits[4];
         memcpy(bits, sample, sizeof(bits));
-        *alpha = fminf(fmaxf(half_float(bits[3]), 0.0f), 1.0f);
+        *alpha = writer->alpha ? fminf(fmaxf(half_float(bits[3]), 0.0f), 1.0f) : 1.0f;
         if (writer->transfer == 1) {
-            for (int c = 0; c < 3; c++)
-                rgb[c] = writer->pq[bits[c]];
+            for (int c = 0; c < 3; c++) {
+                float linear = half_float(bits[c]);
+                if (writer->alpha)
+                    linear = *alpha > 0.0f ? linear / *alpha : 0.0f;
+                rgb[c] = writer->alpha ? pq_encode(linear) : writer->pq[bits[c]];
+            }
         } else {
-            for (int c = 0; c < 3; c++)
-                rgb[c] = fminf(fmaxf(half_float(bits[c]) / 10.0f, 0.0f), 1.0f);
+            for (int c = 0; c < 3; c++) {
+                float linear = half_float(bits[c]) / 10.0f;
+                if (writer->alpha)
+                    linear = *alpha > 0.0f ? linear / *alpha : 0.0f;
+                rgb[c] = fminf(fmaxf(linear, 0.0f), 1.0f);
+            }
             float luminance = kr * rgb[0] + kg * rgb[1] + kb * rgb[2];
             float scale = luminance > 0.0f ? powf(luminance, -1.0f / 6.0f) : 0.0f;
             for (int c = 0; c < 3; c++)
@@ -218,6 +230,11 @@ EXPORT int phitkc_prores_frame(ProRes *writer, const uint8_t *rgba) {
         return result;
     int bytes_per_pixel = writer->transfer ? 8 : 4;
     int step = frame->format == AV_PIX_FMT_YUV422P10LE ? 2 : 1;
+    const float y_offset = 64.0f;
+    const float y_range = 876.0f;
+    const float c_center = 512.0f;
+    const float c_range = 896.0f;
+    const float max_code = 1023.0f;
     for (int row = 0; row < frame->height; row++) {
         uint16_t *planes[4] = {0};
         for (int plane = 0; plane < 3 + writer->alpha; plane++)
@@ -229,14 +246,14 @@ EXPORT int phitkc_prores_frame(ProRes *writer, const uint8_t *rgba) {
                 float y, cb, cr, alpha;
                 convert(writer, rgba, &y, &cb, &cr, &alpha);
                 rgba += bytes_per_pixel;
-                planes[0][column + i] = lrintf(64.0f + 876.0f * y);
+                planes[0][column + i] = (uint16_t)lrintf(fminf(fmaxf(y_offset + y_range * y, 0.0f), max_code));
                 cb_sum += cb;
                 cr_sum += cr;
                 if (writer->alpha)
-                    planes[3][column + i] = lrintf(alpha * 1023.0f);
+                    planes[3][column + i] = (uint16_t)lrintf(alpha * max_code);
             }
-            planes[1][column / step] = lrintf(512.0f + (896.0f / step) * cb_sum);
-            planes[2][column / step] = lrintf(512.0f + (896.0f / step) * cr_sum);
+            planes[1][column / step] = (uint16_t)lrintf(fminf(fmaxf(c_center + (c_range / step) * cb_sum, 0.0f), max_code));
+            planes[2][column / step] = (uint16_t)lrintf(fminf(fmaxf(c_center + (c_range / step) * cr_sum, 0.0f), max_code));
         }
     }
     frame->pts = writer->video_count++;

@@ -6,6 +6,7 @@ use crate::{
     apple_frames::{initialize_render_target, MetalFrames},
     apple_lifecycle::RenderActivity,
     apple_media::{Encoder, ProRes},
+    common::RenderProgress,
     render::{build_player, stereo_gains, stereo_pan, RenderParams},
 };
 use anyhow::{bail, Context, Result};
@@ -59,7 +60,8 @@ pub struct RenderRequest {
     pub request_cancel: Option<Arc<AtomicBool>>,
 }
 
-pub fn run(request: RenderRequest, on_progress: impl Fn(f32, f64) + 'static) -> Result<crate::common::RenderStats> {
+pub fn run(request: RenderRequest, on_progress: impl Fn(crate::common::RenderProgress) + 'static) -> Result<crate::common::RenderStats> {
+    on_progress(RenderProgress::Preparing);
     crate::apple_platform::install_logger();
     let _log = crate::apple_platform::start_render_log(request.output_path.with_extension("log"))?;
     let mut request = request;
@@ -101,7 +103,7 @@ async fn render_async(
     activity: RenderActivity,
     vw: u32,
     vh: u32,
-    on_progress: impl Fn(f32, f64) + 'static,
+    on_progress: impl Fn(crate::common::RenderProgress) + 'static,
 ) -> Result<crate::common::RenderStats> {
     let process_start = Instant::now();
     let mut phase = process_start;
@@ -204,6 +206,7 @@ async fn render_async(
     let audio_buffer_length = video_length + audio_delay.abs();
     let mut output = vec![0.0_f32; (audio_buffer_length * SAMPLE_RATE as f64).ceil() as usize * 2];
 
+    on_progress(RenderProgress::Mixing(0.));
     let ratio = 1.0 / SAMPLE_RATE as f64;
     let music_start = Instant::now();
     if volume_music != 0.0 {
@@ -215,6 +218,10 @@ async fn render_async(
             let effective = ((music.length() as f64 * SAMPLE_RATE as f64) as usize).min(max_i);
             let mut time = 0.0_f64;
             for i in 0..effective {
+                if i % 16_384 == 0 {
+                    check_cancel()?;
+                    on_progress(RenderProgress::Mixing(0.6 * i as f32 / effective as f32));
+                }
                 let frame = music.sample(time as f32).unwrap_or_default();
                 unsafe {
                     let idx = start_index + i * 2;
@@ -226,6 +233,7 @@ async fn render_async(
         }
     }
 
+    on_progress(RenderProgress::Mixing(0.6));
     info!("music Time:{:?}", music_start.elapsed());
     let mut place = |pos: f64, clip: &AudioClip, volume: f32, pan: f32| {
         let position = (pos * SAMPLE_RATE as f64).round() as usize * 2;
@@ -264,7 +272,7 @@ async fn render_async(
             let mut note_offset = 0;
             for line in chart.lines.iter() {
                 for (note_index, note) in line.notes.iter().enumerate() {
-                    if !note.above {
+                    if note.fake {
                         continue;
                     }
                     let clip = &*sfx[note.kind.order() as usize];
@@ -286,6 +294,7 @@ async fn render_async(
             pos += ending.length() as f64;
         }
     }
+    on_progress(RenderProgress::Mixing(0.85));
     mark!("mixing");
     activity.checkpoint(check_cancel, finish_gpu)?;
 
@@ -317,6 +326,8 @@ async fn render_async(
         start_bytes as f64 / 4. / sample_rate as f64
     ));
 
+    on_progress(RenderProgress::Mixing(1.));
+    on_progress(RenderProgress::Preparing);
     let bitrate = if prores.is_some() { 0 } else { bitrate_bps(&params.config)? };
     activity.checkpoint(check_cancel, finish_gpu)?;
     let mut encoder = Encoder::new_with_prores(
@@ -339,7 +350,7 @@ async fn render_async(
         MSRenderTarget::new(size, params.config.sample_count)
     });
     let rhythm = if transfer.is_some() {
-        RhythmComposite::new_hdr_with_alpha(game_width, game_height, rhythm_strip, 1, alpha)?
+        RhythmComposite::new_hdr_with_settings(game_width, game_height, rhythm_strip, 1, alpha, config.hdr_settings.rhythm.clone())?
     } else {
         RhythmComposite::new_with_alpha(game_width, game_height, rhythm_strip, 1, alpha)?
     };
@@ -398,6 +409,7 @@ async fn render_async(
     let mut fps_frames = 0;
     let mut realtime_fps = 0.;
     let render_start = fps_timer;
+    on_progress(RenderProgress::Encoding { fraction: 0., fps: 0. });
     for frame in 0..frames {
         objc::rc::autoreleasepool(|| -> Result<()> {
             if prepare_encoder(
@@ -482,10 +494,11 @@ async fn render_async(
                 fps_frames = encoded;
                 fps_timer = Instant::now();
             }
-            on_progress(encoded as f32 / output_frames as f32, realtime_fps);
+            on_progress(RenderProgress::Encoding { fraction: encoded as f32 / output_frames as f32, fps: realtime_fps });
             Ok(())
         })?;
     }
+    on_progress(RenderProgress::Finalizing);
     loop {
         prepare_encoder(
             &activity,
@@ -504,7 +517,6 @@ async fn render_async(
     }
     let encoding_seconds = render_start.elapsed().as_secs_f64();
     let average_fps = output_frames as f64 / encoding_seconds.max(1e-9);
-    on_progress(1., average_fps);
     info!(
         "Metal export complete: {output_frames} frames in {encoding_seconds:.2}s ({average_fps:.1} fps, including encoder drain)"
     );

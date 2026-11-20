@@ -1606,7 +1606,7 @@ void main() { gl_FragColor = vec4(texture2D(screenTexture, uv).rgb * 1.3, 1.0); 
                     asset_dir: Path::new(env!("CARGO_MANIFEST_DIR")).join("assets"),
                     request_cancel: None,
                 },
-                |_, _| {},
+                |_| {},
             )?;
             assert_eq!(stats.frames, 240, "completed native output frame count");
             assert!(stats.duration.is_finite() && stats.duration > 0.0);

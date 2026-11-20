@@ -51,6 +51,8 @@
     render-waiting: Waiting for the render queue...
     render-loading: Loading chart...
     render-mixing: Mixing audio...
+    render-mixing-progress: 'Mixing audio: {progress}%'
+    render-finalizing: Finalizing output…
     render-done: 'Render finished in {duration}'
     render-canceled: Render canceled
     render-failed: Render failed — see the task list for details
@@ -116,6 +118,8 @@
     render-waiting: 等待渲染队列…
     render-loading: 正在加载谱面…
     render-mixing: 正在混音…
+    render-mixing-progress: '正在混音：{progress}%'
+    render-finalizing: 正在封装或保存…
     render-done: '渲染完成，耗时 {duration}'
     render-canceled: 渲染已取消
     render-failed: 渲染失败，详情请查看任务列表
@@ -440,8 +444,12 @@ async function pollRenderTask() {
         renderMsg.value = t('render-loading');
         break;
       case 'mixing':
-        renderProgress.value = 0;
-        renderMsg.value = t('render-mixing');
+        renderProgress.value = (status.progress ?? 0) * 100;
+        renderMsg.value = status.progress === undefined ? t('render-mixing') : t('render-mixing-progress', { progress: Math.round(renderProgress.value) });
+        break;
+      case 'finalizing':
+        renderProgress.value = 100;
+        renderMsg.value = t('render-finalizing');
         break;
       case 'rendering':
         renderProgress.value = status.progress * 100;

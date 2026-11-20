@@ -27,11 +27,20 @@ for name, (_, path) in patches.items():
 
 with tempfile.TemporaryDirectory(prefix="phi-tkc-native-check-") as temp:
     config = Path(temp) / "patches.toml"
-    config.write_text("\n".join(
+    patch_lines = [
         f'[patch."https://github.com/CMDBookDevelope/{repo}"]\n'
         f'{package} = {{ path = {json.dumps(str(path))} }}'
         for repo, (package, path) in patches.items()
-    ))
+    ]
+    # Cargo records branch-qualified git sources with the query in Cargo.lock;
+    # patch both spellings so local render-lib worktrees are actually checked.
+    render_lib_path = patches["Phi-TKC-render-lib"][1]
+    patch_lines.append(
+        '[patch."https://github.com/CMDBookDevelope/Phi-TKC-render-lib?branch=render-lib"]\n'
+        f'prpr = {{ path = {json.dumps(str(render_lib_path))} }}\n'
+        f'prpr-avc = {{ path = {json.dumps(str(render_lib_path.parent / "prpr-avc"))} }}'
+    )
+    config.write_text("\n".join(patch_lines))
     cargo = os.environ.get("CARGO", "cargo")
     cargo_command = os.environ.get("CARGO_COMMAND", "check")
     if cargo_command not in {"check", "test"}:

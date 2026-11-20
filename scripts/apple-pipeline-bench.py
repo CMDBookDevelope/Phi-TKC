@@ -110,7 +110,7 @@ fn main() -> anyhow::Result<()> {
     apple_render::run(apple_render::RenderRequest {
         params: render::RenderParams { path, info, config },
         output_path: args[2].clone().into(), asset_dir: args[3].clone().into(), request_cancel: None,
-    }, |_, _| {})
+    }, |_| {})
 }
 '''
 

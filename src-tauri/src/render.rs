@@ -123,6 +123,11 @@ pub struct RenderConfig {
     pub volume_sfx: f32,
 
     pub hand_split: bool,
+    pub hand_left_color: String,
+    pub hand_right_color: String,
+    pub hand_left_opacity: f32,
+    pub hand_right_opacity: f32,
+    pub hit_effect_enabled: bool,
     pub note_speed_factor: f32,
     pub bar: bool,
     pub score_aim: bool,
@@ -419,6 +424,11 @@ impl Default for RenderConfig {
             volume_music: 1.0,
             volume_sfx: 1.0,
             hand_split: false,
+            hand_left_color: "#3380FF".into(),
+            hand_right_color: "#FF99B3".into(),
+            hand_left_opacity: 1.0,
+            hand_right_opacity: 1.0,
+            hit_effect_enabled: true,
             note_speed_factor: 1.0,
             video: false,
             audio_bit: None,
@@ -532,6 +542,11 @@ impl RenderConfig {
             hdr_settings: self.hdr_settings.clone(),
             disable_loading: self.disable_loading,
             hand_split: self.hand_split,
+            hand_left_color: self.hand_left_color.clone(),
+            hand_right_color: self.hand_right_color.clone(),
+            hand_left_opacity: self.hand_left_opacity,
+            hand_right_opacity: self.hand_right_opacity,
+            hit_effect_enabled: self.hit_effect_enabled,
             note_speed_factor: self.note_speed_factor,
 
             ui_score: self.ui_score,
@@ -585,7 +600,9 @@ pub struct RenderParams {
 #[derive(Serialize, Deserialize)]
 pub enum IPCEvent {
     StartMixing,
+    PrepareEncoder,
     StartRender(u64),
+    Finalizing,
     Frame,
     EncoderFps(f64),
     Done(f64),
@@ -594,7 +611,7 @@ pub enum IPCEvent {
 struct FramePipeline {
     pool: Vec<Vec<u8>>,
     pool_addrs: Vec<usize>,
-    free_pool: Mutex<Vec<usize>>,
+    free_pool: Mutex<(Vec<usize>, bool)>, // (available slots, writer exited)
     free_cv: Condvar,
     jobq: Mutex<(VecDeque<usize>, bool)>, // (queue, stopped)
     jobq_cv: Condvar,
@@ -608,6 +625,14 @@ struct FramePipeline {
     write_ns: AtomicU64,
     write_count: AtomicU64,
     write_max_ns: AtomicU64,
+}
+
+struct FrameWriterClosed<'a>(&'a FramePipeline);
+
+impl Drop for FrameWriterClosed<'_> {
+    fn drop(&mut self) {
+        self.0.writer_exited();
+    }
 }
 
 struct EncoderAvailability {
@@ -1095,7 +1120,7 @@ impl Nv12Pipe {
         }
         let pipeline = pipeline.expect("copy handoff needs a frame pool");
         let start = Instant::now();
-        let buf = pipeline.acquire_buf();
+        let buf = pipeline.acquire_buf()?;
         let wait = start.elapsed().as_secs_f64();
         let start = Instant::now();
         // The GPU fence for read_slot was consumed by the caller. Copy mode
@@ -1120,13 +1145,26 @@ impl Nv12Pipe {
     }
 }
 
+fn hdr_rgba_to_gbr(input: &[u8], output: &mut [u8]) {
+    let plane_size = input.len() / 2;
+    let (green, remaining) = output.split_at_mut(plane_size);
+    let (blue, red) = remaining.split_at_mut(plane_size);
+    for (index, pixel) in input.chunks_exact(8).enumerate() {
+        let start = index * 4;
+        for (channel, plane) in [(0, &mut *red), (2, &mut *green), (4, &mut *blue)] {
+            let bits = u16::from_ne_bytes([pixel[channel], pixel[channel + 1]]);
+            plane[start..start + 4].copy_from_slice(&half::f16::from_bits(bits).to_f32().to_le_bytes());
+        }
+    }
+}
+
 impl FramePipeline {
     fn new(frame_size: usize) -> Self {
         let pool_size = (POOL_TARGET_BYTES / frame_size.max(1)).clamp(8, 32);
         Self {
             pool: (0..pool_size).map(|_| vec![0u8; frame_size]).collect(),
             pool_addrs: Vec::new(),
-            free_pool: Mutex::new((0..pool_size).collect()),
+            free_pool: Mutex::new(((0..pool_size).collect(), false)),
             free_cv: Condvar::new(),
             jobq: Mutex::new((VecDeque::new(), false)),
             jobq_cv: Condvar::new(),
@@ -1147,18 +1185,19 @@ impl FramePipeline {
         self.pool_addrs = self.pool.iter_mut().map(|b| b.as_mut_ptr() as usize).collect();
     }
 
-    fn acquire_buf(&self) -> usize {
+    fn acquire_buf(&self) -> Result<usize> {
         let mut free = self.free_pool.lock().unwrap();
         let mut wait_start: Option<Instant> = None;
         loop {
-            if let Some(idx) = free.pop() {
+            anyhow::ensure!(!free.1, "FFmpeg writer exited before all frames were submitted");
+            if let Some(idx) = free.0.pop() {
                 if let Some(start) = wait_start {
                     let d = start.elapsed().as_nanos() as u64;
                     self.acquire_blocks.fetch_add(1, Ordering::Relaxed);
                     self.acquire_wait_ns.fetch_add(d, Ordering::Relaxed);
                     self.acquire_max_ns.fetch_max(d, Ordering::Relaxed);
                 }
-                return idx;
+                return Ok(idx);
             }
             wait_start.get_or_insert_with(Instant::now);
             free = self.free_cv.wait(free).unwrap();
@@ -1166,8 +1205,13 @@ impl FramePipeline {
     }
 
     fn release_buf(&self, idx: usize) {
-        self.free_pool.lock().unwrap().push(idx);
+        self.free_pool.lock().unwrap().0.push(idx);
         self.free_cv.notify_one();
+    }
+
+    fn writer_exited(&self) {
+        self.free_pool.lock().unwrap_or_else(|e| e.into_inner()).1 = true;
+        self.free_cv.notify_all();
     }
 
     fn push_job(&self, idx: usize) {
@@ -1270,7 +1314,15 @@ pub(crate) fn stereo_pan(normalized_x: f32, strength: f32) -> f32 {
     if !normalized_x.is_finite() || !strength.is_finite() {
         return 0.0;
     }
-    (normalized_x * strength.clamp(0.0, 1.0)).clamp(-1.0, 1.0)
+    let strength = strength.clamp(0.0, 2.0);
+    if strength <= 1.0 {
+        return (normalized_x * strength).clamp(-1.0, 1.0);
+    }
+    if strength == 2.0 {
+        return if normalized_x > 0.0 { 1.0 } else if normalized_x < 0.0 { -1.0 } else { 0.0 };
+    }
+    // Above 100%, narrow the center-to-edge transition continuously.
+    (normalized_x / (2.0 - strength)).clamp(-1.0, 1.0)
 }
 
 pub(crate) fn stereo_gains(pan: f32) -> (f32, f32) {
@@ -1308,6 +1360,37 @@ mod render_config_tests {
         assert_eq!(stereo_gains(1.0), (0.0, 1.0));
         assert_eq!(stereo_pan(f32::NAN, 1.0), 0.0);
         assert_eq!(stereo_pan(2.0, 1.0), 1.0);
+        assert_eq!(stereo_pan(0.25, 1.5), 0.5);
+        let one_pixel = 2.0 / 1920.0;
+        assert_eq!(stereo_gains(stereo_pan(-one_pixel, 2.0)), (1.0, 0.0));
+        assert_eq!(stereo_gains(stereo_pan(one_pixel, 2.0)), (0.0, 1.0));
+        assert_eq!(stereo_gains(stereo_pan(0.0, 2.0)), (1.0, 1.0));
+    }
+
+    #[test]
+    fn writer_exit_wakes_a_full_frame_pool() {
+        let pipeline = std::sync::Arc::new(FramePipeline::new(4));
+        for _ in 0..pipeline.pool.len() {
+            pipeline.acquire_buf().unwrap();
+        }
+        let producer = std::sync::Arc::clone(&pipeline);
+        let (send, recv) = mpsc::channel();
+        let join = std::thread::spawn(move || send.send(producer.acquire_buf()).unwrap());
+        drop(FrameWriterClosed(&pipeline));
+        assert!(recv.recv_timeout(std::time::Duration::from_secs(1)).unwrap().is_err());
+        join.join().unwrap();
+    }
+
+    #[test]
+    fn hdr_transfer_preserves_linear_planes_and_drops_alpha() {
+        let input: Vec<_> = [0.5, 2.0, 4.0, 1.0, 8.0, 16.0, 32.0, 0.0]
+            .into_iter()
+            .flat_map(|v| half::f16::from_f32(v).to_bits().to_ne_bytes())
+            .collect();
+        let mut output = [0; 24];
+        hdr_rgba_to_gbr(&input, &mut output);
+        let values: Vec<_> = output.chunks_exact(4).map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap())).collect();
+        assert_eq!(values, [2.0, 16.0, 4.0, 32.0, 0.5, 8.0]);
     }
 
     #[test]
@@ -1642,6 +1725,7 @@ async fn render_impl(
         pos += ending.frame_count() as f64 / sample_rate_f64;
     }
     let mixing_s = mark!("mixing");
+    send(IPCEvent::PrepareEncoder);
 
     let audio_bit = params.config.audio_bit;
     let mut audio_format = params.config.audio_format.to_lowercase();
@@ -1845,7 +1929,7 @@ async fn render_impl(
         })
         .collect();
     let rhythm = if config.hdr_output {
-        RhythmComposite::new_hdr(game_width, game_height, rhythm_strip, mst_count)?
+        RhythmComposite::new_hdr_with_settings(game_width, game_height, rhythm_strip, mst_count, alpha, config.hdr_settings.rhythm.clone())?
     } else {
         RhythmComposite::new_with_alpha(game_width, game_height, rhythm_strip, mst_count, alpha)?
     };
@@ -1887,8 +1971,6 @@ async fn render_impl(
 
     const O: f64 = LoadingScene::TOTAL_TIME as f64 + GameScene::BEFORE_TIME as f64;
     const A: f64 = 1.0;
-
-    send(IPCEvent::StartRender(out_frames));
 
     static VULKAN_PROBE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -2870,20 +2952,26 @@ async fn render_impl(
     }
 
     let async_depth = "-async_depth 4"; // the "4" parallel process 4 frames (vulkan encoder)
+    // The temporary audio already has the requested codec and sample rate.
+    // FLAC stays in MP4; ProRes MOV uses compatible AAC, MP3 or PCM.
+    let mux_audio = if video == "mp4" && audio_format == "wav" {
+        audio_mux_args.as_str()
+    } else {
+        "-c:a copy -strict -2"
+    };
     let args2 = if null_sink {
         "-c:v rawvideo -map 0:v:0 -f null".to_string()
     } else if vulkan_video {
         let duration = out_frames as f64 / fps.max(1) as f64;
         format!(
-            "{} -c:v copy -map 0:v:0 -map 1:a:0 -t {duration:.6} -f {}",
-            audio_mux_args, video_mux,
+            "{mux_audio} -c:v copy -map 0:v:0 -map 1:a:0 -t {duration:.6} -f {video_mux}",
         )
     } else if prores.is_some() {
-        format!("{audio_mux_args} -c:v {ffmpeg_encoder} -map 0:v:0 -map 1:a:0 -shortest {out_extra} -f mov")
+        format!("{mux_audio} -c:v {ffmpeg_encoder} -map 0:v:0 -map 1:a:0 -shortest {out_extra} -f mov")
     } else if is_vulkan_encoder {
         format!(
             "{} -c:v {} {} {} {} -map 0:v:0 -map 1:a:0 -shortest {} {} {} -f {}",
-            audio_mux_args,
+            mux_audio,
             ffmpeg_encoder,
             bitrate_control,
             params.config.bitrate,
@@ -2896,7 +2984,7 @@ async fn render_impl(
     } else {
         format!(
             "{} -c:v {} {} {} {} {} -map 0:v:0 -map 1:a:0 -shortest {} -f {}",
-            audio_mux_args,
+            mux_audio,
             ffmpeg_encoder,
             bitrate_control,
             params.config.bitrate,
@@ -2937,8 +3025,8 @@ async fn render_impl(
 
     let video_stderr = drain_stderr_with_progress(proc.stderr.take().unwrap(), ffmpeg_frames.clone());
 
-    let frame_size = vw as usize * vh as usize * if color_space.is_hdr() { 12 } else { 4 };
-    let mut hdr_staging = if color_space.is_hdr() { vec![0; vw as usize * vh as usize * 8] } else { Vec::new() };
+    let hdr_readback = color_space.is_hdr();
+    let frame_size = vw as usize * vh as usize * if hdr_readback { 8 } else { 4 };
 
     let mut ffmpeg_stdin = Some(proc.stdin.take().unwrap());
     let keyframe_interval = (fps.saturating_mul(KEYFRAME_INTERVAL_SECS)).max(1) as u64;
@@ -3054,6 +3142,7 @@ async fn render_impl(
                 let writer = std::thread::Builder::new()
                     .name("ffmpeg-writer".to_owned())
                     .spawn(move || -> std::io::Result<u64> {
+                        let _closed = FrameWriterClosed(&shared);
                         let mut busy: u64 = 0;
                         while let Some(buf) = shared.pop_job() {
                             let t = Instant::now();
@@ -3101,10 +3190,21 @@ async fn render_impl(
             let writer = std::thread::Builder::new()
                 .name("ffmpeg-writer".to_owned())
                 .spawn(move || -> std::io::Result<u64> {
-                    let mut busy: u64 = 0;
+                    let _closed = FrameWriterClosed(&shared);
+                    let mut busy = 0_u64;
+                    // Reuse one planar frame on the writer thread. The render
+                    // thread can submit the next RGBA16F frame while this runs.
+                    let mut planar = if hdr_readback { vec![0; frame_size / 8 * 12] } else { Vec::new() };
                     while let Some(buf) = shared.pop_job() {
+                        let pixels = &shared.pool[buf];
+                        let bytes = if hdr_readback {
+                            hdr_rgba_to_gbr(pixels, &mut planar);
+                            planar.as_slice()
+                        } else {
+                            pixels.as_slice()
+                        };
                         let t = Instant::now();
-                        stdin.write_all(&shared.pool[buf])?;
+                        stdin.write_all(bytes)?;
                         let d = t.elapsed().as_nanos() as u64;
                         busy += d;
                         shared.write_ns.fetch_add(d, Ordering::Relaxed);
@@ -3121,9 +3221,9 @@ async fn render_impl(
             (None, Some(pipeline), Some(writer), None, None, None)
         };
 
-    fn submit_frame(pipeline: &FramePipeline, target: &RenderTarget, rgba: Option<&RgbaReadback>, hdr_staging: &mut [u8], frame_size: usize) -> Result<(f64, f64)> {
+    fn submit_frame(pipeline: &FramePipeline, target: &RenderTarget, rgba: Option<&RgbaReadback>, frame_size: usize) -> Result<(f64, f64)> {
         let acquire_start = Instant::now();
-        let buf = pipeline.acquire_buf();
+        let buf = pipeline.acquire_buf()?;
         let pool_wait = acquire_start.elapsed().as_secs_f64();
         let base = pipeline.pool_addrs[buf] as *mut u8;
 
@@ -3135,15 +3235,7 @@ async fn render_impl(
             quad_context.copy_render_target(target.render_pass, rgba.0.render_pass);
             rgba.0.texture.raw_miniquad_texture_handle().read_pixels(quad_context, out);
         } else {
-            target.texture.raw_miniquad_texture_handle().read_pixels(quad_context, hdr_staging);
-            let plane_size = frame_size / 3;
-            for (plane, channel) in out.chunks_exact_mut(plane_size).zip([1, 2, 0]) {
-                for (destination, pixel) in plane.chunks_exact_mut(4).zip(hdr_staging.chunks_exact(8)) {
-                    let offset = channel * 2;
-                    let bits = u16::from_ne_bytes([pixel[offset], pixel[offset + 1]]);
-                    destination.copy_from_slice(&half::f16::from_bits(bits).to_f32().to_le_bytes());
-                }
-            }
+            target.texture.raw_miniquad_texture_handle().read_pixels(quad_context, out);
         }
         let dma_wait = dma_start.elapsed().as_secs_f64();
 
@@ -3185,6 +3277,7 @@ async fn render_impl(
     let mut copy_time: f64 = 0.0;
     let gl = unsafe { get_internal_gl() };
     let spawn_s = mark!("ffmpeg spawn + threads");
+    send(IPCEvent::StartRender(out_frames));
     info!("Rendering video ({} frames)", out_frames);
     let loop_start_time = Instant::now();
 
@@ -3293,7 +3386,7 @@ async fn render_impl(
             }
         } else {
             let (dma, pool) =
-                submit_frame(pipeline.as_ref().unwrap(), &rendered, rgba_readback.as_ref(), &mut hdr_staging, frame_size)?;
+                submit_frame(pipeline.as_ref().unwrap(), &rendered, rgba_readback.as_ref(), frame_size)?;
             if headless_vulkan {
                 miniquad_context().vulkan_context().unwrap().finish_offscreen_frame();
             }
@@ -3305,6 +3398,7 @@ async fn render_impl(
 
     let loop_wall = loop_start_time.elapsed().as_secs_f64().max(1e-9);
     mark!("render loop");
+    send(IPCEvent::Finalizing);
     info!("Finalizing video");
     let backlog_at_end = output_index.saturating_sub(ffmpeg_frames.load(Ordering::Relaxed) as u64);
     drop(vulkan_pipe);

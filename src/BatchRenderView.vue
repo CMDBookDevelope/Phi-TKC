@@ -160,12 +160,13 @@ import moment from 'moment';
 import { toast, toastError, RULES } from './common';
 import type { ChartInfo, RenderConfig, Task } from './model';
 import { RHYTHM_DEFAULTS, isRhythmSpeed, withRhythmDefaults } from './rhythmConfig';
+import { renderAppearance } from './renderAppearance';
 import ConfigView from '@/components/ConfigView.vue';
 import RenderProgressBar from '@/components/RenderProgressBar.vue';
 
 const { t } = useI18n();
 
-const ACTIVE_STATUSES = ['pending', 'loading', 'mixing', 'rendering'];
+const ACTIVE_STATUSES = ['pending', 'loading', 'mixing', 'rendering', 'finalizing'];
 const POLL_MS = 500;
 
 function sleep(ms: number) {
@@ -206,7 +207,7 @@ let statusSyncTimer: ReturnType<typeof setInterval> | null = null;
 
 const bulkEditData = ref({
   backgroundDim: null as number | null,
-  holdCover: null as boolean | null,
+  holdCover: 'keep' as 'keep' | 'on' | 'off',
 });
 
 const isAddingFiles = ref(false);
@@ -238,7 +239,8 @@ function loadDefaultConfig(): RenderConfig {
   const savedConfig = localStorage.getItem('defaultRenderConfig');
   if (savedConfig) {
     try {
-      return withRhythmDefaults(JSON.parse(savedConfig) as RenderConfig);
+      const config = withRhythmDefaults(JSON.parse(savedConfig) as RenderConfig);
+      return { ...config, ...renderAppearance(config) };
     } catch (e) {
       console.error('Failed to parse saved config', e);
     }
@@ -264,13 +266,7 @@ function loadDefaultConfig(): RenderConfig {
     backgroundVideo: null,
     backgroundVideoPlayback: 'normal',
     stereoEnabled: false,
-    stereoStrength: 0.5,
-    hdrSettings: {
-      blockArea: { mode: 'sdr', peakNits: 1000, knee: 0.7, power: 1.7, shadowGain: 1, chromaScale: 1, gamutClip: 'hard' },
-      note: { mode: 'sdr', peakNits: 1000, knee: 0.7, power: 1.7, shadowGain: 1, chromaScale: 1, gamutClip: 'hard' },
-      background: { mode: 'sdr', peakNits: 1000, knee: 0.7, power: 1.7, shadowGain: 1, chromaScale: 1, gamutClip: 'hard' },
-      ui: Object.fromEntries(['score', 'combo', 'name', 'level', 'line', 'pb', 'pause', 'progressText', 'timeText', 'bar', 'scoreAim', 'watermark'].map((key) => [key, { mode: 'sdr', peakNits: 1000, knee: 0.7, power: 1.7, shadowGain: 1, chromaScale: 1, gamutClip: 'hard' }])) as RenderConfig['hdrSettings']['ui'],
-    },
+    ...renderAppearance(),
     bitrateControl: 'CRF',
     bitrate: '28',
     targetAudio: 48000,
@@ -442,7 +438,7 @@ async function buildRenderParams(requireFfmpeg = true) {
   if (!config.resolution) throw new Error('Resolution missing');
   const settings = withRhythmDefaults(config);
   if (!isRhythmSpeed(settings.rhythmSpeed)) throw new Error(t('rhythm-speed-invalid'));
-  return settings;
+  return { ...settings, ...renderAppearance(settings) };
 }
 
 async function saveConfig() {
@@ -473,8 +469,12 @@ async function waitForRender(taskId: number): Promise<{ status: 'done' | 'failed
       if (status.type === 'rendering') {
         renderProgress.value = status.progress * 100;
         renderMsg.value = `FPS: ${status.fps} | ${t('eta')}: ${moment.duration(status.estimate, 'seconds').humanize(true, { ss: 1 })}`;
-      } else if (status.type === 'pending' || status.type === 'loading' || status.type === 'mixing') {
+      } else if (status.type === 'mixing') {
+        renderProgress.value = (status.progress ?? 0) * 100;
+      } else if (status.type === 'pending' || status.type === 'loading') {
         renderProgress.value = 0;
+      } else if (status.type === 'finalizing') {
+        renderProgress.value = 100;
       } else if (status.type === 'done') {
         renderProgress.value = 100;
         return { status: 'done' };
@@ -665,17 +665,17 @@ async function saveChartInfo() {
 }
 
 function openBulkEditDialog() {
-  bulkEditData.value = { backgroundDim: null, holdCover: null };
+  bulkEditData.value = { backgroundDim: null, holdCover: 'keep' };
   bulkEditDialog.value = true;
 }
 
 function saveBulkEdit() {
   const selectedCharts = charts.value.filter((c) => c.selected && c.chartInfo);
+  const { backgroundDim, holdCover } = bulkEditData.value;
   selectedCharts.forEach((chart) => {
     if (!chart.chartInfo) return;
-    if (bulkEditData.value.backgroundDim !== null) chart.chartInfo.backgroundDim = bulkEditData.value.backgroundDim;
-    // v-btn-toggle yields `undefined` when the active button is toggled off, so `!== null` isn't enough.
-    if (typeof bulkEditData.value.holdCover === 'boolean') chart.chartInfo.HoldPartialCover = bulkEditData.value.holdCover;
+    if (backgroundDim !== null) chart.chartInfo.backgroundDim = backgroundDim;
+    if (holdCover !== 'keep') chart.chartInfo.HoldPartialCover = holdCover === 'on';
   });
   bulkEditDialog.value = false;
   toast(t('config-saved'), 'success');
@@ -942,14 +942,11 @@ watch(
                 <v-btn icon="mdi-close-circle" size="small" variant="text" color="error" v-if="bulkEditData.backgroundDim !== null" @click="bulkEditData.backgroundDim = null" />
               </template>
             </v-slider>
-            <div class="d-flex align-center justify-space-between mt-4">
-              <span class="field-label-sm">{{ t('hold_cover') }}</span>
-              <v-btn-toggle v-model="bulkEditData.holdCover" color="primary" variant="outlined" density="compact">
-                <v-btn :value="null">{{ t('keep') }}</v-btn>
-                <v-btn :value="true">{{ t('on') }}</v-btn>
-                <v-btn :value="false">{{ t('off') }}</v-btn>
-              </v-btn-toggle>
-            </div>
+            <v-select v-model="bulkEditData.holdCover" :items="[
+              { value: 'keep', title: t('keep') },
+              { value: 'on', title: t('on') },
+              { value: 'off', title: t('off') },
+            ]" :label="t('hold_cover')" density="compact" variant="outlined" hide-details class="mt-4" />
           </v-form>
         </v-card-text>
         <v-card-actions class="pa-4 border-t">

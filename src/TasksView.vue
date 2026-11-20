@@ -6,6 +6,8 @@ en:
     pending: Pending…
     loading: Loading…
     mixing: Mixing…
+    mixing-progress: 'Mixing audio: {progress}%'
+    finalizing: Finalizing output…
     rendering: Rendering {fps} FPS, estimated to end {estimate}
     done: 'Done, took {duration}, average frame rate: {fps} fps'
     canceled: Canceled
@@ -15,6 +17,7 @@ en:
     pending: Ready
     loading: Loading
     mixing: Mixing
+    finalizing: Finalizing
     rendering: Rendering
     done: Done
     canceled: Canceled
@@ -63,6 +66,8 @@ zh-CN:
     pending: 等待中…
     loading: 加载中…
     mixing: 混音中…
+    mixing-progress: '正在混音：{progress}%'
+    finalizing: 正在封装或保存…
     rendering: 渲染中 {fps} FPS  预计 {estimate} 结束
     done: '已完成，耗时 {duration}，平均帧率：{fps} fps'
     canceled: 已取消
@@ -72,6 +77,7 @@ zh-CN:
     pending: 就绪
     loading: 加载中
     mixing: 混音中
+    finalizing: 封装中
     rendering: 渲染中
     done: 已完成
     canceled: 已取消
@@ -174,7 +180,7 @@ let sourceGeneration = 0;
 let localListGeneration = 0;
 const identityCache = new Map<string, string | null>();
 
-const ACTIVE_STATUSES = ['pending', 'loading', 'mixing', 'rendering'];
+const ACTIVE_STATUSES = ['pending', 'loading', 'mixing', 'rendering', 'finalizing'];
 const POLL_ACTIVE_MS = 300;
 const POLL_IDLE_MS = 2000;
 
@@ -382,7 +388,10 @@ function describeStatus(status: TaskStatus): string {
   switch (status.type) {
     case 'pending': return t('status.pending');
     case 'loading': return t('status.loading');
-    case 'mixing': return t('status.mixing');
+    case 'mixing': return status.progress === undefined
+      ? t('status.mixing')
+      : t('status.mixing-progress', { progress: Math.round(status.progress * 100) });
+    case 'finalizing': return t('status.finalizing');
     case 'rendering':
       return t('status.rendering', {
         fps: status.fps,
@@ -403,7 +412,7 @@ function formatMetric(value: number | undefined): string {
 
 function statusColor(statusType: string): string {
   const colors: Record<string, string> = {
-    pending: 'info', loading: 'info', mixing: 'info',
+    pending: 'info', loading: 'info', mixing: 'info', finalizing: 'info',
     rendering: 'primary', done: 'success', canceled: 'warning', failed: 'error',
   };
   return colors[statusType] || 'info';
@@ -416,8 +425,10 @@ const contextMenu = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const contextMenuRow = ref<Row | null>(null);
-const swipedRow = ref<string | null>(null);
-let touchStart: { key: string; id: number; x: number; y: number; axis: 'pending' | 'horizontal' | 'vertical' } | null = null;
+const SWIPE_DELETE_THRESHOLD = 0.7;
+const swipe = ref<{ key: string; offset: number; dragging: boolean } | null>(null);
+const removingRows = new Set<string>();
+let touchStart: { key: string; id: number; x: number; y: number; width: number; axis: 'pending' | 'horizontal' | 'vertical' } | null = null;
 let suppressSwipeClick: { key: string; x: number; y: number; until: number } | null = null;
 
 function canRemoveRow(row: Row): row is Row & { task: Task } {
@@ -450,25 +461,35 @@ async function cancelRow(row: Row) {
 }
 
 async function removeRow(row: Row) {
-  if (!canRemoveRow(row)) return;
+  if (!canRemoveRow(row) || removingRows.has(row.key)) return;
+  removingRows.add(row.key);
   try {
     await invoke('remove_task', { id: row.task.id });
-    swipedRow.value = null;
     closeContextMenu();
     await updateList();
   } catch (e) {
     toastError(e);
+  } finally {
+    removingRows.delete(row.key);
   }
 }
 
 function beginSwipe(event: TouchEvent, row: Row) {
-  touchStart = null;
+  if (event.touches.length !== 1) return;
+  cancelSwipe();
   suppressSwipeClick = null;
-  if (!mobile) return;
-  if (swipedRow.value !== row.key) swipedRow.value = null;
-  if (!canRemoveRow(row) || event.touches.length !== 1) return;
+  if (!mobile || !canRemoveRow(row) || removingRows.has(row.key)) return;
   const touch = event.changedTouches[0];
-  if (touch) touchStart = { key: row.key, id: touch.identifier, x: touch.clientX, y: touch.clientY, axis: 'pending' };
+  const shell = event.currentTarget as HTMLElement | null;
+  if (!touch || !shell) return;
+  touchStart = {
+    key: row.key,
+    id: touch.identifier,
+    x: touch.clientX,
+    y: touch.clientY,
+    width: shell.getBoundingClientRect().width,
+    axis: 'pending',
+  };
 }
 
 function findTouch(touches: TouchList, id: number) {
@@ -478,7 +499,7 @@ function findTouch(touches: TouchList, id: number) {
 function moveSwipe(event: TouchEvent, row: Row) {
   const start = touchStart;
   if (!start || start.key !== row.key) return;
-  if (event.touches.length > 1) {
+  if (event.touches.length !== 1) {
     cancelSwipe();
     return;
   }
@@ -490,31 +511,29 @@ function moveSwipe(event: TouchEvent, row: Row) {
     if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.25) start.axis = 'horizontal';
     else if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) start.axis = 'vertical';
   }
-  if (start.axis === 'horizontal' && event.cancelable) {
-    event.preventDefault();
-  }
+  if (start.axis !== 'horizontal') return;
+  if (event.cancelable) event.preventDefault();
+  swipe.value = {
+    key: row.key,
+    offset: Math.max(-start.width, Math.min(start.width, dx)),
+    dragging: true,
+  };
 }
 
 function finishSwipe(event: TouchEvent, row: Row) {
   const start = touchStart;
   if (!start || start.key !== row.key) return;
-  if (event.touches.length !== 0 || event.changedTouches.length !== 1) {
-    cancelSwipe();
-    return;
-  }
   const touch = findTouch(event.changedTouches, start.id);
-  if (!touch) return;
-  const dx = touch.clientX - start.x;
-  const dy = touch.clientY - start.y;
-  touchStart = null;
-  if (start.axis === 'vertical' || Math.abs(dx) <= 52 || Math.abs(dx) <= Math.abs(dy) * 1.25) return;
+  cancelSwipe();
+  if (!touch || event.touches.length !== 0 || event.changedTouches.length !== 1 || start.axis !== 'horizontal') return;
   if (event.cancelable) event.preventDefault();
-  swipedRow.value = canRemoveRow(row) && dx < 0 ? row.key : null;
   suppressSwipeClick = { key: row.key, x: touch.clientX, y: touch.clientY, until: Date.now() + 500 };
+  if (start.x - touch.clientX > start.width * SWIPE_DELETE_THRESHOLD) void removeRow(row);
 }
 
 function cancelSwipe() {
   touchStart = null;
+  if (swipe.value?.dragging) swipe.value = { ...swipe.value, offset: 0, dragging: false };
 }
 
 // The additional finger can land outside the active row and be lifted before
@@ -575,7 +594,6 @@ const showContextMenu = (event: MouseEvent, row: Row) => {
 
 // Touch-friendly replacement for the right-click menu: anchor it to the button.
 const showContextMenuFromButton = (event: MouseEvent, row: Row) => {
-  swipedRow.value = null;
   const target = event.currentTarget as HTMLElement;
   const rect = target.getBoundingClientRect();
   contextMenuRow.value = row;
@@ -587,7 +605,7 @@ const showContextMenuFromButton = (event: MouseEvent, row: Row) => {
 const closeContextMenu = () => {
   contextMenu.value = false;
   contextMenuRow.value = null;
-  swipedRow.value = null;
+  cancelSwipe();
 };
 
 const showDetail = (row: Row) => {
@@ -628,27 +646,22 @@ onUnmounted(() => {
         v-for="row in rows"
         :key="row.key"
         class="task-row-shell"
-        :class="{ 'is-swipeable': mobile && canRemoveRow(row), 'is-swipe-open': swipedRow === row.key }"
+        :class="{ 'is-swipeable': mobile && canRemoveRow(row), 'is-swipe-dragging': swipe?.key === row.key && swipe.dragging }"
+         :style="swipe?.key === row.key ? { '--swipe-offset': `${swipe.offset}px`, '--delete-width': `${Math.max(0, -swipe.offset - 8)}px` } : undefined"
         @touchstart.passive="beginSwipe($event, row)"
         @touchmove="moveSwipe($event, row)"
         @touchend="finishSwipe($event, row)"
         @touchcancel="cancelSwipe"
         @click.capture="suppressClickAfterSwipe($event, row)"
       >
-        <button
-          v-if="mobile && swipedRow === row.key && canRemoveRow(row)"
-          class="swipe-delete"
-          type="button"
-          :aria-label="t('remove-record')"
-          :title="t('remove-record')"
-          @click.stop="removeRow(row)"
-        ><v-icon icon="mdi-delete-outline" size="20" /></button>
+        <div v-if="mobile && canRemoveRow(row)" class="swipe-delete clear-glass" aria-hidden="true">
+          <span>删除-Delete</span>
+        </div>
         <div
           class="task-card glass fluent-glass"
           v-glass
           @contextmenu="showContextMenu($event, row)"
-          @click="swipedRow = null"
-        >
+                  >
         <!-- Cover (left 35%) -->
         <div class="task-cover">
           <div
@@ -690,7 +703,7 @@ onUnmounted(() => {
 
           <div class="task-status">
             <RenderProgressCircular
-              v-if="['loading', 'mixing', 'pending', 'rendering', 'done'].includes(row.status.type)"
+              v-if="['loading', 'mixing', 'pending', 'rendering', 'finalizing', 'done'].includes(row.status.type)"
               :complete="row.status.type === 'done'"
               color="primary" :size="20" :width="2" :aria-label="describeStatus(row.status)"
             />
@@ -704,7 +717,7 @@ onUnmounted(() => {
           />
 
           <div class="task-actions">
-            <template v-if="['loading', 'mixing', 'rendering', 'pending'].includes(row.status.type)">
+            <template v-if="['loading', 'mixing', 'rendering', 'pending', 'finalizing'].includes(row.status.type)">
               <v-btn variant="text" size="small" color="primary" :disabled="canceling.has(row.key)" :loading="canceling.has(row.key)" @click="cancelRow(row)">
                 <v-icon icon="mdi-cancel" size="16" class="mr-1" />
                 <span>{{ t('cancel') }}</span>
@@ -892,6 +905,7 @@ onUnmounted(() => {
 }
 
 .task-row-shell {
+  --task-metadata-size: 12px;
   position: relative;
   flex: 0 0 auto;
   min-width: 0;
@@ -914,7 +928,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.task-card:hover { transform: none; }
+
 
 .task-cover {
   width: 35%;
@@ -959,7 +973,7 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px 12px;
-  font-size: 12px;
+  font-size: var(--task-metadata-size);
   color: rgba(var(--main-color-rgb), 0.45);
 }
 .task-metadata span {
@@ -1149,15 +1163,33 @@ onUnmounted(() => {
 }
 
 .task-row-shell.is-swipeable { touch-action: pan-y; }
-.task-row-shell.is-swipe-open .task-card { transform: translateX(-72px); }
-.task-row-shell.is-swipe-open .swipe-delete {
+.is-swipeable .task-card {
+  transform: translateX(var(--swipe-offset, 0px));
+  border-radius: 16px;
+  transition: transform 0.24s cubic-bezier(0.65, 0, 0.35, 1),
+    box-shadow 0.2s ease-in-out, backdrop-filter 0.2s ease-in-out !important;
+}
+.is-swipeable .swipe-delete {
   position: absolute;
   inset: 0 0 0 auto;
   display: grid;
   place-items: center;
-  width: 72px;
+  width: var(--delete-width, 0px);
+  border-radius: 16px;
+  overflow: hidden;
+  pointer-events: none;
+  transition: width 0.24s cubic-bezier(0.65, 0, 0.35, 1);
   border: 0;
-  color: white;
-  background: rgb(190, 42, 53);
+  box-shadow: inset 0 0 0 1px rgba(var(--bg-color-rgb), 0.2);
+}
+.swipe-delete span {
+  color: rgb(255 255 255 / 80%);
+  font-size: var(--task-metadata-size);
+  font-weight: normal;
+  white-space: nowrap;
+}
+.is-swipeable.is-swipe-dragging :is(.task-card, .swipe-delete) { transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .is-swipeable :is(.task-card, .swipe-delete) { transition: none !important; }
 }
 </style>

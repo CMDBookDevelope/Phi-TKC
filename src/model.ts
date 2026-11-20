@@ -21,6 +21,10 @@ export type TaskStatus =
     }
   | {
       type: 'mixing';
+      progress?: number;
+    }
+  | {
+      type: 'finalizing';
     }
   | {
       type: 'rendering';
@@ -83,13 +87,9 @@ export interface RenderConfig {
   backgroundVideo: string | null;
   backgroundVideoPlayback: 'normal' | 'repeat' | 'stretch';
   colorSpace: 'rec709' | 'srgb' | 'rec2100_pq' | 'rec2100_hlg';
-  hdrSettings: {
-    blockArea: HdrLayerSettings;
-    note: HdrLayerSettings;
-    background: HdrLayerSettings;
-    ui: Record<HdrUiKey, HdrLayerSettings>;
-  };
+  hdrSettings: RenderHdrSettings;
   stereoEnabled: boolean;
+  /** 1 is the original full-strength baseline, 2 is 200%. */
   stereoStrength: number;
   fps: number;
   hardwareAccel: boolean;
@@ -122,6 +122,11 @@ export interface RenderConfig {
   volumeMusic: number;
   volumeSfx: number;
   handSplit: boolean;
+  handLeftColor: string;
+  handRightColor: string;
+  handLeftOpacity: number;
+  handRightOpacity: number;
+  hitEffectEnabled: boolean;
   noteSpeedFactor: number;
 
   uiScore: boolean;
@@ -144,6 +149,19 @@ export interface HdrLayerSettings {
   chromaScale: number;
   gamutClip: 'hard' | 'soft';
 }
+
+export interface RenderHdrSettings {
+  blockArea: HdrLayerSettings;
+  note: HdrLayerSettings;
+  background: HdrLayerSettings;
+  ui: Record<HdrUiKey, HdrLayerSettings>;
+  rhythm: Record<HdrRhythmKey, HdrLayerSettings>;
+  handIndicator: Record<HdrHandKey, HdrLayerSettings>;
+  hitEffect: HdrLayerSettings;
+}
+
+export type HdrRhythmKey = 'metronome' | 'note' | 'value';
+export type HdrHandKey = 'left' | 'right';
 
 export type HdrUiKey =
   | 'score' | 'combo' | 'name' | 'level' | 'line' | 'pb' | 'pause' | 'progressText'

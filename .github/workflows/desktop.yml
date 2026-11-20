@@ -399,11 +399,16 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Download all artifacts
+      - name: Download desktop packages
         uses: actions/download-artifact@v4
         with:
-          path: dist
-          merge-multiple: true
+          pattern: desktop-*
+          path: release-input
+
+      - name: Stage release packages
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        run: python3 scripts/stage-release-assets.py desktop "$RELEASE_VERSION" release-input release-assets
 
       - name: Create or update release
         uses: softprops/action-gh-release@v2
@@ -436,7 +441,5 @@ jobs:
 
             CLI, server and preview terminal output shares the colored logger, including
             startup errors and per-job render diagnostics.
-          # Recursive: artifact archives keep the directory layout below the
-          # glob root (the APK lands in apk/universal/release/), so `dist/*`
-          # would silently skip it.
-          files: dist/**
+          fail_on_unmatched_files: true
+          files: release-assets/*

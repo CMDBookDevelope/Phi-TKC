@@ -44,7 +44,11 @@ fn create_task_cover(cover_dir: Option<&Path>) -> Result<NamedTempFile> {
 pub enum TaskStatus {
     Pending,
     Loading,
-    Mixing,
+    Mixing {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        progress: Option<f32>,
+    },
+    Finalizing,
     Rendering {
         progress: f64,
         fps: u64,
@@ -135,7 +139,7 @@ impl Task {
     /// atomic counters that the render thread updates.
     #[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
     async fn run_mobile(&self) -> Result<()> {
-        use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+        use crate::common::RenderProgress;
         #[cfg(target_os = "android")]
         use crate::android_render as native_render;
         #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
@@ -147,10 +151,8 @@ impl Task {
         }
         *self.status.lock().await = TaskStatus::Loading;
 
-        let progress = Arc::new(AtomicU64::new(0));
-        let current_fps = Arc::new(AtomicU64::new(0));
+        let progress = Arc::new(std::sync::Mutex::new(RenderProgress::Preparing));
         let progress_out = Arc::clone(&progress);
-        let fps_out = Arc::clone(&current_fps);
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_out = Arc::clone(&cancel);
         let request = native_render::RenderRequest {
@@ -163,7 +165,6 @@ impl Task {
             request_cancel: Some(cancel_out),
         };
 
-        *self.status.lock().await = TaskStatus::Mixing;
         let finished = Arc::new(std::sync::Mutex::new(None::<Result<crate::common::RenderStats>>));
         let finished_out = Arc::clone(&finished);
         let runtime = tokio::runtime::Handle::current();
@@ -174,14 +175,15 @@ impl Task {
                     if let Some(guard) = crate::common::NativeGraphicsGuard::try_acquire() {
                         break guard;
                     }
-                    if request.request_cancel.as_ref().is_some_and(|cancel| cancel.load(AtomicOrdering::Relaxed)) {
+                    if request.request_cancel.as_ref().is_some_and(|cancel| cancel.load(Ordering::Relaxed)) {
                         anyhow::bail!("render canceled while waiting for the preview");
                     }
                     std::thread::sleep(Duration::from_millis(25));
                 };
-                native_render::run(request, move |value, fps| {
-                    progress_out.store((value.max(0.) * 10000.) as u64, AtomicOrdering::Relaxed);
-                    fps_out.store(fps.max(0.) as u64, AtomicOrdering::Relaxed);
+                native_render::run(request, move |value| {
+                    if let Ok(mut progress) = progress_out.lock() {
+                        *progress = value;
+                    }
                 })
             })).unwrap_or_else(|panic| {
                 let message = panic.downcast_ref::<String>().map(String::as_str)
@@ -193,21 +195,14 @@ impl Task {
             }
         })?;
 
-        let start = Instant::now();
+        let mut encoding_start: Option<Instant> = None;
         loop {
             if self.request_cancel.load(Ordering::Relaxed) {
                 cancel.store(true, Ordering::Relaxed);
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
-            let value = progress.load(AtomicOrdering::Relaxed) as f64 / 10000.;
-            let fps = current_fps.load(AtomicOrdering::Relaxed);
+            let phase = *progress.lock().unwrap_or_else(|error| error.into_inner());
             let done = finished.lock().ok().and_then(|mut guard| guard.take());
-            let elapsed = start.elapsed().as_secs_f64();
-            let estimate = if value > 0.01 {
-                elapsed / value - elapsed
-            } else {
-                0.0
-            };
             match done {
                 Some(Ok(stats)) => {
                     if self.request_cancel.load(Ordering::Relaxed) {
@@ -215,6 +210,7 @@ impl Task {
                         *self.status.lock().await = TaskStatus::Canceled;
                         return Ok(());
                     }
+                    *self.status.lock().await = TaskStatus::Finalizing;
                     let log = tokio::fs::read_to_string(self.output.with_extension("log"))
                         .await
                         .unwrap_or_default();
@@ -270,11 +266,20 @@ impl Task {
                     return Ok(());
                 }
                 None => {
-                    *self.status.lock().await = if value == 0. { TaskStatus::Mixing } else { TaskStatus::Rendering {
-                        progress: value,
-                        fps,
-                        estimate,
-                    } };
+                    *self.status.lock().await = match phase {
+                        RenderProgress::Preparing => TaskStatus::Loading,
+                        RenderProgress::Mixing(fraction) => TaskStatus::Mixing { progress: Some(fraction.clamp(0., 1.)) },
+                        RenderProgress::Finalizing => TaskStatus::Finalizing,
+                        RenderProgress::Encoding { fraction, fps } => {
+                            let value = f64::from(fraction).clamp(0., 1.);
+                            let elapsed = encoding_start.get_or_insert_with(Instant::now).elapsed().as_secs_f64();
+                            TaskStatus::Rendering {
+                                progress: value,
+                                fps: fps.max(0.).round() as u64,
+                                estimate: if value > 0.01 { elapsed * (1. - value) / value } else { 0. },
+                            }
+                        }
+                    };
                 }
             }
         }
@@ -363,9 +368,12 @@ impl Task {
             };
             match event {
                 IPCEvent::StartMixing => {
-                    *self.status.lock().await = TaskStatus::Mixing;
+                    *self.status.lock().await = TaskStatus::Mixing { progress: None };
                 }
+                IPCEvent::PrepareEncoder => *self.status.lock().await = TaskStatus::Loading,
+                IPCEvent::Finalizing => *self.status.lock().await = TaskStatus::Finalizing,
                 IPCEvent::StartRender(total_frame) => {
+                    *self.last_fps_update.lock().await = Instant::now();
                     *self.status.lock().await = TaskStatus::Rendering {
                         progress: 0.,
                         fps: 0,

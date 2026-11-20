@@ -48,6 +48,17 @@ en:
   hdr-note: Note
   hdr-background: Background
   hdr-ui: UI Elements
+  hdr-rhythm: Rhythm Analysis
+  hdr-hand-indicator: Hand Indicator
+  hdr-hit-effect: Hit Effects
+  hdr-section: HDR Group
+  hdr-ui-element: UI Element
+  hdr-rhythm-element: Rhythm Element
+  hdr-hand-side: Hand
+  hdr-mode: HDR Mode
+  hdr-metronome: Metronome
+  hdr-rhythm-note: Notes
+  hdr-note-value: Note Value
   hdr-ui-score: Score
   hdr-ui-combo: Combo
   hdr-ui-name: Name
@@ -73,7 +84,7 @@ en:
   hdr-gamut-clip: Gamut Mapping
   hdr-hard: Hard Clip
   hdr-soft: Soft Compression
-  background-tab: Background
+  background-type: Background Type
   background-chart: Chart Illustration
   background-solid: Solid
   background-video: Video
@@ -137,6 +148,14 @@ en:
   flid_x: Mirror
   background: BG Only
   hand-split: Hand Split
+  hand-left: Left
+  hand-right: Right
+  hand-overlay-color: Overlay Color
+  hand-overlay-opacity: Overlay Opacity
+  hand-color-for-side: '{side} Overlay Color'
+  hand-opacity-for-side: '{side} Overlay Opacity'
+  hand-opacity-hint: 100% applies the full tint.
+  hit-effect-enabled: Hit Effects
   note-speed-factor: Note Speed
   bar: Judge Bar
   render-list: Judge Line,Score,Combo,Level,Name,Progress,Percent,Time,Pause
@@ -230,6 +249,17 @@ zh-CN:
   hdr-note: 音符
   hdr-background: 背景
   hdr-ui: UI 元素
+  hdr-rhythm: 节奏解析
+  hdr-hand-indicator: 手序标记
+  hdr-hit-effect: 打击特效
+  hdr-section: HDR 分组
+  hdr-ui-element: UI 元素
+  hdr-rhythm-element: 节奏元素
+  hdr-hand-side: 手别
+  hdr-mode: HDR 模式
+  hdr-metronome: 节拍器
+  hdr-rhythm-note: 音符
+  hdr-note-value: 音符时值
   hdr-ui-score: 分数
   hdr-ui-combo: 连击
   hdr-ui-name: 玩家名称
@@ -255,7 +285,7 @@ zh-CN:
   hdr-gamut-clip: 色域裁切
   hdr-hard: 硬裁切
   hdr-soft: 软压缩
-  background-tab: 背景
+  background-type: 背景类型
   background-chart: 谱面曲绘
   background-solid: 纯色
   background-video: 视频
@@ -319,6 +349,14 @@ zh-CN:
   flid_x: 镜像
   background: 仅背景显示
   hand-split: 手序拆分
+  hand-left: 左手
+  hand-right: 右手
+  hand-overlay-color: 叠加颜色
+  hand-overlay-opacity: 叠加不透明度
+  hand-color-for-side: '{side}叠加颜色'
+  hand-opacity-for-side: '{side}叠加不透明度'
+  hand-opacity-hint: 100% 表示完全使用所选颜色。
+  hit-effect-enabled: 打击特效
   note-speed-factor: 流速
   bar: 判定条显示
   render-list: 判定线,分数,连击,等级,名字,进度,百分比,时间,暂停
@@ -374,7 +412,8 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { VForm } from 'vuetify/components';
 import { toast, anyFilter, toastError, RULES } from '@/common';
-import type { RenderConfig } from '@/model';
+import type { HdrHandKey, HdrRhythmKey, HdrUiKey, RenderConfig } from '@/model';
+import { renderAppearance, STEREO_STRENGTH_MAX } from '@/renderAppearance';
 import { RHYTHM_DEFAULTS, RHYTHM_SPEED_MIN, RHYTHM_SPEED_MAX, isRhythmSpeed, withRhythmDefaults, type RhythmColors } from '@/rhythmConfig';
 import TipSwitch from './TipSwitch.vue';
 import RhythmColorPicker from './RhythmColorPicker.vue';
@@ -540,7 +579,13 @@ const watermark = ref('');
 const endingLength = ref('-2.0');
 const chartRatio = ref(1.0);
 const noteSpeedFactor = ref(1.0);
-const backgroundMode = ref<'chart' | 'solid' | 'video' | 'none'>('chart');
+const backgroundMode = ref<RenderConfig['backgroundMode']>('chart');
+const backgroundOptions = computed(() => [
+  { value: 'chart', title: t('background-chart') },
+  { value: 'solid', title: t('background-solid') },
+  { value: 'video', title: t('background-video') },
+  { value: 'none', title: t('background-none') },
+]);
 const backgroundColor = ref('#000000');
 const backgroundVideo = ref<string | null>(null);
 const backgroundVideoPlayback = ref<RenderConfig['backgroundVideoPlayback']>('normal');
@@ -600,44 +645,53 @@ watch([videoCodec, hwAccel, encoderAvailability], () => {
     encoder.value = encoders.value[0]?.value ?? 'auto';
   }
 });
-type HdrMode = 'sdr' | 'mapped' | 'custom';
-interface HdrSetting {
-  mode: HdrMode;
-  peakNits: number;
-  knee: number;
-  power: number;
-  shadowGain: number;
-  chromaScale: number;
-  gamutClip: 'hard' | 'soft';
-}
-const HDR_DEFAULT: HdrSetting = { mode: 'sdr', peakNits: 1000, knee: 0.7, power: 1.7, shadowGain: 1, chromaScale: 1, gamutClip: 'hard' };
 type HdrSectionKey = keyof RenderConfig['hdrSettings'];
-const HDR_UI_KEYS = ['score', 'combo', 'name', 'level', 'line', 'pb', 'pause', 'progressText', 'timeText', 'bar', 'scoreAim', 'watermark'] as const;
-const HDR_UI_LABELS: Record<typeof HDR_UI_KEYS[number], string> = {
+const HDR_UI_LABELS: Record<HdrUiKey, string> = {
   score: 'hdr-ui-score', combo: 'hdr-ui-combo', name: 'hdr-ui-name', level: 'hdr-ui-level',
   line: 'hdr-ui-line', pb: 'hdr-ui-pb', pause: 'hdr-ui-pause', progressText: 'hdr-ui-progress-text',
   timeText: 'hdr-ui-time-text', bar: 'hdr-ui-bar', scoreAim: 'hdr-ui-score-aim', watermark: 'hdr-ui-watermark',
 };
-const activeHdrUi = ref<typeof HDR_UI_KEYS[number]>('score');
-function createHdrUiSettings() {
-  return Object.fromEntries(HDR_UI_KEYS.map((key) => [key, { ...HDR_DEFAULT }])) as RenderConfig['hdrSettings']['ui'];
-}
-const hdrSettings = ref<RenderConfig['hdrSettings']>({
-  blockArea: { ...HDR_DEFAULT }, note: { ...HDR_DEFAULT }, background: { ...HDR_DEFAULT }, ui: createHdrUiSettings(),
-});
+const appearance = ref(renderAppearance());
 const activeHdrSection = ref<HdrSectionKey>('blockArea');
+const activeHdrUi = ref<HdrUiKey>('score');
+const activeHdrRhythm = ref<HdrRhythmKey>('metronome');
+const activeHdrHand = ref<HdrHandKey>('left');
 const hdrEnabled = computed(() => colorSpace.value === 'rec2100_pq' || colorSpace.value === 'rec2100_hlg');
-const activeHdrSetting = computed<HdrSetting>(() => activeHdrSection.value === 'ui'
-  ? hdrSettings.value.ui[activeHdrUi.value]
-  : hdrSettings.value[activeHdrSection.value]);
+const activeHdrSetting = computed(() => {
+  const hdr = appearance.value.hdrSettings;
+  switch (activeHdrSection.value) {
+    case 'ui': return hdr.ui[activeHdrUi.value];
+    case 'rhythm': return hdr.rhythm[activeHdrRhythm.value];
+    case 'handIndicator': return hdr.handIndicator[activeHdrHand.value];
+    default: return hdr[activeHdrSection.value];
+  }
+});
 const hdrSections = computed<Array<{ value: HdrSectionKey; title: string }>>(() => [
   { value: 'blockArea', title: t('hdr-block-area') },
   { value: 'note', title: t('hdr-note') },
   { value: 'background', title: t('hdr-background') },
   { value: 'ui', title: t('hdr-ui') },
+  { value: 'rhythm', title: t('hdr-rhythm') },
+  { value: 'handIndicator', title: t('hdr-hand-indicator') },
+  { value: 'hitEffect', title: t('hdr-hit-effect') },
+]);
+const hdrUiOptions = computed(() => Object.entries(HDR_UI_LABELS).map(([value, label]) => ({ value, title: t(label) })));
+const hdrRhythmOptions = computed(() => [
+  { value: 'metronome', title: t('hdr-metronome') },
+  { value: 'note', title: t('hdr-rhythm-note') },
+  { value: 'value', title: t('hdr-note-value') },
+]);
+const handSides = [
+  { value: 'left', label: 'hand-left', colorKey: 'handLeftColor', opacityKey: 'handLeftOpacity' },
+  { value: 'right', label: 'hand-right', colorKey: 'handRightColor', opacityKey: 'handRightOpacity' },
+] as const;
+const hdrHandOptions = computed(() => handSides.map(({ value, label }) => ({ value, title: t(label) })));
+const hdrModes = computed(() => [
+  { value: 'sdr', title: t('hdr-sdr') },
+  { value: 'mapped', title: t('hdr-mapped') },
+  { value: 'custom', title: t('hdr-custom') },
 ]);
 const stereoEnabled = ref(false);
-const stereoStrength = ref(0.5);
 async function chooseBackgroundVideo() {
   try {
     const selected = mobile ? await invoke<string | null>('pick_background_video') : await open({
@@ -749,11 +803,7 @@ const DEFAULT_PRESET: Preset = {
     backgroundVideo: null,
     backgroundVideoPlayback: 'normal',
     stereoEnabled: false,
-    stereoStrength: 0.5,
-    hdrSettings: {
-      blockArea: { ...HDR_DEFAULT }, note: { ...HDR_DEFAULT },
-      background: { ...HDR_DEFAULT }, ui: createHdrUiSettings(),
-    },
+    ...renderAppearance(),
     bitrateControl: 'CRF',
     bitrate: '28',
     targetAudio: 48000,
@@ -930,8 +980,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
     backgroundVideo: backgroundVideo.value,
     backgroundVideoPlayback: backgroundVideoPlayback.value,
     stereoEnabled: stereoEnabled.value,
-    stereoStrength: stereoStrength.value,
-    hdrSettings: JSON.parse(JSON.stringify(hdrSettings.value)),
+    ...renderAppearance(appearance.value),
     bitrateControl: bitrateControl.value,
     bitrate: bitrate.value,
     targetAudio: targetAudio.value,
@@ -1005,15 +1054,7 @@ function applyConfig(c: RenderConfig) {
   backgroundVideo.value = c.backgroundVideo || null;
   backgroundVideoPlayback.value = c.backgroundVideoPlayback ?? 'normal';
   stereoEnabled.value = c.stereoEnabled ?? false;
-  stereoStrength.value = c.stereoStrength ?? 0.5;
-  if (c.hdrSettings) {
-    hdrSettings.value = {
-      blockArea: { ...HDR_DEFAULT, ...c.hdrSettings.blockArea },
-      note: { ...HDR_DEFAULT, ...c.hdrSettings.note },
-      background: { ...HDR_DEFAULT, ...c.hdrSettings.background },
-      ui: Object.fromEntries(HDR_UI_KEYS.map((key) => [key, { ...HDR_DEFAULT, ...(c.hdrSettings.ui?.[key] ?? {}) }])) as RenderConfig['hdrSettings']['ui'],
-    };
-  }
+  appearance.value = renderAppearance(c);
   bitrateControl.value = c.bitrateControl;
   bitrate.value = c.bitrate;
   targetAudio.value = c.targetAudio;
@@ -1260,8 +1301,8 @@ async function replacePreset() {
                 <TipSwitch v-model="stereoEnabled" :label="t('stereo')" density="compact" color="primary" />
               </div>
               <div v-if="stereoEnabled" class="slider-block">
-                <div class="slider-header"><span>{{ t('stereo-strength') }}</span><span class="slider-val">{{ Math.round(stereoStrength * 100) }}%</span></div>
-                <v-slider v-model="stereoStrength" :min="0" :max="1" :step="0.01" hide-details color="primary" />
+                <div class="slider-header"><span>{{ t('stereo-strength') }}</span><span class="slider-val">{{ Math.round(appearance.stereoStrength * 100) }}%</span></div>
+                <v-slider v-model="appearance.stereoStrength" :aria-label="t('stereo-strength')" :aria-valuetext="`${Math.round(appearance.stereoStrength * 100)}%`" :min="0" :max="STEREO_STRENGTH_MAX" :step="0.01" hide-details color="primary" />
               </div>
               <div class="field-row two-col">
                 <v-select v-model="targetAudio" :items="SAMPLE_RATES" :label="t('target_audio')" density="compact" variant="outlined" hide-details />
@@ -1295,13 +1336,6 @@ async function replacePreset() {
                 <v-slider v-model="noteSpeedFactor" :min="0.1" :max="2" :step="0.01" hide-details color="primary" />
               </div>
               <div class="switch-grid">
-                <v-switch
-                  :model-value="backgroundMode === 'chart'"
-                  :label="t('background')"
-                  density="compact"
-                  color="primary"
-                  hide-details
-                  @update:model-value="backgroundMode = $event ? 'chart' : 'none'" />
                 <v-switch v-model="bar" :label="t('bar')" density="compact" color="primary" hide-details />
               </div>
             </div>
@@ -1318,35 +1352,6 @@ async function replacePreset() {
           </div>
           <!-- GRAPHICS -->
             <div v-show="activeCategory === 'graphics'" class="settings-stack" :inert="activeCategory !== 'graphics'">
-            <div class="md3-card glass fluent-glass" v-glass>
-              <div class="card-label">{{ t('background-tab') }}</div>
-              <v-btn-toggle v-model="backgroundMode" mandatory color="primary" divided class="background-modes">
-                <v-btn value="chart">{{ t('background-chart') }}</v-btn>
-                <v-btn value="solid">{{ t('background-solid') }}</v-btn>
-                <v-btn value="video">{{ t('background-video') }}</v-btn>
-                <v-btn value="none">{{ t('background-none') }}</v-btn>
-              </v-btn-toggle>
-              <div v-if="backgroundMode === 'solid'" class="field-row background-color-row">
-                <label class="field-label" for="render-background-color">{{ t('background-color') }}</label>
-                <input id="render-background-color" v-model="backgroundColor" class="color-input" type="color" />
-              </div>
-              <div v-if="backgroundMode === 'video'" class="field-row background-video-row">
-                <v-text-field
-                  v-if="!mobile"
-                  v-model="backgroundVideo"
-                  :label="t('background-video-path')"
-                  density="compact"
-                  variant="outlined"
-                  hide-details />
-                <v-btn variant="outlined" prepend-icon="mdi-folder-open-outline" @click="chooseBackgroundVideo">{{ t('background-choose-video') }}</v-btn>
-              </div>
-              <v-btn-toggle v-if="backgroundMode === 'video'" v-model="backgroundVideoPlayback"
-                :aria-label="t('background-video-playback')" mandatory color="primary" divided class="background-modes">
-                <v-btn v-for="option in backgroundVideoPlaybackOptions" :key="option.value" :value="option.value">
-                  {{ option.title }}
-                </v-btn>
-              </v-btn-toggle>
-            </div>
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.respack') }}</div>
               <div class="respack-row">
@@ -1381,10 +1386,31 @@ async function replacePreset() {
                 <TipSwitch v-model="aggressive" :label="t('aggressive')" :tooltip="t('aggressive-tips')" density="compact" color="primary" />
                 <TipSwitch v-model="disableParticle" :label="t('disable-particle')" density="compact" color="primary" />
                 <TipSwitch v-model="disableEffect" :label="t('disable-effect')" density="compact" color="primary" />
+                <TipSwitch v-model="appearance.hitEffectEnabled" :label="t('hit-effect-enabled')" density="compact" color="primary" />
               </div>
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
               <div class="card-label">{{ t('section.ui') }}</div>
+              <v-select v-model="backgroundMode" :items="backgroundOptions" :label="t('background-type')"
+                density="compact" variant="outlined" hide-details />
+              <label v-if="backgroundMode === 'solid'" class="color-picker-row field-label">
+                {{ t('background-color') }}
+                <input v-model="backgroundColor" class="color-input" type="color" />
+              </label>
+              <template v-if="backgroundMode === 'video'">
+                <div class="field-row background-video-row">
+                  <v-text-field
+                    v-if="!mobile"
+                    v-model="backgroundVideo"
+                    :label="t('background-video-path')"
+                    density="compact"
+                    variant="outlined"
+                    hide-details />
+                  <v-btn variant="outlined" prepend-icon="mdi-folder-open-outline" @click="chooseBackgroundVideo">{{ t('background-choose-video') }}</v-btn>
+                </div>
+                <v-select v-model="backgroundVideoPlayback" :items="backgroundVideoPlaybackOptions" :label="t('background-video-playback')"
+                  density="compact" variant="outlined" hide-details />
+              </template>
               <div class="ui-grid">
                 <div v-for="(item, index) in renderList" :key="index" class="ui-chip" :class="{ 'is-on': render.includes(item) }" @click="toggleRender(item)">
                   <v-icon :icon="render.includes(item) ? 'mdi-checkbox-marked' : 'mdi-checkbox-blank-outline'" size="16" />
@@ -1453,6 +1479,24 @@ async function replacePreset() {
             </div>
             <div class="md3-card glass fluent-glass" v-glass>
               <TipSwitch v-model="handSplit" :label="t('hand-split')" density="compact" color="primary" hide-details />
+              <template v-if="handSplit">
+                <fieldset v-for="side in handSides" :key="side.value" class="hand-overlay">
+                  <legend class="card-label">{{ t(side.label) }}</legend>
+                  <label class="color-picker-row field-label">
+                    {{ t('hand-overlay-color') }}
+                    <input v-model="appearance[side.colorKey]" :aria-label="t('hand-color-for-side', { side: t(side.label) })" class="color-input" type="color" />
+                  </label>
+                  <div class="slider-block">
+                    <div class="slider-header">
+                      <span>{{ t('hand-overlay-opacity') }}</span>
+                      <span class="slider-val">{{ Math.round(appearance[side.opacityKey] * 100) }}%</span>
+                    </div>
+                    <v-slider v-model="appearance[side.opacityKey]" :aria-label="t('hand-opacity-for-side', { side: t(side.label) })"
+                      :aria-valuetext="`${Math.round(appearance[side.opacityKey] * 100)}%`" :min="0" :max="1" :step="0.01" hide-details color="primary" />
+                  </div>
+                </fieldset>
+                <p class="field-hint hand-opacity-hint">{{ t('hand-opacity-hint') }}</p>
+              </template>
             </div>
           </div>
           <!-- HDR -->
@@ -1460,42 +1504,37 @@ async function replacePreset() {
             <div class="md3-card glass fluent-glass hdr-card" v-glass :aria-disabled="!hdrEnabled">
               <div class="card-label">{{ t('hdr') }}</div>
               <p v-if="!hdrEnabled" class="field-hint">{{ t('hdr-disabled') }}</p>
-              <v-tabs v-model="activeHdrSection" color="primary" density="compact" class="hdr-tabs" :disabled="!hdrEnabled">
-                <v-tab v-for="section in hdrSections" :key="section.value" :value="section.value">{{ section.title }}</v-tab>
-              </v-tabs>
-              <template v-for="section in hdrSections" :key="section.value">
-                <div v-if="activeHdrSection === section.value" class="hdr-section" :class="{ 'is-disabled': !hdrEnabled }">
-                  <v-tabs v-if="section.value === 'ui'" v-model="activeHdrUi" color="primary" density="compact" class="hdr-tabs hdr-ui-tabs" :disabled="!hdrEnabled">
-                    <v-tab v-for="key in HDR_UI_KEYS" :key="key" :value="key">{{ t(HDR_UI_LABELS[key]) }}</v-tab>
-                  </v-tabs>
-                  <v-btn-toggle v-model="activeHdrSetting.mode" mandatory color="primary" divided class="hdr-modes" :disabled="!hdrEnabled">
-                    <v-btn value="sdr">{{ t('hdr-sdr') }}</v-btn>
-                    <v-btn value="mapped">{{ t('hdr-mapped') }}</v-btn>
-                    <v-btn value="custom">{{ t('hdr-custom') }}</v-btn>
-                  </v-btn-toggle>
-                  <template v-if="hdrEnabled && activeHdrSetting.mode === 'custom'">
-                    <div class="card-label">{{ t('hdr-tone-mapping') }}</div>
-                    <div class="field-row">
-                      <v-text-field v-model.number="activeHdrSetting.peakNits" :label="t('hdr-peak')" type="number" :min="100" :max="10000" :rules="[RULES.positive]" density="compact" variant="outlined" hide-details />
-                    </div>
-                    <div v-for="control in ([
-                      { key: 'knee', label: 'hdr-knee', min: 0, max: 1, step: 0.01 },
-                      { key: 'power', label: 'hdr-power', min: 0.1, max: 4, step: 0.01 },
-                      { key: 'shadowGain', label: 'hdr-shadow', min: 0, max: 4, step: 0.01 },
-                    ] as const)" :key="control.key" class="slider-block">
-                      <div class="slider-header"><span>{{ t(control.label) }}</span><span class="slider-val">{{ activeHdrSetting[control.key].toFixed(2) }}</span></div>
-                      <v-slider v-model="activeHdrSetting[control.key]" :min="control.min" :max="control.max" :step="control.step" :disabled="!hdrEnabled" hide-details color="primary" />
-                    </div>
-                    <div class="card-label">{{ t('hdr-gamut') }}</div>
-                    <div class="slider-block">
-                      <div class="slider-header"><span>{{ t('hdr-chroma') }}</span><span class="slider-val">{{ activeHdrSetting.chromaScale.toFixed(2) }}</span></div>
-                      <v-slider v-model="activeHdrSetting.chromaScale" :min="0" :max="2" :step="0.01" :disabled="!hdrEnabled" hide-details color="primary" />
-                    </div>
-                    <v-select v-model="activeHdrSetting.gamutClip" :items="[
-                      { title: t('hdr-hard'), value: 'hard' }, { title: t('hdr-soft'), value: 'soft' },
-                    ]" :label="t('hdr-gamut-clip')" density="compact" variant="outlined" :disabled="!hdrEnabled" hide-details />
-                  </template>
+              <v-select v-model="activeHdrSection" :items="hdrSections" :label="t('hdr-section')"
+                density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
+              <v-select v-if="activeHdrSection === 'ui'" v-model="activeHdrUi" :items="hdrUiOptions" :label="t('hdr-ui-element')"
+                density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
+              <v-select v-else-if="activeHdrSection === 'rhythm'" v-model="activeHdrRhythm" :items="hdrRhythmOptions" :label="t('hdr-rhythm-element')"
+                density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
+              <v-select v-else-if="activeHdrSection === 'handIndicator'" v-model="activeHdrHand" :items="hdrHandOptions" :label="t('hdr-hand-side')"
+                density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
+              <v-select v-model="activeHdrSetting.mode" :items="hdrModes" :label="t('hdr-mode')"
+                density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
+              <template v-if="hdrEnabled && activeHdrSetting.mode === 'custom'">
+                <div class="card-label">{{ t('hdr-tone-mapping') }}</div>
+                <div class="field-row">
+                  <v-text-field v-model.number="activeHdrSetting.peakNits" :label="t('hdr-peak')" type="number" :min="100" :max="10000" :rules="[RULES.positive]" density="compact" variant="outlined" hide-details />
                 </div>
+                <div v-for="control in ([
+                  { key: 'knee', label: 'hdr-knee', min: 0, max: 1, step: 0.01 },
+                  { key: 'power', label: 'hdr-power', min: 0.1, max: 4, step: 0.01 },
+                  { key: 'shadowGain', label: 'hdr-shadow', min: 0, max: 4, step: 0.01 },
+                ] as const)" :key="control.key" class="slider-block">
+                  <div class="slider-header"><span>{{ t(control.label) }}</span><span class="slider-val">{{ activeHdrSetting[control.key].toFixed(2) }}</span></div>
+                  <v-slider v-model="activeHdrSetting[control.key]" :aria-label="t(control.label)" :min="control.min" :max="control.max" :step="control.step" hide-details color="primary" />
+                </div>
+                <div class="card-label">{{ t('hdr-gamut') }}</div>
+                <div class="slider-block">
+                  <div class="slider-header"><span>{{ t('hdr-chroma') }}</span><span class="slider-val">{{ activeHdrSetting.chromaScale.toFixed(2) }}</span></div>
+                  <v-slider v-model="activeHdrSetting.chromaScale" :aria-label="t('hdr-chroma')" :min="0" :max="2" :step="0.01" hide-details color="primary" />
+                </div>
+                <v-select v-model="activeHdrSetting.gamutClip" :items="[
+                  { title: t('hdr-hard'), value: 'hard' }, { title: t('hdr-soft'), value: 'soft' },
+                ]" :label="t('hdr-gamut-clip')" density="compact" variant="outlined" hide-details />
               </template>
             </div>
           </div>
@@ -1654,35 +1693,38 @@ async function replacePreset() {
   transition-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
   cursor: default;
 }
-.background-modes,
-.hdr-modes {
-  width: 100%;
-  min-height: 40px;
-  height: auto;
-  display: flex;
-  overflow-x: auto;
-  overflow-y: hidden;
-  flex-wrap: nowrap;
-}
-.background-modes :deep(.v-btn),
-.hdr-modes :deep(.v-btn) {
-  min-width: max-content;
-  min-height: 40px;
-  flex: 1 0 auto;
-  text-transform: none;
-}
-.background-color-row { align-items: center; justify-content: space-between; }
+.color-picker-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 .background-video-row { align-items: center; }
+.background-video-row :deep(.v-input) { min-width: 0; }
 .field-label { color: rgba(var(--main-color-rgb), 0.75); font-size: 13px; }
-.color-input { width: 52px; height: 36px; border: 1px solid rgba(var(--main-color-rgb), .3); border-radius: 6px; background: transparent; padding: 2px; }
-.hdr-tabs { min-height: 48px; max-width: 100%; overflow-x: auto; }
-.hdr-tabs :deep(.v-slide-group__content) { width: max-content; flex: 0 0 auto; }
-.hdr-tabs :deep(.v-slide-group__container) { min-width: 0; overflow: hidden; }
-.hdr-tabs :deep(.v-tab) { min-width: 88px; min-height: 48px; padding-inline: 12px; flex: 0 0 auto; }
-.hdr-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.hdr-section.is-disabled { opacity: .5; }
-.hdr-card[aria-disabled="true"] :deep(.v-btn-toggle),
-.hdr-card[aria-disabled="true"] :deep(.v-slider) { pointer-events: none; }
+.color-input {
+  flex: none;
+  width: 52px;
+  height: 36px;
+  border: 1px solid rgba(var(--main-color-rgb), .3);
+  border-radius: 6px;
+  background: transparent;
+  padding: 2px;
+  cursor: pointer;
+}
+.hand-overlay {
+  display: grid;
+  gap: 8px;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 8px 12px 4px;
+  border: 1px solid rgba(var(--main-color-rgb), 0.22);
+  border-radius: 12px;
+}
+.hand-overlay legend { padding-inline: 4px; }
+.hand-opacity-hint { margin-top: 0; }
+@media (max-width: 600px) {
+  .background-video-row { flex-wrap: wrap; }
+  .background-video-row :deep(.v-input) { flex-basis: 100%; }
+}
+@media (pointer: coarse) {
+  .color-input { min-height: 44px; }
+}
 .stereo-option { display: block; }
 .card-label {
   font-size: 11px;
