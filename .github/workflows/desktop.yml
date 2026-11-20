@@ -154,6 +154,10 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Install Apple encoder smoke tools
+        if: matrix.rust-target == 'aarch64-apple-darwin'
+        run: brew install ffmpeg
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -208,15 +212,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Include the encoder, background lifecycle, and real Metal ->
-          # CoreVideo -> VideoToolbox -> AVAssetReader integration tests.
+          mkdir -p "$PHI_TKC_APPLE_SMOKE_ARTIFACTS"
+          # Include Metal/profile/color/alpha ProRes MOV output and decode,
+          # plus the encoder, lifecycle and HDR native rendering regressions.
+          PHI_TKC_REQUIRE_APPLE_PRORES=1 \
+            cargo test --locked --manifest-path src-tauri/Cargo.toml --lib \
+              --features apple-render-check apple_ -- --nocapture --test-threads=1 \
+              2>&1 | tee "$PHI_TKC_APPLE_SMOKE_ARTIFACTS/apple-tests.log"
+          # Same-host timing includes GPU completion and VT/MOV drain. This is
+          # evidence, not an iPad benchmark or a hard CI speed threshold.
           cargo test --locked --manifest-path src-tauri/Cargo.toml --lib \
-            --features apple-render-check apple_ -- --nocapture --test-threads=1
+            --features apple-render-check apple_metal_prores_pq_timing \
+            -- --ignored --nocapture --test-threads=1 \
+            2>&1 | tee "$PHI_TKC_APPLE_SMOKE_ARTIFACTS/prores-timing.log"
           MINIQUAD_MANIFEST="$(cargo metadata --locked --manifest-path src-tauri/Cargo.toml \
             --format-version 1 | python3 -c 'import json,sys; print(next(p["manifest_path"] for p in json.load(sys.stdin)["packages"] if p["name"] == "miniquad"))')"
           bash scripts/check-macos-preview.sh "$RUNNER_TEMP/preview-sdk-check"
           bash scripts/run-macos-preview-smoke.sh "$MINIQUAD_MANIFEST" "$RUNNER_TEMP/preview-opengl-check"
           cargo run --manifest-path "$MINIQUAD_MANIFEST" --example metal_offscreen --features metal
+
+      - name: Upload Apple performance evidence
+        if: always() && matrix.rust-target == 'aarch64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-performance-${{ github.run_id }}
+          path: ${{ runner.temp }}/apple-media-smoke/*.log
+          if-no-files-found: ignore
 
       - name: Preserve failed Apple media fixtures
         if: failure() && matrix.rust-target == 'aarch64-apple-darwin'
@@ -224,7 +245,9 @@ jobs:
         with:
           name: apple-media-smoke-${{ github.run_id }}
           path: |
+            ${{ runner.temp }}/apple-media-smoke/*.mov
             ${{ runner.temp }}/apple-media-smoke/*.mp4
+            ${{ runner.temp }}/apple-media-smoke/*.json
             ${{ runner.temp }}/apple-media-smoke/*.log
           if-no-files-found: ignore
 

@@ -540,7 +540,6 @@ const watermark = ref('');
 const endingLength = ref('-2.0');
 const chartRatio = ref(1.0);
 const noteSpeedFactor = ref(1.0);
-const background = ref(false);
 const backgroundMode = ref<'chart' | 'solid' | 'video' | 'none'>('chart');
 const backgroundColor = ref('#000000');
 const backgroundVideo = ref<string | null>(null);
@@ -936,7 +935,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
     bitrateControl: bitrateControl.value,
     bitrate: bitrate.value,
     targetAudio: targetAudio.value,
-    background: backgroundMode.value === 'chart',
+    background: false,
     handSplit: handSplit.value,
     noteSpeedFactor: noteSpeedFactor.value,
     video: video.value,
@@ -1018,7 +1017,6 @@ function applyConfig(c: RenderConfig) {
   bitrateControl.value = c.bitrateControl;
   bitrate.value = c.bitrate;
   targetAudio.value = c.targetAudio;
-  background.value = backgroundMode.value === 'chart';
   handSplit.value = c.handSplit ?? false;
   noteSpeedFactor.value = c.noteSpeedFactor;
   // Keep the format select and the `video` boolean in sync; buildConfig() sends only

@@ -260,6 +260,18 @@ input[type='number'] {
   border-color: var(--main-color) !important;
 }
 
+/* Leave a straight border segment between the floating label and each rounded
+   corner. Limit the notch so long translated labels ellipsize in narrow fields. */
+:is(.v-select, .v-combobox, .v-autocomplete) .v-field--variant-outlined {
+  --select-outline-shoulder: calc(var(--v-input-control-height) / 2 + 8px);
+}
+:is(.v-select, .v-combobox, .v-autocomplete) .v-field--variant-outlined .v-field__outline > .v-field__outline__start {
+  flex-basis: var(--select-outline-shoulder);
+}
+:is(.v-select, .v-combobox, .v-autocomplete) .v-field--variant-outlined .v-field__outline > .v-field__outline__notch {
+  max-width: max(0px, calc(100% - 2 * var(--select-outline-shoulder)));
+}
+
 .v-label {
   color: rgba(var(--main-color-rgb), 0.7) !important;
   opacity: 1 !important;
@@ -344,13 +356,18 @@ input[type='number'] {
   -webkit-backdrop-filter: blur(28px) !important;
   border: 1px solid rgba(var(--main-color-rgb), 0.2) !important;
 }
-.dropdown-panel {
+/* The teleported select menu puts a VSheet around the list. Let the outer
+   .blur-glass paint through it, while preserving Vuetify's inner scroller. */
+.v-menu > .v-overlay__content.blur-glass.dropdown-panel {
+  box-shadow: 0 8px 24px rgba(var(--main-color-rgb), 0.1);
   border-radius: 16px;
 }
-.dropdown-panel > .v-list {
+.v-menu > .v-overlay__content.blur-glass.dropdown-panel > :is(.v-sheet, .v-list) {
   background: transparent !important;
-  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
   border: 0 !important;
+  box-shadow: none;
 }
 /* Color selection shares the pointer-responsive Fluent glass surface. */
 .v-menu > .v-overlay__content > .color-picker-panel {

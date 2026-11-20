@@ -195,12 +195,18 @@ fn query_encoder_availability(
             _ => ("h264", None),
         };
         let directory = tempfile::tempdir()?;
-        if Encoder::probe(&directory.path().join("probe.mp4"), transfer, None).is_ok() {
+        if Encoder::probe(&directory.path().join("probe.mp4"), transfer, None, false).is_ok() {
             support.insert(codec.to_owned(), vec!["videotoolbox".into()]);
         }
         for name in ProRes::NAMES {
             let profile = ProRes::parse(name).expect("known ProRes profile");
-            if Encoder::probe(&directory.path().join(format!("{name}.mov")), transfer, Some(profile)).is_ok() {
+            if color_space.is_hdr() && profile.alpha {
+                continue;
+            }
+            if Encoder::probe(
+                &directory.path().join(format!("{name}.mov")), transfer, Some(profile),
+                color_space == ExportColorSpace::Srgb,
+            ).is_ok() {
                 support.insert(name.to_owned(), vec!["videotoolbox".into()]);
             }
         }

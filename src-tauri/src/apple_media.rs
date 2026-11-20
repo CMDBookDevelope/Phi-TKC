@@ -68,6 +68,8 @@ extern "C" {
     fn CFRetain(value: Ref) -> Ref;
     fn CFRelease(value: Ref);
     fn CFEqual(first: Ref, second: Ref) -> u8;
+    static kCFBooleanTrue: Ref;
+    static kCFBooleanFalse: Ref;
 }
 #[cfg_attr(
     any(target_os = "macos", target_os = "ios"),
@@ -103,6 +105,7 @@ extern "C" {
     static kCVImageBufferColorPrimaries_ITU_R_2020: Ref;
     static kCVImageBufferColorPrimaries_ITU_R_709_2: Ref;
     static kCVImageBufferTransferFunction_ITU_R_709_2: Ref;
+    static kCVImageBufferTransferFunction_sRGB: Ref;
     static kCVImageBufferYCbCrMatrix_ITU_R_709_2: Ref;
     static kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ: Ref;
     static kCVImageBufferTransferFunction_ITU_R_2100_HLG: Ref;
@@ -194,6 +197,7 @@ extern "C" {
         output: *mut Ref,
     ) -> i32;
     fn VTSessionSetProperty(session: Ref, key: Ref, value: Ref) -> i32;
+    fn VTSessionCopyProperty(session: Ref, key: Ref, allocator: Ref, value: *mut Ref) -> i32;
     fn VTCompressionSessionPrepareToEncodeFrames(session: Ref) -> i32;
     fn VTCompressionSessionEncodeFrame(
         session: Ref,
@@ -380,7 +384,7 @@ impl ProRes {
             .map(|&(_, tag, alpha)| Self { tag: u32::from_be_bytes(tag), alpha })
     }
 
-    fn is_4444(self) -> bool {
+    pub(crate) fn is_4444(self) -> bool {
         matches!(self.tag.to_be_bytes(), [b'a', b'p', b'4', b'h' | b'x'])
     }
 }
@@ -402,7 +406,24 @@ fn transfer_value(transfer: Transfer) -> Ref {
         }
     }
 }
+// iOS added these public VideoToolbox CFString globals in 17.4. Look up
+// the exported variables (and dereference them) only when present at runtime.
+fn optional_vt_key(symbol: &std::ffi::CStr) -> Option<Ref> {
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
+    unsafe {
+        let address = libc::dlsym(libc::RTLD_DEFAULT, symbol.as_ptr()).cast::<Ref>();
+        return address.as_ref().copied().filter(|value| !value.is_null());
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+    {
+        let _ = symbol;
+        None
+    }
+}
+
 const POOL_THRESHOLD_EXCEEDED: i32 = -6689;
+const PROPERTY_NOT_SUPPORTED: i32 = -12900;
+const PROPERTY_READ_ONLY: i32 = -12901;
 const INVALID_SESSION: i32 = -12903;
 
 struct FrameInput {
@@ -473,6 +494,7 @@ pub struct Encoder {
     bitrate: u32,
     hdr: Option<Transfer>,
     prores: Option<ProRes>,
+    srgb: bool,
     next_token: usize,
     next_output_frame: u64,
     writer: Obj,
@@ -493,7 +515,7 @@ pub struct Encoder {
 }
 impl Encoder {
     #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
-    pub(crate) fn probe(path: &Path, transfer: Option<Transfer>, prores: Option<ProRes>) -> Result<()> {
+    pub(crate) fn probe(path: &Path, transfer: Option<Transfer>, prores: Option<ProRes>, srgb: bool) -> Result<()> {
         const WIDTH: u32 = 320;
         const HEIGHT: u32 = 240;
         const FPS: u32 = 30;
@@ -501,7 +523,7 @@ impl Encoder {
         const PIXELS: usize = (WIDTH * HEIGHT) as usize;
         objc::rc::autoreleasepool(|| {
             let mut encoder = Self::new_with_prores(
-                path, WIDTH, HEIGHT, FPS, 2_000_000, RATE, transfer, prores,
+                path, WIDTH, HEIGHT, FPS, 2_000_000, RATE, transfer, prores, srgb,
             )?;
             let pcm = vec![0; (RATE / FPS * 4) as usize];
             if prores.is_some() {
@@ -535,7 +557,7 @@ impl Encoder {
         rate: u32,
         hdr: Option<Transfer>,
     ) -> Result<Self> {
-        Self::new_with_prores(path, width, height, fps, bitrate, rate, hdr, None)
+        Self::new_with_prores(path, width, height, fps, bitrate, rate, hdr, None, false)
     }
 
     pub(crate) fn new_with_prores(
@@ -547,6 +569,7 @@ impl Encoder {
         rate: u32,
         hdr: Option<Transfer>,
         prores: Option<ProRes>,
+        srgb: bool,
     ) -> Result<Self> {
         ensure!(
             width > 0
@@ -626,16 +649,18 @@ impl Encoder {
             let _: () = msg_send![true_value, retain];
             let true_value = Obj(true_value);
             let surface_properties = dictionary(&[]);
-            let pixel_attributes = reference_dictionary(&[
+            let mut attributes = vec![
                 (kCVPixelBufferWidthKey, pixel_width.0 as Ref),
                 (kCVPixelBufferHeightKey, pixel_height.0 as Ref),
                 (kCVPixelBufferPixelFormatTypeKey, pixel_format.0 as Ref),
-                (kCVPixelBufferMetalCompatibilityKey, true_value.0 as Ref),
-                (
-                    kCVPixelBufferIOSurfacePropertiesKey,
-                    surface_properties.0 as Ref,
-                ),
-            ]);
+                (kCVPixelBufferIOSurfacePropertiesKey, surface_properties.0 as Ref),
+            ];
+            // The ProRes GPU writes to shared Metal buffers, not CVMetalTexture
+            // aliases. In particular, packed y416 need not map to an MTLTexture.
+            if prores.is_none() {
+                attributes.push((kCVPixelBufferMetalCompatibilityKey, true_value.0 as Ref));
+            }
+            let pixel_attributes = reference_dictionary(&attributes);
             let minimum_buffers = number(2);
             let pool_attributes = reference_dictionary(&[(
                 kCVPixelBufferPoolMinimumBufferCountKey,
@@ -664,6 +689,7 @@ impl Encoder {
                 bitrate,
                 hdr,
                 prores,
+                srgb,
                 next_token: 1,
                 next_output_frame: 0,
                 force_next_keyframe: true,
@@ -701,28 +727,76 @@ impl Encoder {
             Ok(encoder)
         }
     }
+    unsafe fn open_session(&mut self, spec: Option<&Obj>) -> i32 {
+        VTCompressionSessionCreate(
+            null_mut(),
+            self.width as i32,
+            self.height as i32,
+            self.prores.map_or_else(
+                || u32::from_be_bytes(if self.hdr.is_some() { *b"hvc1" } else { *b"avc1" }),
+                |profile| profile.tag,
+            ),
+            spec.map_or(null_mut(), |spec| spec.0 as Ref),
+            self.pixel_attributes.0 as Ref,
+            null_mut(),
+            compressed,
+            self.callbacks.as_mut() as *mut _ as Ref,
+            &mut self.session,
+        )
+    }
+
+    fn invalidate_session(&mut self) {
+        if !self.session.is_null() {
+            unsafe {
+                VTCompressionSessionInvalidate(self.session);
+                CFRelease(self.session);
+            }
+            self.session = null_mut();
+        }
+    }
+
+    fn color_tags(&self) -> Option<[Ref; 3]> {
+        unsafe {
+            if let Some(transfer) = self.hdr {
+                Some([
+                    kCVImageBufferColorPrimaries_ITU_R_2020,
+                    transfer_value(transfer),
+                    kCVImageBufferYCbCrMatrix_ITU_R_2020,
+                ])
+            } else if self.prores.is_some() {
+                Some([
+                    kCVImageBufferColorPrimaries_ITU_R_709_2,
+                    if self.srgb {
+                        kCVImageBufferTransferFunction_sRGB
+                    } else {
+                        kCVImageBufferTransferFunction_ITU_R_709_2
+                    },
+                    kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                ])
+            } else {
+                None
+            }
+        }
+    }
+
     fn create_session(&mut self) -> Result<()> {
         ensure!(
             self.session.is_null(),
             "compression session is already active"
         );
         self.force_next_keyframe = true;
+        self.bounded_frame_delay = false;
         unsafe {
-            let code = VTCompressionSessionCreate(
-                null_mut(),
-                self.width as i32,
-                self.height as i32,
-                self.prores.map_or_else(
-                    || u32::from_be_bytes(if self.hdr.is_some() { *b"hvc1" } else { *b"avc1" }),
-                    |profile| profile.tag,
-                ),
-                null_mut(),
-                self.pixel_attributes.0 as Ref,
-                null_mut(),
-                compressed,
-                self.callbacks.as_mut() as *mut _ as Ref,
-                &mut self.session,
-            );
+            let spec = self.prores.and_then(|_| {
+                optional_vt_key(c"kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder")
+                    .map(|key| reference_dictionary(&[(key, kCFBooleanTrue)]))
+            });
+            let mut code = self.open_session(spec.as_ref());
+            if code != 0 && code != INVALID_SESSION && spec.is_some() {
+                log::debug!("VideoToolbox ProRes hardware preference rejected ({code}); retrying default selection");
+                self.invalidate_session();
+                code = self.open_session(None);
+            }
             if code == INVALID_SESSION {
                 self.invalidate_for_resume()?;
                 return Ok(());
@@ -778,35 +852,41 @@ impl Encoder {
                 }
                 status(code, "VideoToolbox profile")?;
             }
-            if let Some(transfer) = self.hdr {
+            if let Some([primaries, transfer, matrix]) = self.color_tags() {
                 for (key, value) in [
-                    (kVTCompressionPropertyKey_ColorPrimaries, kCVImageBufferColorPrimaries_ITU_R_2020),
-                    (kVTCompressionPropertyKey_TransferFunction, transfer_value(transfer)),
-                    (kVTCompressionPropertyKey_YCbCrMatrix, kCVImageBufferYCbCrMatrix_ITU_R_2020),
+                    (kVTCompressionPropertyKey_ColorPrimaries, primaries),
+                    (kVTCompressionPropertyKey_TransferFunction, transfer),
+                    (kVTCompressionPropertyKey_YCbCrMatrix, matrix),
                 ] {
                     let code = VTSessionSetProperty(self.session, key, value);
                     if code == INVALID_SESSION {
                         self.invalidate_for_resume()?;
                         return Ok(());
                     }
-                    status(code, "VideoToolbox HDR color property")?;
+                    if code != PROPERTY_NOT_SUPPORTED && code != PROPERTY_READ_ONLY {
+                        status(code, "VideoToolbox color property")?;
+                    }
                 }
             }
-            // Limit the encoder's compression window so the producer can stop
-            // at its bounded in-flight limit without waiting for a future frame.
-            let delay = number((MAX_IN_FLIGHT_VIDEO - 2) as i64);
-            let delay_status = VTSessionSetProperty(
-                self.session,
-                kVTCompressionPropertyKey_MaxFrameDelayCount,
-                delay.0 as Ref,
-            );
-            if delay_status == INVALID_SESSION {
-                self.invalidate_for_resume()?;
-                return Ok(());
-            }
-            self.bounded_frame_delay = delay_status == 0;
-            if !self.bounded_frame_delay {
-                log::warn!("VideoToolbox frame delay bound unsupported ({delay_status}); flush only when the in-flight window fills");
+            if self.prores.is_none() {
+                // This is optional and many intra-only encoders reject it. Keep
+                // the producer bounded even without VT's own delay guarantee.
+                let delay = number((MAX_IN_FLIGHT_VIDEO - 2) as i64);
+                let delay_status = VTSessionSetProperty(
+                    self.session,
+                    kVTCompressionPropertyKey_MaxFrameDelayCount,
+                    delay.0 as Ref,
+                );
+                if delay_status == INVALID_SESSION {
+                    self.invalidate_for_resume()?;
+                    return Ok(());
+                }
+                self.bounded_frame_delay = delay_status == 0;
+                if delay_status == PROPERTY_NOT_SUPPORTED || delay_status == PROPERTY_READ_ONLY {
+                    log::debug!("VideoToolbox frame delay bound unavailable ({delay_status}); bounded completion fallback enabled");
+                } else if delay_status != 0 {
+                    status(delay_status, "VideoToolbox frame delay bound")?;
+                }
             }
             let code = VTCompressionSessionPrepareToEncodeFrames(self.session);
             if code == INVALID_SESSION {
@@ -814,6 +894,22 @@ impl Encoder {
                 return Ok(());
             }
             status(code, "VideoToolbox preparation")?;
+            if self.prores.is_some() && log::log_enabled!(log::Level::Debug) {
+                if let Some(key) = optional_vt_key(c"kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder") {
+                    let mut value = Cf(null_mut());
+                    let code = VTSessionCopyProperty(self.session, key, null_mut(), &mut value.0);
+                    if code == 0 && !value.0.is_null() {
+                        let engine = if CFEqual(value.0, kCFBooleanTrue) != 0 {
+                            "hardware"
+                        } else if CFEqual(value.0, kCFBooleanFalse) != 0 {
+                            "software"
+                        } else {
+                            "unknown"
+                        };
+                        log::debug!("VideoToolbox ProRes encoder selection: {engine}");
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -856,6 +952,13 @@ impl Encoder {
                 "IOSurface allocation interrupted: VideoToolbox requires foreground resume"
             );
             let before = self.in_flight()?;
+            // Pool pressure can occur while callbacks are below the submission
+            // cap. Complete the oldest input so the encoder releases its surface.
+            self.complete_oldest_frame()?;
+            ensure!(
+                !self.needs_resume()?,
+                "IOSurface allocation interrupted: VideoToolbox requires foreground resume"
+            );
             self.service(pcm16)?;
             ensure!(
                 !self.needs_resume()?,
@@ -998,6 +1101,11 @@ impl Encoder {
         Ok(())
     }
 
+    /// Number of consecutive encoded frames received from VideoToolbox.
+    pub(crate) fn encoded_frames(&self) -> u64 {
+        self.next_output_frame
+    }
+
     pub fn needs_resume(&self) -> Result<bool> {
         self.callbacks
             .lock()
@@ -1037,13 +1145,7 @@ impl Encoder {
     }
 
     fn invalidate_for_resume(&mut self) -> Result<()> {
-        if !self.session.is_null() {
-            unsafe {
-                VTCompressionSessionInvalidate(self.session);
-                CFRelease(self.session);
-            }
-            self.session = null_mut();
-        }
+        self.invalidate_session();
         let mut state = self
             .callbacks
             .lock()
@@ -1101,10 +1203,31 @@ impl Encoder {
         Ok(())
     }
 
+    /// Apply the source color metadata after GPU or CPU writes and before submission.
+    pub(crate) fn tag_prores_pixel(&self, pixel: &PixelBuffer) -> Result<()> {
+        ensure!(self.prores.is_some(), "ProRes encoder is required");
+        self.tag_color(pixel);
+        Ok(())
+    }
+
+    fn tag_color(&self, pixel: &PixelBuffer) {
+        if let Some([primaries, transfer, matrix]) = self.color_tags() {
+            unsafe {
+                for (key, value) in [
+                    (kCVImageBufferColorPrimariesKey, primaries),
+                    (kCVImageBufferTransferFunctionKey, transfer),
+                    (kCVImageBufferYCbCrMatrixKey, matrix),
+                ] {
+                    CVBufferSetAttachment(pixel.as_ptr(), key, value, 1); // ShouldPropagate
+                }
+            }
+        }
+    }
+
     // CPU compatibility and the native baseline tests use the same pool and
     // asynchronous scheduler. Production Metal submits frame_pixel directly.
     pub(crate) fn write_hdr_pixel(&self, pixel: &PixelBuffer, p010: &[u8]) -> Result<()> {
-        let transfer = self.hdr.context("HDR encoder is required for P010 frames")?;
+        ensure!(self.hdr.is_some(), "HDR encoder is required for P010 frames");
         let row_bytes = self.width as usize * 2;
         let y_bytes = row_bytes * self.height as usize;
         ensure!(p010.len() == y_bytes + y_bytes / 2, "wrong P010 frame size");
@@ -1127,14 +1250,8 @@ impl Encoder {
             let unlock = CVPixelBufferUnlockBaseAddress(buffer, 0);
             result?;
             status(unlock, "10-bit pixel buffer unlock")?;
-            for (key, value) in [
-                (kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_2020),
-                (kCVImageBufferTransferFunctionKey, transfer_value(transfer)),
-                (kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_2020),
-            ] {
-                CVBufferSetAttachment(buffer, key, value, 1);
-            }
         }
+        self.tag_color(pixel);
         Ok(())
     }
 
@@ -1213,23 +1330,7 @@ impl Encoder {
             let unlock = CVPixelBufferUnlockBaseAddress(buffer, 0);
             result?;
             status(unlock, "ProRes pixel buffer unlock")?;
-            if let Some(transfer) = self.hdr {
-                for (key, value) in [
-                    (kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_2020),
-                    (kCVImageBufferTransferFunctionKey, transfer_value(transfer)),
-                    (kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_2020),
-                ] {
-                    CVBufferSetAttachment(buffer, key, value, 1);
-                }
-            } else {
-                for (key, value) in [
-                    (kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2),
-                    (kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_ITU_R_709_2),
-                    (kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2),
-                ] {
-                    CVBufferSetAttachment(buffer, key, value, 1);
-                }
-            }
+            self.tag_prores_pixel(pixel)?;
         }
         Ok(())
     }
@@ -1277,6 +1378,26 @@ impl Encoder {
             .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))
     }
 
+    fn complete_oldest_frame(&mut self) -> Result<()> {
+        let frame = {
+            let state = self
+                .callbacks
+                .lock()
+                .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?;
+            state.pixels.values().next().map(|input| input.frame)
+        };
+        let Some(frame) = frame else {
+            return Ok(());
+        };
+        let code = unsafe {
+            VTCompressionSessionCompleteFrames(self.session, Time::new(frame as i64, self.fps))
+        };
+        if code == INVALID_SESSION {
+            return self.invalidate_for_resume();
+        }
+        status(code, "VideoToolbox bounded-window completion")
+    }
+
     fn wait_capacity(&mut self, pcm16: &[u8]) -> Result<()> {
         self.service(pcm16)?;
         let idle_since = Instant::now();
@@ -1285,26 +1406,7 @@ impl Encoder {
                 return Ok(());
             }
             if !self.bounded_frame_delay {
-                let token = self
-                    .callbacks
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("compression callback lock poisoned"))?
-                    .pixels
-                    .values()
-                    .next()
-                    .unwrap()
-                    .frame;
-                let code = unsafe {
-                    VTCompressionSessionCompleteFrames(
-                        self.session,
-                        Time::new(token as i64, self.fps),
-                    )
-                };
-                if code == INVALID_SESSION {
-                    self.invalidate_for_resume()?;
-                    return Ok(());
-                }
-                status(code, "VideoToolbox bounded-window completion")?;
+                self.complete_oldest_frame()?;
             }
             self.service(pcm16)?;
             if self.in_flight()? < MAX_IN_FLIGHT_VIDEO {
@@ -1410,40 +1512,42 @@ impl Encoder {
                         "VideoToolbox did not encode a ProRes alpha plane");
                 }
             }
-            if let Some(transfer) = self.hdr {
-                if self.prores.is_none() {
-                    let mut count = 0;
-                    let mut bytes = std::ptr::null();
-                    let mut length = 0;
+            if self.hdr.is_some() && self.prores.is_none() {
+                let mut count = 0;
+                let mut bytes = std::ptr::null();
+                let mut length = 0;
+                status(
+                    CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                        hint, 0, &mut bytes, &mut length, &mut count, null_mut(),
+                    ),
+                    "VideoToolbox HEVC parameter set query",
+                )?;
+                let mut main10 = false;
+                for index in 0..count {
                     status(
                         CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                            hint, 0, &mut bytes, &mut length, &mut count, null_mut(),
+                            hint, index, &mut bytes, &mut length, null_mut(), null_mut(),
                         ),
-                        "VideoToolbox HEVC parameter set query",
+                        "VideoToolbox HEVC parameter set read",
                     )?;
-                    let mut main10 = false;
-                    for index in 0..count {
-                        status(
-                            CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
-                                hint, index, &mut bytes, &mut length, null_mut(), null_mut(),
-                            ),
-                            "VideoToolbox HEVC parameter set read",
-                        )?;
-                        if !bytes.is_null() && is_10_bit_420_sps(std::slice::from_raw_parts(bytes, length)) == Some(true) {
-                            main10 = true;
-                            break;
-                        }
+                    if !bytes.is_null() && is_10_bit_420_sps(std::slice::from_raw_parts(bytes, length)) == Some(true) {
+                        main10 = true;
+                        break;
                     }
-                    ensure!(main10, "VideoToolbox did not produce 10-bit 4:2:0 HEVC. Try a different device or choose SDR.");
                 }
-                for (key, expected) in [
-                    (kCMFormatDescriptionExtension_ColorPrimaries, kCVImageBufferColorPrimaries_ITU_R_2020),
-                    (kCMFormatDescriptionExtension_TransferFunction, transfer_value(transfer)),
-                    (kCMFormatDescriptionExtension_YCbCrMatrix, kCVImageBufferYCbCrMatrix_ITU_R_2020),
+                ensure!(main10, "VideoToolbox did not produce 10-bit 4:2:0 HEVC. Try a different device or choose SDR.");
+            }
+            if let Some([primaries, transfer, matrix]) = self.color_tags() {
+                for (key, expected, name) in [
+                    (kCMFormatDescriptionExtension_ColorPrimaries, primaries, "primaries"),
+                    (kCMFormatDescriptionExtension_TransferFunction, transfer, "transfer function"),
+                    (kCMFormatDescriptionExtension_YCbCrMatrix, matrix, "YCbCr matrix"),
                 ] {
                     let actual = CMFormatDescriptionGetExtension(hint, key);
-                    ensure!(!actual.is_null() && CFEqual(actual, expected) != 0,
-                        "VideoToolbox did not preserve HDR color signaling. Try a different device or choose SDR.");
+                    if actual.is_null() || CFEqual(actual, expected) == 0 {
+                        ensure!(self.hdr.is_none(), "VideoToolbox did not preserve required HDR {name}");
+                        log::warn!("VideoToolbox did not preserve the requested SDR {name}");
+                    }
                 }
             }
             let video: *mut Object = msg_send![class!(AVAssetWriterInput), assetWriterInputWithMediaType:media.0 outputSettings:null_mut::<Object>() sourceFormatHint:hint];

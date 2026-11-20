@@ -417,7 +417,12 @@ const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const contextMenuRow = ref<Row | null>(null);
 const swipedRow = ref<string | null>(null);
-let touchStart: { key: string; x: number; y: number } | null = null;
+let touchStart: { key: string; id: number; x: number; y: number; axis: 'pending' | 'horizontal' | 'vertical' } | null = null;
+let suppressSwipeClick: { key: string; x: number; y: number; until: number } | null = null;
+
+function canRemoveRow(row: Row): row is Row & { task: Task } {
+  return row.source === 'local' && row.status.type === 'done' && !!row.task;
+}
 
 async function showInFolder(path: string) {
   try { await invoke('show_in_folder', { path }); } catch (e) { toastError(e); }
@@ -445,7 +450,7 @@ async function cancelRow(row: Row) {
 }
 
 async function removeRow(row: Row) {
-  if (row.source !== 'local' || row.status.type !== 'done' || !row.task) return;
+  if (!canRemoveRow(row)) return;
   try {
     await invoke('remove_task', { id: row.task.id });
     swipedRow.value = null;
@@ -457,26 +462,74 @@ async function removeRow(row: Row) {
 }
 
 function beginSwipe(event: TouchEvent, row: Row) {
-  if (!mobile || row.source !== 'local' || row.status.type !== 'done') return;
+  touchStart = null;
+  suppressSwipeClick = null;
+  if (!mobile) return;
   if (swipedRow.value !== row.key) swipedRow.value = null;
+  if (!canRemoveRow(row) || event.touches.length !== 1) return;
   const touch = event.changedTouches[0];
-  if (touch) touchStart = { key: row.key, x: touch.clientX, y: touch.clientY };
+  if (touch) touchStart = { key: row.key, id: touch.identifier, x: touch.clientX, y: touch.clientY, axis: 'pending' };
+}
+
+function findTouch(touches: TouchList, id: number) {
+  return Array.from(touches).find((touch) => touch.identifier === id);
+}
+
+function moveSwipe(event: TouchEvent, row: Row) {
+  const start = touchStart;
+  if (!start || start.key !== row.key) return;
+  if (event.touches.length > 1) {
+    cancelSwipe();
+    return;
+  }
+  const touch = findTouch(event.changedTouches, start.id);
+  if (!touch) return;
+  const dx = touch.clientX - start.x;
+  const dy = touch.clientY - start.y;
+  if (start.axis === 'pending') {
+    if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.25) start.axis = 'horizontal';
+    else if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) start.axis = 'vertical';
+  }
+  if (start.axis === 'horizontal' && event.cancelable) {
+    event.preventDefault();
+  }
 }
 
 function finishSwipe(event: TouchEvent, row: Row) {
-  if (!touchStart || touchStart.key !== row.key) return;
-  const touch = event.changedTouches[0];
-  if (!touch) return;
-  const dx = touch.clientX - touchStart.x;
-  const dy = touch.clientY - touchStart.y;
-  if (Math.abs(dx) > 52 && Math.abs(dx) > Math.abs(dy) * 1.25) {
-    swipedRow.value = dx < 0 ? row.key : null;
+  const start = touchStart;
+  if (!start || start.key !== row.key) return;
+  if (event.touches.length !== 0 || event.changedTouches.length !== 1) {
+    cancelSwipe();
+    return;
   }
+  const touch = findTouch(event.changedTouches, start.id);
+  if (!touch) return;
+  const dx = touch.clientX - start.x;
+  const dy = touch.clientY - start.y;
   touchStart = null;
+  if (start.axis === 'vertical' || Math.abs(dx) <= 52 || Math.abs(dx) <= Math.abs(dy) * 1.25) return;
+  if (event.cancelable) event.preventDefault();
+  swipedRow.value = canRemoveRow(row) && dx < 0 ? row.key : null;
+  suppressSwipeClick = { key: row.key, x: touch.clientX, y: touch.clientY, until: Date.now() + 500 };
 }
 
 function cancelSwipe() {
   touchStart = null;
+}
+
+// The additional finger can land outside the active row and be lifted before
+// that row receives another move/end. Invalidate the gesture at document capture.
+function cancelSwipeOnMultitouch(event: TouchEvent) {
+  if (event.touches.length > 1) cancelSwipe();
+}
+
+function suppressClickAfterSwipe(event: MouseEvent, row: Row) {
+  const swipe = suppressSwipeClick;
+  if (!swipe || swipe.key !== row.key || Date.now() >= swipe.until || event.detail === 0) return;
+  if (Math.hypot(event.clientX - swipe.x, event.clientY - swipe.y) > 48) return;
+  suppressSwipeClick = null;
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 async function downloadRemote(row: Row) {
@@ -522,6 +575,7 @@ const showContextMenu = (event: MouseEvent, row: Row) => {
 
 // Touch-friendly replacement for the right-click menu: anchor it to the button.
 const showContextMenuFromButton = (event: MouseEvent, row: Row) => {
+  swipedRow.value = null;
   const target = event.currentTarget as HTMLElement;
   const rect = target.getBoundingClientRect();
   contextMenuRow.value = row;
@@ -533,6 +587,7 @@ const showContextMenuFromButton = (event: MouseEvent, row: Row) => {
 const closeContextMenu = () => {
   contextMenu.value = false;
   contextMenuRow.value = null;
+  swipedRow.value = null;
 };
 
 const showDetail = (row: Row) => {
@@ -541,8 +596,14 @@ const showDetail = (row: Row) => {
   closeContextMenu();
 };
 
-onMounted(() => document.addEventListener('click', closeContextMenu));
-onUnmounted(() => document.removeEventListener('click', closeContextMenu));
+onMounted(() => {
+  document.addEventListener('click', closeContextMenu);
+  if (mobile) document.addEventListener('touchstart', cancelSwipeOnMultitouch, { capture: true, passive: true });
+});
+onUnmounted(() => {
+  document.removeEventListener('click', closeContextMenu);
+  if (mobile) document.removeEventListener('touchstart', cancelSwipeOnMultitouch, true);
+});
 </script>
 
 <template>
@@ -567,18 +628,20 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
         v-for="row in rows"
         :key="row.key"
         class="task-row-shell"
-        :class="{ 'is-swipe-open': swipedRow === row.key }"
+        :class="{ 'is-swipeable': mobile && canRemoveRow(row), 'is-swipe-open': swipedRow === row.key }"
         @touchstart.passive="beginSwipe($event, row)"
+        @touchmove="moveSwipe($event, row)"
         @touchend="finishSwipe($event, row)"
         @touchcancel="cancelSwipe"
+        @click.capture="suppressClickAfterSwipe($event, row)"
       >
         <button
-          v-if="mobile && row.source === 'local' && row.status.type === 'done'"
+          v-if="mobile && swipedRow === row.key && canRemoveRow(row)"
           class="swipe-delete"
           type="button"
           :aria-label="t('remove-record')"
           :title="t('remove-record')"
-          @click="removeRow(row)"
+          @click.stop="removeRow(row)"
         ><v-icon icon="mdi-delete-outline" size="20" /></button>
         <div
           class="task-card glass fluent-glass"
@@ -599,7 +662,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 
         <!-- Info (right 65%) -->
         <div class="task-info">
-          <div class="task-header">
+          <div class="task-header" :class="{ 'has-source': row.source !== 'local' }">
             <h3 class="task-name" :title="row.name">{{ row.name }}</h3>
             <span v-if="row.source !== 'local'" class="source-chip">
               <v-icon icon="mdi-cloud-outline" size="12" class="mr-1" />{{ t(row.source === 'local-server' ? 'source-local-server' : 'source-remote') }}
@@ -1054,6 +1117,7 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
 }
 
 /* ===== Responsive ===== */
+.task-row-shell.is-swipeable { overflow: hidden; border-radius: 16px; }
 @media (max-width: 600px) {
   .tasks-container {
     padding: 12px 12px 16px;
@@ -1062,22 +1126,15 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
      information (name/status/actions) is what people come here for, and a
      phone screen only fits a couple of cards otherwise. */
   .task-card { flex-direction: row; height: auto; min-height: 124px; }
-  .task-row-shell { overflow: hidden; border-radius: 16px; }
-  .task-row-shell.is-swipe-open .task-card { transform: translateX(-72px); }
-  .swipe-delete {
-    position: absolute;
-    inset: 0 0 0 auto;
-    display: grid;
-    place-items: center;
-    width: 72px;
-    border: 0;
-    color: white;
-    background: rgb(190, 42, 53);
-  }
   .task-cover { width: 92px; min-height: 92px; align-self: stretch; }
   .cover-image { min-height: 92px; }
   .task-info { width: auto; flex: 1; padding: 10px 12px; gap: 4px; }
   .task-name { font-size: 15px; }
+  /* Keep a visible title and the menu on the first line. Server/status badges
+     share the next line instead of pushing the menu beyond a narrow card. */
+  .task-header.has-source { flex-wrap: wrap; gap: 4px 8px; }
+  .task-header.has-source .task-name { flex-basis: calc(100% - 52px); }
+  .task-header.has-source :is(.source-chip, .status-chip) { order: 1; }
   .task-path { font-size: 11px; }
   .task-actions { gap: 2px; }
   .tasks-title { font-size: 20px; }
@@ -1089,5 +1146,18 @@ onUnmounted(() => document.removeEventListener('click', closeContextMenu));
     min-width: 44px;
     min-height: 44px;
   }
+}
+
+.task-row-shell.is-swipeable { touch-action: pan-y; }
+.task-row-shell.is-swipe-open .task-card { transform: translateX(-72px); }
+.task-row-shell.is-swipe-open .swipe-delete {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  border: 0;
+  color: white;
+  background: rgb(190, 42, 53);
 }
 </style>

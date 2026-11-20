@@ -33,9 +33,12 @@ with tempfile.TemporaryDirectory(prefix="phi-tkc-native-check-") as temp:
         for repo, (package, path) in patches.items()
     ))
     cargo = os.environ.get("CARGO", "cargo")
+    cargo_command = os.environ.get("CARGO_COMMAND", "check")
+    if cargo_command not in {"check", "test"}:
+        raise SystemExit(f"Unsupported CARGO_COMMAND: {cargo_command}")
     try:
         result = subprocess.run([
-            cargo, "--config", str(config), "check", "--manifest-path", str(manifest),
+            cargo, "--config", str(config), cargo_command, "--manifest-path", str(manifest),
             "--features", "apple-render-check,macroquad/metal", *sys.argv[1:]
         ], cwd=project)
     finally:

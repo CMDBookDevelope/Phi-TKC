@@ -33,7 +33,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 const SAMPLE_RATE: usize = 44100;
@@ -328,11 +328,12 @@ async fn render_async(
         sample_rate as u32,
         transfer,
         prores,
+        params.config.color_space.eq_ignore_ascii_case("srgb"),
     )?;
     let size = (game_width, game_height);
     let target = Rc::new(if transfer.is_some() {
         MSRenderTarget::new_hdr(size, 1)
-    } else if alpha {
+    } else if prores.is_some() {
         MSRenderTarget::new_rgba(size, params.config.sample_count)
     } else {
         MSRenderTarget::new(size, params.config.sample_count)
@@ -343,10 +344,6 @@ async fn render_async(
         RhythmComposite::new_with_alpha(game_width, game_height, rhythm_strip, 1, alpha)?
     };
     let mut hdr = transfer.filter(|_| prores.is_none()).map(|transfer| P010::new(vw, vh, transfer));
-    let mut prores_rgba = prores.map(|_| {
-        let bytes_per_pixel = if transfer.is_some() { 8 } else { 4 };
-        vec![0; vw as usize * vh as usize * bytes_per_pixel]
-    });
     let mut p010 = if hdr.is_some() { vec![0; vw as usize * vh as usize * 3] } else { Vec::new() };
     initialize_render_target(
         miniquad_context()
@@ -390,15 +387,17 @@ async fn render_async(
     main.top_level = false;
     main.viewport = Some((0, 0, game_width as i32, game_height as i32));
     main.update()?;
-    let mut gpu_frames = MetalFrames::new(
-        miniquad_context()
-            .metal_context()
-            .context("Metal context is unavailable")?,
-        vw,
-        vh,
-    )?;
+    let metal = miniquad_context()
+        .metal_context()
+        .context("Metal context is unavailable")?;
+    let mut gpu_frames = match prores {
+        Some(profile) => MetalFrames::new_with_prores(metal, vw, vh, profile, transfer)?,
+        None => MetalFrames::new(metal, vw, vh)?,
+    };
     let mut fps_timer = Instant::now();
+    let mut fps_frames = 0;
     let mut realtime_fps = 0.;
+    let render_start = fps_timer;
     for frame in 0..frames {
         objc::rc::autoreleasepool(|| -> Result<()> {
             if prepare_encoder(
@@ -409,6 +408,8 @@ async fn render_async(
                 check_cancel,
             )? {
                 fps_timer = Instant::now();
+                fps_frames = encoder.encoded_frames();
+                realtime_fps = 0.;
             }
             *my_time.borrow_mut() = frame as f64 * frame_duration;
             if frame != 0 {
@@ -444,6 +445,8 @@ async fn render_async(
                     check_cancel,
                 )? {
                     fps_timer = Instant::now();
+                    fps_frames = encoder.encoded_frames();
+                    realtime_fps = 0.;
                 }
                 match encoder.pixel_buffer(pcm16) {
                     Ok(pixel) => break pixel,
@@ -451,11 +454,7 @@ async fn render_async(
                     Err(error) => return Err(error),
                 }
             };
-            if let Some(rgba) = &mut prores_rgba {
-                texture.read_pixels(miniquad_context(), rgba);
-                encoder.write_prores_pixel(&pixel, rgba)?;
-                encoder.frame_pixel(pixel, output_index, pcm16)?;
-            } else if let Some(hdr) = &mut hdr {
+            if let Some(hdr) = &mut hdr {
                 texture.read_pixels(miniquad_context(), &mut hdr.rgba);
                 hdr.convert(&mut p010);
                 encoder.write_hdr_pixel(&pixel, &p010)?;
@@ -476,14 +475,14 @@ async fn render_async(
                     )
                 })?;
             }
-            if output_index % 10 == 9 {
-                realtime_fps = 10. / fps_timer.elapsed().as_secs_f64().max(1e-9);
+            let encoded = encoder.encoded_frames();
+            let elapsed = fps_timer.elapsed();
+            if elapsed >= Duration::from_millis(250) {
+                realtime_fps = (encoded - fps_frames) as f64 / elapsed.as_secs_f64();
+                fps_frames = encoded;
                 fps_timer = Instant::now();
             }
-            on_progress(
-                (output_index + 1) as f32 / output_frames as f32,
-                realtime_fps,
-            );
+            on_progress(encoded as f32 / output_frames as f32, realtime_fps);
             Ok(())
         })?;
     }
@@ -503,9 +502,11 @@ async fn render_async(
             break;
         }
     }
+    let encoding_seconds = render_start.elapsed().as_secs_f64();
+    let average_fps = output_frames as f64 / encoding_seconds.max(1e-9);
+    on_progress(1., average_fps);
     info!(
-        "Metal render complete: {output_frames} frames in {:.2}s",
-        process_start.elapsed().as_secs_f64()
+        "Metal export complete: {output_frames} frames in {encoding_seconds:.2}s ({average_fps:.1} fps, including encoder drain)"
     );
     Ok(crate::common::RenderStats {
         frames: output_frames,
@@ -528,8 +529,8 @@ fn finish_gpu() -> Result<()> {
     miniquad_context()
         .metal_context()
         .context("Metal context is unavailable")?
-        .finish();
-    Ok(())
+        .try_finish()
+        .map_err(anyhow::Error::msg)
 }
 
 fn prepare_encoder(

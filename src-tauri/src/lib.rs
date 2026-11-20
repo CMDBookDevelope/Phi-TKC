@@ -23,6 +23,11 @@ mod apple_media;
 #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
 mod apple_frames;
 #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+mod apple_prores_gpu;
+#[cfg(all(test, feature = "apple-render-check"))]
+#[path = "../../scripts/apple-prores-smoke.rs"]
+mod apple_prores_smoke;
+#[cfg(any(target_os = "ios", feature = "apple-render-check"))]
 mod apple_lifecycle;
 #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
 mod apple_platform;
