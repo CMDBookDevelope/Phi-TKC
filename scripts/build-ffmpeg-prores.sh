@@ -54,30 +54,21 @@ fi
 distribution="$output/ffmpeg-prores-distribution"
 cp config.h config_components.h "$distribution/"
 cp ffbuild/config.mak "$distribution/config.mak"
-# zimg is the only external linked library: permissive MIT, not GPL/LGPL.
-# Copy its installed copyright/license, and GCC's runtime exception notices.
-python3 - "$distribution" <<'PY'
-import os, shutil, sys
-from pathlib import Path
-out = Path(sys.argv[1])
-prefix = Path(os.environ.get('MINGW_PREFIX', '/usr'))
-roots = [prefix / 'share/licenses', Path('/usr/share/doc')]
-zimg = [p for root in roots if root.exists() for pattern in ('zimg*/LICENSE*', 'libzimg*/copyright') for p in root.glob(pattern) if p.is_file()]
-if not zimg:
-    raise SystemExit('zimg copyright/license is required for binary redistribution')
-shutil.copy2(zimg[0], out / 'zimg-LICENSE.txt')
-for root in roots:
-    if root.exists():
-        for pattern in ('gcc*/COPYING.RUNTIME', 'gcc*/COPYING3', 'gcc*/COPYING3.LIB'):
-            for p in root.glob(pattern):
-                if p.is_file():
-                    shutil.copy2(p, out / ('GCC-' + p.name))
-# The Vulkan headers are permissively licensed and header-only.
-for root in roots:
-    for p in root.glob('vulkan-headers*/LICENSE*') if root.exists() else []:
-        if p.is_file():
-            shutil.copy2(p, out / ('Vulkan-Headers-' + p.name))
-PY
+# Keep zimg's installed license with the statically linked encoder.
+# MSYS2 places it under share/doc/zimg/COPYING.
+if [ "$make_target" = ffmpeg.exe ] && [ -n "${MINGW_PREFIX:-}" ]; then
+  cp "$MINGW_PREFIX/share/doc/zimg/COPYING" "$distribution/zimg-LICENSE.txt"
+  notice_root="$MINGW_PREFIX/share/licenses"
+else
+  test -f /usr/share/doc/libzimg2/copyright
+  cp /usr/share/doc/libzimg2/copyright "$distribution/zimg-LICENSE.txt"
+  notice_root=/usr/share/licenses
+fi
+for notice in "$notice_root"/gcc*/COPYING.RUNTIME "$notice_root"/gcc*/COPYING3 \
+    "$notice_root"/gcc*/COPYING3.LIB "$notice_root"/vulkan-headers*/LICENSE*; do
+  [ -f "$notice" ] || continue
+  cp "$notice" "$distribution/$(basename "$(dirname "$notice")")-$(basename "$notice")"
+done
 {
   printf 'FFmpeg configuration:\n'
   printf '%q ' "$source_dir/configure" "${configure_args[@]}"
@@ -85,7 +76,11 @@ PY
   ${PHI_FFMPEG_CROSS_PREFIX:-}gcc --version
   make --version
   printf '\nzimg: '; pkg-config --modversion zimg
-  printf 'Vulkan headers: '; pkg-config --modversion vulkan
+  if command -v pacman >/dev/null && [ -n "${MINGW_PACKAGE_PREFIX:-}" ]; then
+    pacman -Q "${MINGW_PACKAGE_PREFIX}-vulkan-headers" "${MINGW_PACKAGE_PREFIX}-spirv-headers"
+  else
+    printf 'Vulkan headers: '; pkg-config --modversion vulkan
+  fi
   printf '\nShader compiler:\n'
   if [ -n "${PHI_FFMPEG_GLSLC:-}" ]; then
     "$PHI_FFMPEG_GLSLC" --version
