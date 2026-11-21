@@ -18,12 +18,15 @@ configure_args=(
   --disable-shared --enable-static --enable-ffmpeg --enable-vulkan --enable-libzimg
   --extra-version=Phi-TKC-ProRes --pkg-config-flags=--static
 )
+make_target=ffmpeg
 case "$(uname -s)" in
   MINGW*|MSYS*)
+    make_target=ffmpeg.exe
     configure_args+=(--target-os=mingw32 --arch=x86_64 --extra-ldflags=-static)
     ;;
   *)
     if [ -n "${PHI_FFMPEG_CROSS_PREFIX:-}" ]; then
+      make_target=ffmpeg.exe
       configure_args+=(--enable-cross-compile --target-os=mingw32 --arch=x86_64
         "--cross-prefix=${PHI_FFMPEG_CROSS_PREFIX}" --extra-ldflags=-static)
     fi
@@ -42,7 +45,7 @@ for feature in ('PRORES_KS_VULKAN_ENCODER', 'PRORES_KS_ENCODER', 'ZSCALE_FILTER'
     if f'#define CONFIG_{feature} 1' not in config:
         raise SystemExit(f'Required FFmpeg component disabled: {feature}')
 PY
-make -j"${PHI_FFMPEG_JOBS:-$(nproc)}" ffmpeg
+make -j"${PHI_FFMPEG_JOBS:-$(nproc)}" "$make_target"
 if [ -f ffmpeg.exe ]; then
   cp ffmpeg.exe "$output/ffmpeg-prores.exe"
 else
