@@ -42,7 +42,9 @@ en:
   progress: Progress
   eta: ETA
   no-charts: Drag and drop chart folders/files here, or use the buttons above to add them.
+  no-charts-status: No charts yet
   no-results: No results found
+  search-label: Search charts
   search-placeholder: Search charts, charter or level...
   selected: "Selected: {count}"
   filtered-results: "Filtered: {count}"
@@ -115,7 +117,9 @@ zh-CN:
   progress: 进度
   eta: 预计
   no-charts: 将谱面文件或文件夹拖拽至此，或使用上方按钮添加
+  no-charts-status: 暂无谱面
   no-results: 未找到相关谱面
+  search-label: 搜索谱面
   search-placeholder: 搜索谱面名称、谱师或难度...
   selected: "已选择 {count} 项"
   filtered-results: "筛选结果: {count}"
@@ -150,8 +154,8 @@ zh-CN:
 </i18n>
 
 <script setup lang="ts">
-import { isMobile } from './platform';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { isAndroid, isMobile } from './platform';
+import { computed, onMounted, onUnmounted, ref, useId, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -163,8 +167,11 @@ import { RHYTHM_DEFAULTS, isRhythmSpeed, withRhythmDefaults } from './rhythmConf
 import { renderAppearance } from './renderAppearance';
 import ConfigView from '@/components/ConfigView.vue';
 import RenderProgressBar from '@/components/RenderProgressBar.vue';
+import { OptionSelect } from '@/components/optionControls';
 
 const { t } = useI18n();
+const android = isAndroid();
+const searchId = useId();
 
 const ACTIVE_STATUSES = ['pending', 'loading', 'mixing', 'rendering', 'finalizing'];
 const POLL_MS = 500;
@@ -722,13 +729,15 @@ watch(
     <!-- Top Bar -->
     <div class="batch-header">
       <div class="header-row">
-        <div class="search-wrap">
+        <div class="search-wrap" :class="{ 'search-wrap-labeled': !android }">
+          <label v-if="!android" :for="searchId" class="search-label">{{ t('search-label') }}</label>
           <v-icon icon="mdi-magnify" size="18" class="search-icon" />
-          <input v-model="searchQuery" :placeholder="t('search-placeholder')" class="blur-glass md3-search" />
+          <input v-model="searchQuery" :id="android ? undefined : searchId"
+            :placeholder="android ? t('search-placeholder') : undefined" class="blur-glass md3-search" />
         </div>
 
-        <div class="header-actions">
-          <v-select
+        <div class="header-actions" :class="{ 'header-actions-labeled': !android }">
+          <OptionSelect
             v-model="selectedPreset"
             :items="presets"
             item-title="name"
@@ -738,7 +747,7 @@ watch(
             variant="outlined"
             hide-details
             :disabled="isRenderingQueue"
-            class="preset-select" />
+            :class="android ? 'preset-select' : 'preset-select-labeled'" />
           <button class="md3-btn md3-btn-tonal" :disabled="isAddingFiles" @click="addFiles">
             <v-icon icon="mdi-file-plus-outline" size="18" />
             <span>{{ t('add-files') }}</span>
@@ -802,7 +811,7 @@ watch(
     <div class="chart-list">
       <div v-if="charts.length === 0" class="empty-state">
         <v-icon icon="mdi-text-box-plus-outline" size="64" color="rgba(var(--main-color-rgb), 0.15)" />
-        <p>{{ t('no-charts') }}</p>
+        <p>{{ t(android ? 'no-charts' : 'no-charts-status') }}</p>
       </div>
 
       <div v-else class="list-scroll">
@@ -1056,6 +1065,31 @@ watch(
   min-width: 160px;
 }
 
+.search-wrap-labeled {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(0, 280px);
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 260px;
+  min-width: 0;
+  max-width: none;
+}
+
+.search-label {
+  max-width: 120px;
+  overflow-wrap: anywhere;
+}
+
+.search-wrap-labeled .search-icon {
+  grid-area: 1 / 2 / 2 / 3;
+}
+
+.search-wrap-labeled .md3-search {
+  min-width: 0;
+  max-width: 280px;
+  grid-column: 2;
+}
+
 .search-icon {
   position: absolute;
   left: 12px;
@@ -1095,6 +1129,16 @@ watch(
 .preset-select {
   min-width: 160px;
   max-width: 200px;
+}
+
+.header-actions-labeled {
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.preset-select-labeled {
+  flex: 0 1 260px;
 }
 
 /* ===== Selection Bar ===== */

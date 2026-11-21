@@ -3,8 +3,6 @@ en:
   settings:
     outputPath:
       label: "Custom output path"
-      placeholder: "Click to choose folder or type manually"
-      hint: "Prefer Browser FS API; use Electron for absolute path"
       aria: "Custom output path"
     selectFolder: "Select folder"
     save: "Save"
@@ -17,9 +15,7 @@ en:
       hint: "The app reloads after switching languages"
     server:
       label: "Render server"
-      hint: "Lets phones on the same network submit charts to this machine"
       host: "Bind address"
-      hostHint: "0.0.0.0 accepts phones; 127.0.0.1 is local only"
       port: "Port"
       start: "Start server"
       stop: "Stop server"
@@ -85,8 +81,6 @@ zh-CN:
   settings:
     outputPath:
       label: "自定义输出路径"
-      placeholder: "点击选择文件夹或手动输入"
-      hint: "请输入正确路径"
       aria: "自定义输出路径"
     selectFolder: "选择文件夹"
     save: "保存路径"
@@ -99,9 +93,7 @@ zh-CN:
       hint: "切换语言后应用会自动重新加载"
     server:
       label: "渲染服务器"
-      hint: "让同一局域网里的手机把谱面提交到这台电脑渲染"
       host: "监听地址"
-      hostHint: "0.0.0.0 允许手机连接；127.0.0.1 仅本机"
       port: "端口"
       start: "启动服务器"
       stop: "停止服务器"
@@ -177,12 +169,14 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 defineOptions({ name: 'SettingsPanel' });
 import { RULES as rules, toast, toastError, changeLocale } from './common';
 import { mainColor, bgColor, subColor } from './colorStore';
-import { isMobile } from './platform';
+import { isAndroid, isMobile } from './platform';
+import { OptionSelect, OptionSwitch, OptionTextField } from '@/components/optionControls';
 import PlatformColorPicker from './components/PlatformColorPicker.vue';
 import { extractThemeColors } from './themeColor.js';
 import { backgroundPath, backgroundUrl, customBackgroundUrl as backgroundPreviewUrl, backgroundBusy, autoColorOnRefresh, backgroundColorError, selectCustomBackground, clearCustomBackground, fixCurrentBackground, refreshApiBackground } from './background';
 
 const { t } = useI18n();
+const android = isAndroid();
 const mobile = isMobile();
 
 // Only these two message sets exist; `changeLocale` normalises zh-TW to zh-CN.
@@ -592,15 +586,16 @@ onUnmounted(stopWatching);
     <div class="settings-scroll">
       <!-- Language is also available on mobile. -->
       <div class="md3-card glass fluent-glass" v-glass>
-        <div class="card-label">{{ t('settings.language.label') }}</div>
-        <v-select
+        <div v-if="android" class="card-label">{{ t('settings.language.label') }}</div>
+        <OptionSelect
           v-model="currentLocale"
           :items="LANGUAGES"
           item-title="title"
           item-value="value"
           :label="t('settings.language.label')"
-          :hint="t('settings.language.hint')"
-          persistent-hint
+          :hint="android ? t('settings.language.hint') : undefined"
+          :persistent-hint="android"
+          :hide-details="android ? undefined : 'auto'"
           density="compact"
           variant="outlined"
           @update:model-value="applyLocale" />
@@ -609,24 +604,21 @@ onUnmounted(stopWatching);
       <!-- Render server: desktop only (phones cannot host renders) -->
       <div v-if="!mobile" class="md3-card glass fluent-glass" v-glass>
         <div class="card-label">{{ t('settings.server.label') }}</div>
-        <p class="server-hint">{{ t('settings.server.hint') }}</p>
-        <div class="server-row">
-          <v-text-field
+        <div :class="{ 'option-grid': !android }">
+          <OptionTextField
             v-model="serverHost"
             :label="t('settings.server.host')"
-            :hint="t('settings.server.hostHint')"
-            persistent-hint
+            hide-details="auto"
             density="compact"
             variant="outlined"
             :disabled="serverRunning" />
-          <v-text-field
+          <OptionTextField
             v-model.number="serverPort"
             :label="t('settings.server.port')"
             type="number"
             density="compact"
             variant="outlined"
             hide-details
-            class="port-field"
             :disabled="serverRunning" />
         </div>
         <div class="server-actions">
@@ -671,8 +663,8 @@ onUnmounted(stopWatching);
            do with the WebUI. -->
       <div v-if="mobile" class="md3-card glass fluent-glass" v-glass>
         <div class="card-label">{{ t('settings.remote.label') }}</div>
-        <p class="server-hint">{{ t('settings.remote.hint') }}</p>
-        <v-text-field
+        <p v-if="android" class="server-hint">{{ t('settings.remote.hint') }}</p>
+        <OptionTextField
           v-model="remoteAddress"
           :label="t('settings.remote.address')"
           :placeholder="t('settings.remote.placeholder')"
@@ -707,15 +699,13 @@ onUnmounted(stopWatching);
       <!-- Output Path (desktop only: mobile render output is fixed to the app data dir) -->
       <div v-if="!mobile" class="md3-card glass fluent-glass" v-glass>
         <div class="card-label">{{ t('settings.outputPath.label') }}</div>
-        <v-text-field
+        <OptionTextField
           v-model="outputPath"
           :label="t('settings.outputPath.label')"
-          :placeholder="t('settings.outputPath.placeholder')"
           :rules="[rules.non_empty]"
           clearable
           density="compact"
-          :hint="t('settings.outputPath.hint')"
-          persistent-hint
+          hide-details="auto"
           variant="outlined"
           append-icon="mdi-folder-open"
           @click:append="selectFolder"
@@ -764,7 +754,7 @@ onUnmounted(stopWatching);
             <v-icon icon="mdi-close" size="18" />
           </v-btn>
         </div>
-        <v-switch v-model="autoColorOnRefresh" :label="t('settings.background.autoColorOnRefresh')"
+        <OptionSwitch v-model="autoColorOnRefresh" :label="t('settings.background.autoColorOnRefresh')"
           :disabled="backgroundControlsBusy" color="primary" hide-details class="mt-2" />
       </div>
 
@@ -776,7 +766,7 @@ onUnmounted(stopWatching);
             :loading="extractingColor === 'all'" :disabled="!backgroundUrl || backgroundControlsBusy"
             @click="useWallpaperColor('all')">{{ t('settings.colors.fromWallpaper') }}</v-btn>
         </div>
-        <div class="color-row">
+        <div class="color-row" :class="{ 'option-grid': !android }">
           <div class="color-item">
             <span class="color-label">{{ t('settings.colors.main') }}</span>
             <PlatformColorPicker v-model="tempMainColor" class="theme-color-picker"
@@ -914,6 +904,19 @@ onUnmounted(stopWatching);
 }
 
 /* ===== Theme colours ===== */
+.color-row.option-grid {
+  display: grid;
+  --option-column-min: 260px;
+}
+.color-row.option-grid .color-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-inline-size: 0;
+}
+.color-row.option-grid .color-label { min-inline-size: 0; overflow-wrap: anywhere; }
+.color-row.option-grid .theme-color-picker { justify-self: end; }
+.color-row.option-grid .color-item > .v-btn { justify-self: start; min-inline-size: 0; }
 .color-row {
   display: flex;
   flex-direction: column;
@@ -959,17 +962,6 @@ onUnmounted(stopWatching);
   font-size: 0.78rem;
   opacity: 0.65;
   line-height: 1.5;
-}
-.server-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-.server-row .v-input:first-child {
-  flex: 1;
-}
-.port-field {
-  max-width: 120px;
 }
 .server-actions {
   display: flex;

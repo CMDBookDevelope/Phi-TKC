@@ -30,6 +30,9 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { toastError } from '@/common';
 import { isRhythmColors, type RhythmColors } from '@/rhythmConfig';
 import PlatformColorPicker from './PlatformColorPicker.vue';
+import { isAndroid } from '@/platform';
+
+const android = isAndroid();
 
 const props = defineProps<{ modelValue: RhythmColors | null; chartPath?: string; chartLabel?: string; chartCover?: string | null; revision?: number }>();
 const emit = defineEmits<{ 'update:modelValue': [colors: RhythmColors | null] }>();
@@ -141,20 +144,20 @@ onUnmounted(invalidate);
         </template>
       </v-tooltip>
     </div>
-    <div class="colors-row">
+    <div class="colors-row" :class="{ 'option-grid': !android }">
       <div v-for="(color, index) in colors" :key="index" class="color-option">
         <PlatformColorPicker :model-value="color" :label="t('color', { number: index + 1 })"
           :active="selectedColor === index" @activate="selectedColor = index" @update:model-value="setColor(index, $event)" />
         <span>{{ t('color', { number: index + 1 }) }}</span>
       </div>
     </div>
-    <p class="colors-hint">{{ props.modelValue ? t('custom') : t('automatic') }}</p>
+    <p v-if="android" class="colors-hint">{{ props.modelValue ? t('custom') : t('automatic') }}</p>
     <div class="colors-actions">
       <v-btn variant="tonal" color="primary" prepend-icon="mdi-palette" :loading="busy" :disabled="!chartPath || busy"
         @click="extractColors(true)">{{ t('extract') }}</v-btn>
     </div>
-    <p v-if="!chartPath" class="colors-hint">{{ t('choose-chart') }}</p>
-    <p v-else-if="sourceName" class="colors-hint">{{ t('source', { name: sourceName }) }}</p>
+    <p v-if="android && !chartPath" class="colors-hint">{{ t('choose-chart') }}</p>
+    <p v-else-if="android && sourceName" class="colors-hint">{{ t('source', { name: sourceName }) }}</p>
     <p v-if="extractionError" class="colors-error" role="status">{{ t('failed') }}</p>
   </div>
 </template>
@@ -170,7 +173,9 @@ onUnmounted(invalidate);
 .eyedropper-button:disabled { opacity: 0.4; cursor: default; }
 .eyedropper-button[aria-pressed="true"] { color: rgb(var(--v-theme-primary)); outline: 2px solid currentColor; }
 .colors-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.colors-row.option-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
 .color-option { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; }
+.option-grid .color-option { flex-direction: row-reverse; justify-content: space-between; max-inline-size: 280px; }
 .colors-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .colors-hint { margin: 0; font-size: 12px; line-height: 1.6; opacity: 0.7; overflow-wrap: anywhere; }
 .colors-error { margin: 0; font-size: 12px; color: rgb(var(--v-theme-error)); }

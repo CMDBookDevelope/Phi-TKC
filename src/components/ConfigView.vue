@@ -166,6 +166,7 @@ en:
   preset-deleted: Preset deleted
   preset-replaced: Preset replaced
   preset-cannot-use-default: Cannot use 'default'
+  preset-name: Preset name
   preset-name-empty: Please enter a preset name
   cancel: Cancel
   confirm: OK
@@ -367,6 +368,7 @@ zh-CN:
   preset-deleted: 预设已删除
   preset-replaced: 预设已替换
   preset-cannot-use-default: 不能使用 default
+  preset-name: 预设名称
   preset-name-empty: 请输入预设名称
   cancel: 取消
   confirm: 确定
@@ -418,9 +420,11 @@ import { RHYTHM_DEFAULTS, RHYTHM_SPEED_MIN, RHYTHM_SPEED_MAX, isRhythmSpeed, wit
 import TipSwitch from './TipSwitch.vue';
 import RhythmColorPicker from './RhythmColorPicker.vue';
 import PlatformColorPicker from './PlatformColorPicker.vue';
-import { isMobile } from '@/platform';
+import { isAndroid, isMobile } from '@/platform';
+import { OptionCombobox, OptionSelect, OptionSwitch, OptionTextField } from './optionControls';
 const props = defineProps<{ initialConfig?: RenderConfig; chartPath?: string; chartLabel?: string; chartCover?: string | null; presetTarget?: string }>();
 const mobile = isMobile();
+const android = isAndroid();
 
 // Phi-TKC's preset list, plus the 1920x1080 default (which was missing from it).
 const RESOLUTIONS = ['1280x960', '1920x1440', '2560x1920', '3840x2560', '1920x1080', '2844x2132', '2388x1668', '1600x1080', '7680x5760'];
@@ -1163,7 +1167,7 @@ async function replacePreset() {
 </script>
 
 <template>
-  <v-form ref="form" class="config-root" @submit.prevent>
+  <v-form ref="form" class="config-root" :class="{ 'option-layout': !android }" @submit.prevent>
     <!-- Category chips -->
     <div class="cat-bar clear-glass">
       <button v-for="cat in categories" :key="cat.key" type="button" class="cat-chip" :class="{ 'is-active': activeCategory === cat.key }" @click="selectCategory(cat.key)" @focus="revealCategory">
@@ -1179,10 +1183,10 @@ async function replacePreset() {
         <div ref="settingsScroll" class="settings-scroll">
           <!-- OUTPUT -->
             <div v-show="activeCategory === 'output'" class="settings-stack" :inert="activeCategory !== 'output'">
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.output') }}</div>
               <div class="field-row">
-                <v-combobox
+                <OptionCombobox
                   v-model="resolution"
                   :items="RESOLUTIONS"
                   :rules="[RULES.non_empty, RULES.resolution]"
@@ -1192,20 +1196,21 @@ async function replacePreset() {
                   hide-details />
               </div>
               <div class="field-row two-col">
-                <v-text-field v-model="fps" :rules="[RULES.positiveInt]" :label="t('fps')" density="compact" variant="outlined" hide-details />
-                <v-select
+                <OptionTextField v-model="fps" :rules="[RULES.positiveInt]" :label="t('fps')" density="compact" variant="outlined" hide-details />
+                <OptionSelect
                   v-model="sampleCount"
                   :items="msaaItems"
                   item-title="title"
                   item-value="value"
                   :label="t('sample-count')"
-                  :hint="msaaHint"
-                  persistent-hint
+                  :hint="android ? msaaHint : undefined"
+                  :persistent-hint="android"
+                  :hide-details="android ? false : 'auto'"
                   density="compact"
                   variant="outlined" />
               </div>
               <div class="field-row">
-                <v-select
+                <OptionSelect
                   v-model="colorSpace"
                   :items="[
                     { title: t('color-space-rec2100-pq'), value: 'rec2100_pq' },
@@ -1219,10 +1224,10 @@ async function replacePreset() {
                   hide-details />
               </div>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.encoder') }}</div>
               <div class="field-row two-col">
-                <v-select
+                <OptionSelect
                   v-model="videoCodec"
                   :disabled="Boolean(encoderStatus)"
                   :items="videoCodecs"
@@ -1232,7 +1237,7 @@ async function replacePreset() {
                   density="compact"
                   variant="outlined"
                   hide-details />
-                <v-select
+                <OptionSelect
                   v-model="encoder"
                   :disabled="Boolean(encoderStatus)"
                   :items="encoders"
@@ -1243,23 +1248,23 @@ async function replacePreset() {
                   variant="outlined"
                   hide-details />
               </div>
-              <p v-if="encoderStatus" class="field-hint">{{ encoderStatus }}</p>
+              <p v-if="encoderStatus" class="field-hint" role="status">{{ encoderStatus }}</p>
               <div class="field-row two-col">
-                <v-select v-model="ffmpegPreset" :items="FFMPEG_PRESETS" :label="t('ffmpeg-preset')" density="compact" variant="outlined" hide-details />
-                <v-select v-model="videoFormat" :items="VIDEO_FORMAT" :label="t('video-format')" density="compact" variant="outlined" hide-details :disabled="isProResCodec" />
+                <OptionSelect v-model="ffmpegPreset" :items="FFMPEG_PRESETS" :label="t('ffmpeg-preset')" density="compact" variant="outlined" hide-details />
+                <OptionSelect v-model="videoFormat" :items="VIDEO_FORMAT" :label="t('video-format')" density="compact" variant="outlined" hide-details :disabled="isProResCodec" />
               </div>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.bitrate') }}</div>
               <div class="field-row two-col">
-                <v-select v-model="bitrateControl" :items="['CRF', 'CBR']" :label="t('bitrate-control')" density="compact" variant="outlined" hide-details />
-                <v-text-field v-model="bitrate" :rules="[RULES.non_empty]" :label="t('bitrate')" density="compact" variant="outlined" hide-details />
+                <OptionSelect v-model="bitrateControl" :items="['CRF', 'CBR']" :label="t('bitrate-control')" density="compact" variant="outlined" hide-details />
+                <OptionTextField v-model="bitrate" :rules="[RULES.non_empty]" :label="t('bitrate')" density="compact" variant="outlined" hide-details />
               </div>
-              <p v-if="vulkanEligible && vulkanQp !== null" class="field-hint">
+              <p v-if="android && vulkanEligible && vulkanQp !== null" class="field-hint">
                 {{ t('vulkan-qp-hint', { qp: vulkanQp }) }}
               </p>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.performance') }}</div>
               <div class="switch-grid">
                 <TipSwitch v-model="hwAccel" :disabled="Boolean(encoderStatus) || !supportedEncoders.includes('cpu') || supportedEncoders.length < 2" :label="t('hw-accel')" :tooltip="t('hw-accel-tips')" density="compact" color="primary" />
@@ -1270,7 +1275,7 @@ async function replacePreset() {
           </div>
           <!-- RECORDING -->
             <div v-show="activeCategory === 'recording'" class="settings-stack" :inert="activeCategory !== 'recording'">
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.volume') }}</div>
               <div class="slider-row">
                 <v-icon icon="mdi-music-note" size="18" />
@@ -1285,11 +1290,11 @@ async function replacePreset() {
                 <span class="slider-val">{{ Math.round(volumeSfx * 100) }}%</span>
               </div>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.audio') }}</div>
               <div class="field-row two-col">
-                <v-select v-model="audioFormat" :items="AUDIO_FORMATS" :label="t('audio-format')" density="compact" variant="outlined" hide-details />
-                <v-select
+                <OptionSelect v-model="audioFormat" :items="AUDIO_FORMATS" :label="t('audio-format')" density="compact" variant="outlined" hide-details />
+                <OptionSelect
                   v-model="audioBit"
                   :items="AUDIO_BITS"
                   :label="t('audio-bit-depth')"
@@ -1306,8 +1311,8 @@ async function replacePreset() {
                 <v-slider v-model="appearance.stereoStrength" :aria-label="t('stereo-strength')" :aria-valuetext="`${Math.round(appearance.stereoStrength * 100)}%`" :min="0" :max="STEREO_STRENGTH_MAX" :step="0.01" hide-details color="primary" />
               </div>
               <div class="field-row two-col">
-                <v-select v-model="targetAudio" :items="SAMPLE_RATES" :label="t('target_audio')" density="compact" variant="outlined" hide-details />
-                <v-text-field
+                <OptionSelect v-model="targetAudio" :items="SAMPLE_RATES" :label="t('target_audio')" density="compact" variant="outlined" hide-details />
+                <OptionTextField
                   v-model.number="bufferSize"
                   :rules="[RULES.positive]"
                   :label="t('buffer_size')"
@@ -1320,7 +1325,7 @@ async function replacePreset() {
           </div>
           <!-- GAME -->
             <div v-show="activeCategory === 'game'" class="settings-stack" :inert="activeCategory !== 'game'">
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.speed') }}</div>
               <div class="slider-block">
                 <div class="slider-header">
@@ -1337,26 +1342,26 @@ async function replacePreset() {
                 <v-slider v-model="noteSpeedFactor" :min="0.1" :max="2" :step="0.01" hide-details color="primary" />
               </div>
               <div class="switch-grid">
-                <v-switch v-model="bar" :label="t('bar')" density="compact" color="primary" hide-details />
+                <OptionSwitch v-model="bar" :label="t('bar')" density="compact" color="primary" hide-details />
               </div>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.text') }}</div>
               <div class="field-row two-col">
-                <v-text-field v-model="combo" :label="t('combo')" density="compact" variant="outlined" hide-details />
-                <v-text-field v-model="watermark" :label="t('watermark')" density="compact" variant="outlined" hide-details />
+                <OptionTextField v-model="combo" :label="t('combo')" density="compact" variant="outlined" hide-details />
+                <OptionTextField v-model="watermark" :label="t('watermark')" density="compact" variant="outlined" hide-details />
               </div>
               <div class="field-row">
-                <v-text-field v-model="endingLength" :rules="[RULES.number]" :label="t('ending-length')" density="compact" variant="outlined" hide-details />
+                <OptionTextField v-model="endingLength" :rules="[RULES.number]" :label="t('ending-length')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
           </div>
           <!-- GRAPHICS -->
             <div v-show="activeCategory === 'graphics'" class="settings-stack" :inert="activeCategory !== 'graphics'">
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.respack') }}</div>
               <div class="respack-row">
-                <v-select
+                <OptionSelect
                   v-model="respack"
                   :items="respacks"
                   item-title="name"
@@ -1370,7 +1375,7 @@ async function replacePreset() {
                 <v-btn icon="mdi-folder-open" size="small" variant="text" @click="openRespackFolder" />
               </div>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.note-scale') }}</div>
               <div class="slider-block">
                 <div class="slider-header">
@@ -1380,7 +1385,7 @@ async function replacePreset() {
                 <v-slider v-model="noteScale" :min="0" :max="5" :step="0.05" hide-details color="primary" />
               </div>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.effects') }}</div>
               <div class="switch-grid">
                 <TipSwitch v-model="doubleHint" :label="t('double-hint')" density="compact" color="primary" />
@@ -1390,9 +1395,9 @@ async function replacePreset() {
                 <TipSwitch v-model="appearance.hitEffectEnabled" :label="t('hit-effect-enabled')" density="compact" color="primary" />
               </div>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.ui') }}</div>
-              <v-select v-model="backgroundMode" :items="backgroundOptions" :label="t('background-type')"
+              <OptionSelect v-model="backgroundMode" :items="backgroundOptions" :label="t('background-type')"
                 density="compact" variant="outlined" hide-details />
               <div v-if="backgroundMode === 'solid'" class="color-picker-row field-label">
                 <span>{{ t('background-color') }}</span>
@@ -1400,7 +1405,7 @@ async function replacePreset() {
               </div>
               <template v-if="backgroundMode === 'video'">
                 <div class="field-row background-video-row">
-                  <v-text-field
+                  <OptionTextField
                     v-if="!mobile"
                     v-model="backgroundVideo"
                     :label="t('background-video-path')"
@@ -1409,7 +1414,7 @@ async function replacePreset() {
                     hide-details />
                   <v-btn variant="outlined" prepend-icon="mdi-folder-open-outline" @click="chooseBackgroundVideo">{{ t('background-choose-video') }}</v-btn>
                 </div>
-                <v-select v-model="backgroundVideoPlayback" :items="backgroundVideoPlaybackOptions" :label="t('background-video-playback')"
+                <OptionSelect v-model="backgroundVideoPlayback" :items="backgroundVideoPlaybackOptions" :label="t('background-video-playback')"
                   density="compact" variant="outlined" hide-details />
               </template>
               <div class="ui-grid">
@@ -1425,7 +1430,7 @@ async function replacePreset() {
           </div>
           <!-- PLAYER -->
             <div v-show="activeCategory === 'player'" class="settings-stack" :inert="activeCategory !== 'player'">
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.player') }}</div>
               <div class="avatar-row">
                 <v-avatar size="56" color="surface-variant">
@@ -1435,21 +1440,21 @@ async function replacePreset() {
                 <v-btn @click="chooseAvatar" variant="outlined" size="small">{{ t('player-avatar') }}</v-btn>
               </div>
               <div class="field-row two-col">
-                <v-text-field v-model="playerName" :label="t('player-name')" density="compact" variant="outlined" hide-details />
-                <v-text-field v-model="playerRks" :rules="[RULES.number]" :label="t('player-rks')" density="compact" variant="outlined" hide-details />
+                <OptionTextField v-model="playerName" :label="t('player-name')" density="compact" variant="outlined" hide-details />
+                <OptionTextField v-model="playerRks" :rules="[RULES.number]" :label="t('player-rks')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.challenge') }}</div>
               <div class="field-row two-col">
-                <v-text-field v-model="challengeRank" :rules="[RULES.positiveInt]" :label="t('challenge-rank')" density="compact" variant="outlined" hide-details />
-                <v-select v-model="challengeColor" :items="t('challenge-colors').split(',')" :label="t('challenge-color')" density="compact" variant="outlined" hide-details />
+                <OptionTextField v-model="challengeRank" :rules="[RULES.positiveInt]" :label="t('challenge-rank')" density="compact" variant="outlined" hide-details />
+                <OptionSelect v-model="challengeColor" :items="t('challenge-colors').split(',')" :label="t('challenge-color')" density="compact" variant="outlined" hide-details />
               </div>
             </div>
           </div>
           <!-- RHYTHM / HAND SPLIT -->
             <div v-show="activeCategory === 'analysis'" class="settings-stack" :inert="activeCategory !== 'analysis'">
-            <div class="md3-card glass fluent-glass rhythm-card" v-glass>
+            <div class="md3-card glass fluent-glass rhythm-card" :class="{ 'option-grid': !android }" v-glass>
               <TipSwitch v-model="rhythmAnalysis" :label="t('rhythm-analysis')" density="compact" color="primary" hide-details />
               <div v-if="rhythmAnalysis" class="rhythm-options">
                 <TipSwitch v-model="rhythmAutoBpm" :label="t('rhythm-auto-bpm')" density="compact" color="primary" hide-details />
@@ -1462,23 +1467,23 @@ async function replacePreset() {
                     <span>{{ kind[0].toUpperCase() + kind.slice(1) }}</span>
                   </button>
                 </div>
-                <p v-if="!rhythmNotes.length" class="field-hint">{{ t('rhythm-empty') }}</p>
+                <p v-if="android && !rhythmNotes.length" class="field-hint">{{ t('rhythm-empty') }}</p>
                 <div class="rhythm-speed-control">
                   <div class="field-label">{{ t('rhythm-speed') }} <span>{{ rhythmSpeed.toFixed(1) }}×</span></div>
                   <v-slider v-model="rhythmSpeed" class="rhythm-speed" color="primary" thumb-label="always"
                     :min="RHYTHM_SPEED_MIN" :max="RHYTHM_SPEED_MAX" :step="0.1" :rules="[rhythmSpeedRule]"
                     hide-details density="compact" />
-                  <p class="field-hint">{{ t('rhythm-speed-hint') }}</p>
+                  <p v-if="android" class="field-hint">{{ t('rhythm-speed-hint') }}</p>
                 </div>
                 <RhythmColorPicker v-model="rhythmColors" :chart-path="chartPath" :chart-label="chartLabel"
                   :chart-cover="chartCover" :revision="rhythmColorRevision" />
-                <div v-if="rhythmDimensions" class="rhythm-size" aria-live="polite">
+                <div v-if="android && rhythmDimensions" class="rhythm-size" aria-live="polite">
                   <span class="rhythm-output">{{ t('rhythm-output', { width: rhythmDimensions.width, height: rhythmDimensions.outputHeight }) }}</span>
                   <p class="field-hint">{{ t('rhythm-canvas', rhythmDimensions) }}</p>
                 </div>
               </div>
             </div>
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <TipSwitch v-model="handSplit" :label="t('hand-split')" density="compact" color="primary" hide-details />
               <template v-if="handSplit">
                 <fieldset v-for="side in handSides" :key="side.value" class="hand-overlay">
@@ -1496,15 +1501,15 @@ async function replacePreset() {
                       :aria-valuetext="`${Math.round(appearance[side.opacityKey] * 100)}%`" :min="0" :max="1" :step="0.01" hide-details color="primary" />
                   </div>
                 </fieldset>
-                <p class="field-hint hand-opacity-hint">{{ t('hand-opacity-hint') }}</p>
+                <p v-if="android" class="field-hint hand-opacity-hint">{{ t('hand-opacity-hint') }}</p>
               </template>
             </div>
           </div>
           <!-- HDR -->
             <div v-show="activeCategory === 'hdr'" class="settings-stack" :inert="activeCategory !== 'hdr'">
-            <div class="md3-card glass fluent-glass hdr-card" v-glass :aria-disabled="!hdrEnabled">
+            <div class="md3-card glass fluent-glass hdr-card" :class="{ 'option-grid': !android }" v-glass :aria-disabled="!hdrEnabled">
               <div class="card-label">{{ t('hdr') }}</div>
-              <p v-if="!hdrEnabled" class="field-hint">{{ t('hdr-disabled') }}</p>
+              <p v-if="android && !hdrEnabled" class="field-hint">{{ t('hdr-disabled') }}</p>
               <v-tabs v-model="activeHdrSection" :aria-label="t('hdr-section')"
                 class="hdr-tabs clear-glass" height="48" :show-arrows="true" :disabled="!hdrEnabled">
                 <v-tab v-for="section in hdrSections" :key="section.value" :value="section.value" :ripple="false">
@@ -1529,12 +1534,12 @@ async function replacePreset() {
                   {{ option.title }}
                 </v-tab>
               </v-tabs>
-              <v-select v-model="activeHdrSetting.mode" :items="hdrModes" :label="t('hdr-mode')"
+              <OptionSelect v-model="activeHdrSetting.mode" :items="hdrModes" :label="t('hdr-mode')"
                 density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
               <template v-if="hdrEnabled && activeHdrSetting.mode === 'custom'">
                 <div class="card-label">{{ t('hdr-tone-mapping') }}</div>
                 <div class="field-row">
-                  <v-text-field v-model.number="activeHdrSetting.peakNits" :label="t('hdr-peak')" type="number" :min="100" :max="10000" :rules="[RULES.positive]" density="compact" variant="outlined" hide-details />
+                  <OptionTextField v-model.number="activeHdrSetting.peakNits" :label="t('hdr-peak')" type="number" :min="100" :max="10000" :rules="[RULES.positive]" density="compact" variant="outlined" hide-details />
                 </div>
                 <div v-for="control in ([
                   { key: 'knee', label: 'hdr-knee', min: 0, max: 1, step: 0.01 },
@@ -1549,7 +1554,7 @@ async function replacePreset() {
                   <div class="slider-header"><span>{{ t('hdr-chroma') }}</span><span class="slider-val">{{ activeHdrSetting.chromaScale.toFixed(2) }}</span></div>
                   <v-slider v-model="activeHdrSetting.chromaScale" :aria-label="t('hdr-chroma')" :min="0" :max="2" :step="0.01" hide-details color="primary" />
                 </div>
-                <v-select v-model="activeHdrSetting.gamutClip" :items="[
+                <OptionSelect v-model="activeHdrSetting.gamutClip" :items="[
                   { title: t('hdr-hard'), value: 'hard' }, { title: t('hdr-soft'), value: 'soft' },
                 ]" :label="t('hdr-gamut-clip')" density="compact" variant="outlined" hide-details />
               </template>
@@ -1557,11 +1562,11 @@ async function replacePreset() {
           </div>
           <!-- DEBUG -->
             <div v-show="activeCategory === 'debug'" class="settings-stack" :inert="activeCategory !== 'debug'">
-            <div class="md3-card glass fluent-glass" v-glass>
+            <div class="md3-card glass fluent-glass" :class="{ 'option-grid': !android }" v-glass>
               <div class="card-label">{{ t('section.debug') }}</div>
               <div class="switch-grid">
-                <v-switch v-model="chartDebug" :label="t('chart_debug')" density="compact" color="primary" hide-details />
-                <v-switch v-model="flidX" :label="t('flid_x')" density="compact" color="primary" hide-details />
+                <OptionSwitch v-model="chartDebug" :label="t('chart_debug')" density="compact" color="primary" hide-details />
+                <OptionSwitch v-model="flidX" :label="t('flid_x')" density="compact" color="primary" hide-details />
                 <TipSwitch v-model="disableLoading" :label="t('disable-loading')" :tooltip="t('disable-loading-tips')" density="compact" color="warning" />
               </div>
             </div>
@@ -1580,7 +1585,7 @@ async function replacePreset() {
         </button>
         <Transition name="preset-reveal">
           <div v-if="presetExpanded" id="render-preset-drawer" class="preset-drawer blur-glass" role="group" :aria-label="t('presets')">
-            <v-select
+            <OptionSelect
               :model-value="preset"
               @update:model-value="(val: Preset) => { preset = val; applyConfig(val.config); }"
               :items="presets" item-title="name" :label="t('presets')"
@@ -1600,8 +1605,9 @@ async function replacePreset() {
       <v-card class="glass fluent-glass">
         <v-card-title>{{ t('preset-create-title') }}</v-card-title>
         <v-card-text>
-          <v-text-field
+          <OptionTextField
             v-model="presetName"
+            :label="android ? undefined : t('preset-name')"
             autofocus
             variant="outlined"
             density="compact"
@@ -1743,6 +1749,26 @@ async function replacePreset() {
   transition-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
   cursor: default;
 }
+.md3-card.option-grid { display: grid; }
+.option-layout .option-grid :is(.field-row, .switch-grid, .rhythm-options) { display: contents; }
+.option-layout .option-grid :is(.card-label, .hdr-tabs, .field-hint, .ui-grid, .rhythm-note-grid, .rhythm-colors, .respack-row) {
+  grid-column: 1 / -1;
+  min-inline-size: 0;
+}
+.option-layout .option-grid :is(.slider-row, .slider-block, .rhythm-speed-control, .color-picker-row) {
+  min-inline-size: 0;
+  max-inline-size: 280px;
+}
+.option-layout .option-grid .slider-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 8px;
+}
+.option-layout .option-grid .slider-row :deep(.v-slider) { grid-column: 1 / -1; grid-row: 2; }
+.option-layout .option-grid .slider-label { min-width: 0; }
+.option-layout .option-grid .background-video-row > .v-btn { justify-self: start; max-inline-size: 100%; }
+.option-layout .option-grid .respack-row > .option-field { flex: 0 1 450px; }
+.preset-drawer .option-field.preset-select { min-inline-size: min(190px, 100%); }
 .color-picker-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 .background-video-row { align-items: center; }
 .background-video-row :deep(.v-input) { min-width: 0; }
