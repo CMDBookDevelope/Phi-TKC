@@ -82,9 +82,12 @@ pub fn run(
     request: RenderRequest,
     on_progress: impl Fn(crate::common::RenderProgress) + 'static,
 ) -> Result<crate::common::RenderStats> {
+    let output = crate::output_guard::OutputGuard::new(&request.output_path)?;
+    let cancel = request.request_cancel.clone();
+    let mut request = request;
     crate::android_uri::install_logger();
     let _log = crate::android_uri::start_render_log(request.output_path.with_extension("log"))?;
-    let mut request = request;
+    request.output_path = output.path().to_owned();
     normalize_config(&mut request.params.config)?;
     let (vw, vh) = request.params.config.output_resolution()?;
     crate::android_uri::debug_log(&format!("render: using requested {vw}x{vh}"));
@@ -108,11 +111,21 @@ pub fn run(
         }
         macroquad::window::miniquad_context().request_quit();
     });
-    shared
+    let result = shared
         .lock()
         .ok()
         .and_then(|mut guard| guard.take())
-        .unwrap_or_else(|| Err(anyhow::anyhow!("render thread did not report a result")))
+        .unwrap_or_else(|| Err(anyhow::anyhow!("render thread did not report a result")));
+    // Window teardown has dropped/joined every MediaCodec, muxer and ProRes
+    // worker. Only now is it safe to unlink partial output (Windows included).
+    if result.is_ok() {
+        if cancel.as_ref().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            bail!("render canceled");
+        }
+        output.commit()?;
+    }
+    output.cleanup()?;
+    result
 }
 
 async fn render_async(

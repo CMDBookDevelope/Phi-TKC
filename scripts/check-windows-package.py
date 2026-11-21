@@ -17,6 +17,9 @@ spec = importlib.util.spec_from_file_location(
 )
 runtime = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runtime)
+spec = importlib.util.spec_from_file_location("ffmpeg_bundle", Path(__file__).with_name("fetch-ffmpeg.py"))
+ffmpeg = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ffmpeg)
 
 
 def check(archive, version):
@@ -41,10 +44,13 @@ def check(archive, version):
         loader = root / "WebView2Loader.dll"
         if not loader.is_file() or not (root / "assets" / "ending.mp3").is_file():
             raise ValueError(f"{archive}: loader and renderer assets must be beside the executable")
-        files, _ = runtime.audit(executable, root, [loader])
+        sidecar = root / "ffmpeg-prores.exe"
+        ffmpeg.verify_payload(root)
+        files, _ = runtime.audit(executable, root, [loader, sidecar])
         payload = {
             str(path.relative_to(root)).replace("\\", "/"): hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in [executable, *root.glob("*.dll"), *root.glob("*.DLL"), *root.joinpath("assets").rglob("*")]
+            for path in [executable, sidecar, *root.glob("*.dll"), *root.glob("*.DLL"),
+                         *root.joinpath("assets").rglob("*"), *root.joinpath(ffmpeg.DISTRIBUTION).rglob("*")]
             if path.is_file()
         }
         if os.name == "nt":
@@ -65,9 +71,33 @@ def check(archive, version):
                     f"{archive}: isolated startup failed ({result.returncode:#x})\n"
                     f"{result.stdout}\n{result.stderr}"
                 )
+            def run_ffmpeg(*arguments):
+                result = subprocess.run([str(sidecar), "-nostdin", "-hide_banner", *arguments],
+                                        cwd=working, env=env, capture_output=True, text=True,
+                                        encoding="utf-8", errors="replace", timeout=90)
+                if result.returncode:
+                    raise ValueError(f"{archive}: isolated FFmpeg failed ({result.returncode:#x})\n{result.stdout}\n{result.stderr}")
+                return result.stdout + result.stderr
+
+            encoders = run_ffmpeg("-encoders")
+            names = {line.split()[1] for line in encoders.splitlines() if len(line.split()) >= 2}
+            if not {"prores_ks", "prores_ks_vulkan"}.issubset(names):
+                raise ValueError(f"{archive}: genuine CPU/Vulkan ProRes encoders missing")
+            filters = run_ffmpeg("-filters")
+            if not any(len(line.split()) >= 2 and line.split()[1] == "zscale" for line in filters.splitlines()):
+                raise ValueError(f"{archive}: HDR zscale filter missing")
+            license_text = run_ffmpeg("-L")
+            if "Lesser General Public License" not in license_text:
+                raise ValueError(f"{archive}: sidecar is not the source-complete LGPL build")
+            fixture = working / "prores-cpu.mov"
+            run_ffmpeg("-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=1",
+                       "-frames:v", "2", "-c:v", "prores_ks", "-profile:v", "3",
+                       "-pix_fmt", "yuv422p10le", "-y", str(fixture))
+            run_ffmpeg("-v", "error", "-i", str(fixture), "-frames:v", "2", "-f", "null", "-")
+            print("Isolated FFmpeg encoder/filter listing and CPU ProRes encode/decode passed; GPU not tested")
         else:
             print("Native Windows startup skipped on this host; PE dependency audit completed")
-        print(f"Verified {archive.name}: {len(files) - 1} runtime DLLs, complete assets")
+        print(f"Verified {archive.name}: {len(files) - 2} runtime DLLs, complete assets and FFmpeg sources")
         return payload
 
 

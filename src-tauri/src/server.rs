@@ -519,11 +519,10 @@ async fn download(
 }
 
 async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Response {
-    let id = next_id();
-    let dir = jobs_dir().join(&id);
-    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")).into_response();
-    }
+    let (id, dir) = match create_job_directory() {
+        Ok(value) => value,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")).into_response(),
+    };
 
     let mut input: Option<PathBuf> = None;
     // The WebUI may also upload a resource pack and a player avatar. Everything the
@@ -652,7 +651,8 @@ async fn upload(State(st): State<AppState>, mut multipart: Multipart) -> Respons
         .chars()
         .filter(|c| *c == '-' || *c == '_' || *c == ' ' || c.is_alphanumeric())
         .collect();
-    let output = dir.join(format!("{}.{ext}", if safe_name.is_empty() { "render" } else { &safe_name }));
+    // Never collide with uploaded input/avatar/background names in this folder.
+    let output = dir.join(format!("render-{}.{ext}", if safe_name.is_empty() { "chart" } else { &safe_name }));
 
     let job = Job {
         view: JobView {
@@ -811,32 +811,49 @@ async fn run_job(state: AppState, id: &str) {
     }
 
     log::info!("[server] job {id} ({name}) started");
-    let result = render_one(&state, id, &input, &output, &config, info.as_ref(), &cancel).await;
-    match result {
-        Ok(stats) => {
-            log::info!("[server] job {id} ({name}) completed: {}", output.display());
-            set_status(&state, id, |view| {
-                view.status = "done";
-                view.progress = 1.0;
-                view.duration = Some(stats.duration);
-                view.average_fps = Some(stats.average_fps());
-                view.download = Some(format!("/api/jobs/{id}/download"));
-            })
-            .await;
+    let mut staged = None;
+    let result = match crate::output_guard::OutputGuard::new(&output) {
+        Ok(guard) => {
+            let result = render_one(&state, id, &input, guard.path(), &config, info.as_ref(), &cancel).await;
+            staged = Some(guard);
+            result
         }
-        Err(e) => {
-            let canceled = cancel.load(Ordering::Relaxed);
-            let message = format!("{e:#}");
-            if canceled {
-                log::info!("[server] job {id} ({name}) canceled");
-            } else {
-                log::error!("[server] job {id} ({name}) failed: {message}");
+        Err(error) => Err(error.into()),
+    };
+    {
+        // Completing, publishing and canceling use one lock. A cancel between
+        // child exit and commit wins; a late cancel after done preserves output.
+        let mut jobs = state.jobs.lock().await;
+        let Some(job) = jobs.get_mut(id) else { return };
+        let canceled = cancel.load(Ordering::Relaxed);
+        let result = if canceled { Err(anyhow::anyhow!("canceled by client")) } else { result };
+        let result = result.and_then(|stats| {
+            staged.as_ref().context("output guard is missing")?.commit()?;
+            Ok(stats)
+        });
+        // render_one always waits for the child and its stderr reader. Cleanup
+        // therefore cannot race ffmpeg/native writers, including Windows locks.
+        let cleanup = staged.map(|guard| guard.cleanup()).transpose();
+        let result = match (result, cleanup) {
+            (result, Ok(_)) => result,
+            (result, Err(error)) => Err(anyhow::anyhow!("output cleanup failed: {error}; render result: {:?}", result.err())),
+        };
+        match result {
+            Ok(stats) => {
+                log::info!("[server] job {id} ({name}) completed: {}", output.display());
+                job.view.status = "done";
+                job.view.progress = 1.0;
+                job.view.duration = Some(stats.duration);
+                job.view.average_fps = Some(stats.average_fps());
+                job.view.download = Some(format!("/api/jobs/{id}/download"));
             }
-            set_status(&state, id, |view| {
-                view.status = if canceled { "canceled" } else { "failed" };
-                view.error = Some(message.clone());
-            })
-            .await;
+            Err(error) => {
+                let message = format!("{error:#}");
+                job.view.status = if canceled { "canceled" } else { "failed" };
+                job.view.error = Some(message.clone());
+                if canceled { log::info!("[server] job {id} ({name}) canceled"); }
+                else { log::error!("[server] job {id} ({name}) failed: {message}"); }
+            }
         }
     }
     // The chart archive, resource pack and avatar are only inputs: drop them as
@@ -854,13 +871,6 @@ async fn cleanup_inputs(input: &Path, output: &Path) {
         if path.as_path() != output {
             let _ = tokio::fs::remove_file(path).await;
         }
-    }
-}
-
-async fn set_status(state: &AppState, id: &str, f: impl FnOnce(&mut JobView)) {
-    let mut jobs = state.jobs.lock().await;
-    if let Some(job) = jobs.get_mut(id) {
-        f(&mut job.view);
     }
 }
 
@@ -901,22 +911,14 @@ async fn render_one(
         .context("failed to spawn the renderer")?;
 
     let mut stdin = child.stdin.take().unwrap();
-    stdin
-        .write_all(format!("{}\n", serde_json::to_string(&params)?).as_bytes())
-        .await?;
-    stdin
-        .write_all(format!("{}\n", serde_json::to_string(output)?).as_bytes())
-        .await?;
-    stdin.flush().await?;
-    drop(stdin);
 
     // Keep the tail of the renderer's stderr so a failed job reports the actual
     // panic/ffmpeg error instead of only "exited with 101".
     let stderr_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    if let Some(stderr) = child.stderr.take() {
+    let stderr_reader = if let Some(stderr) = child.stderr.take() {
         let tail = stderr_tail.clone();
         let job_id = id.to_owned();
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 crate::logger::relay(&format!("[server] job {job_id}"), &line, log::Level::Warn);
@@ -926,9 +928,14 @@ async fn render_one(
                 }
                 guard.push(line);
             }
-        });
-    }
+        }))
+    } else { None };
 
+    let mut stop_sent = false;
+    let stream_result: Result<crate::common::RenderStats> = async {
+    stdin.write_all(format!("{}\n", serde_json::to_string(&params)?).as_bytes()).await?;
+    stdin.write_all(format!("{}\n", serde_json::to_string(output)?).as_bytes()).await?;
+    stdin.flush().await?;
     let stdout = child.stdout.take().unwrap();
     let mut lines = BufReader::new(stdout).lines();
     let mut total: u64 = 0;
@@ -940,9 +947,9 @@ async fn render_one(
     let mut fps: u64 = params.config.fps as u64;
 
     loop {
-        if cancel.load(Ordering::Relaxed) {
-            let _ = child.kill().await;
-            anyhow::bail!("canceled by client");
+        if !stop_sent && cancel.load(Ordering::Relaxed) {
+            let _ = crate::output_guard::request_stop(&mut stdin).await;
+            stop_sent = true;
         }
         let next = tokio::time::timeout(Duration::from_millis(250), lines.next_line()).await;
         let Ok(line) = next else { continue };
@@ -1002,16 +1009,40 @@ async fn render_one(
         }
     }
 
-    let status = child.wait().await?;
-    if !status.success() {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let tail = stderr_tail.lock().await.join("\n");
-        anyhow::bail!("renderer exited with {status}\n{tail}");
-    }
     Ok(crate::common::RenderStats {
         frames,
         duration: completed_duration.context("renderer exited without reporting completion")?,
     })
+    }.await;
+    if stream_result.is_err() && !stop_sent {
+        let _ = crate::output_guard::request_stop(&mut stdin).await;
+        stop_sent = true;
+    }
+    let status = crate::output_guard::wait_for_renderer(&mut child, &mut stdin, cancel, &mut stop_sent).await;
+    // No detached stderr task and no arbitrary sleep: finish draining before
+    // returning to the output guard, even on IPC/child errors or cancellation.
+    let stderr_result = if let Some(reader) = stderr_reader { reader.await } else { Ok(()) };
+    let status = status?;
+    stderr_result?;
+    if cancel.load(Ordering::Relaxed) { anyhow::bail!("canceled by client"); }
+    if !status.success() {
+        let tail = stderr_tail.lock().await.join("\n");
+        anyhow::bail!("renderer exited with {status}\n{tail}");
+    }
+    stream_result
+}
+
+fn create_job_directory() -> std::io::Result<(String, PathBuf)> {
+    create_job_directory_in(&jobs_dir())
+}
+
+fn create_job_directory_in(root: &Path) -> std::io::Result<(String, PathBuf)> {
+    std::fs::create_dir_all(root)?;
+    // Seconds + an in-process counter can collide with previous server runs.
+    // tempfile reserves a fresh directory atomically, so cleanup owns its files.
+    let directory = tempfile::Builder::new().prefix(&format!("{}-", next_id())).tempdir_in(root)?;
+    let id = directory.path().file_name().unwrap().to_string_lossy().into_owned();
+    Ok((id, directory.keep()))
 }
 
 fn jobs_dir() -> PathBuf {
@@ -1035,6 +1066,28 @@ fn now_secs() -> u64 {
 mod tests {
     use super::build_config;
     use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn unique_job_directories_and_canceled_cleanup_preserve_previous_success() {
+        let root = tempfile::tempdir().unwrap();
+        let (_, previous) = super::create_job_directory_in(root.path()).unwrap();
+        let (id, canceled) = super::create_job_directory_in(root.path()).unwrap();
+        assert_ne!(previous, canceled);
+        assert_eq!(canceled.file_name().unwrap().to_string_lossy(), id);
+        let previous_output = previous.join("success.mp4");
+        std::fs::write(&previous_output, b"previous successful video").unwrap();
+        let input = canceled.join("input.pez");
+        let output = canceled.join("render.mp4");
+        std::fs::write(&input, b"uploaded chart").unwrap();
+        let guard = crate::output_guard::OutputGuard::new(&output).unwrap();
+        std::fs::write(guard.path(), b"canceled partial").unwrap();
+        guard.cleanup().unwrap();
+        super::cleanup_inputs(&input, &output).await;
+        assert!(!input.exists());
+        assert!(!output.exists());
+        assert_eq!(std::fs::read(previous_output).unwrap(), b"previous successful video");
+        assert_eq!(std::fs::read_dir(canceled).unwrap().count(), 0);
+    }
 
     #[test]
     fn rhythm_multipart_missing_fields_keeps_legacy_defaults() {

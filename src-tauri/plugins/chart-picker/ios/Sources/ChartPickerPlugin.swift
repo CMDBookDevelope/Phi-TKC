@@ -116,7 +116,9 @@ final class ChartPickerPlugin: Plugin, UIDocumentPickerDelegate {
                 .placeholderForCreatedAsset?.localIdentifier)
         }) { success, error in
             let assetId = identifier.read()
-            let saved = success && assetId.map { !$0.isEmpty } == true
+            // The placeholder can exist even if committing Photos changes
+            // fails. Rust may remove its private video only for this saved=true.
+            let saved = success && assetId.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } == true
             let detail = error?.localizedDescription ?? "相册未返回已创建的视频标识"
             self.resolveVideo(invoke, saved: saved, assetId: saved ? assetId : nil,
                               message: saved ? "已自动保存到相册。" :

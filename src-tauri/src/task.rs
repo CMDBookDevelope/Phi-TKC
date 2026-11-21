@@ -26,6 +26,13 @@ use tokio::{
 };
 use tracing::{error, info};
 
+#[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
+struct NativeCancelOnDrop(Arc<AtomicBool>);
+#[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
+impl Drop for NativeCancelOnDrop {
+    fn drop(&mut self) { self.0.store(true, Ordering::Relaxed); }
+}
+
 fn create_task_cover(cover_dir: Option<&Path>) -> Result<NamedTempFile> {
     if let Some(dir) = cover_dir {
         // Android's default /data/local/tmp is not writable by app UIDs. Use
@@ -151,13 +158,16 @@ impl Task {
         }
         *self.status.lock().await = TaskStatus::Loading;
 
+        let output = Arc::new(crate::output_guard::OutputGuard::new(&self.output)?);
+        let worker_output = Arc::clone(&output);
         let progress = Arc::new(std::sync::Mutex::new(RenderProgress::Preparing));
         let progress_out = Arc::clone(&progress);
         let cancel = Arc::new(AtomicBool::new(false));
+        let _cancel_on_drop = NativeCancelOnDrop(Arc::clone(&cancel));
         let cancel_out = Arc::clone(&cancel);
         let request = native_render::RenderRequest {
             params: self.params.clone(),
-            output_path: self.output.clone(),
+            output_path: output.path().to_owned(),
             asset_dir: ASSET_PATH
                 .get()
                 .cloned()
@@ -168,7 +178,10 @@ impl Task {
         let finished = Arc::new(std::sync::Mutex::new(None::<Result<crate::common::RenderStats>>));
         let finished_out = Arc::clone(&finished);
         let runtime = tokio::runtime::Handle::current();
-        std::thread::Builder::new().name("native-render".into()).spawn(move || {
+        let mut worker = Some(std::thread::Builder::new().name("native-render".into()).spawn(move || {
+            // If the async task is aborted, this clone keeps staging alive until
+            // native encoders have closed and the render thread really exits.
+            let _output = worker_output;
             let _runtime = runtime.enter();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _graphics = loop {
@@ -193,7 +206,7 @@ impl Task {
             if let Ok(mut guard) = finished_out.lock() {
                 *guard = Some(result);
             }
-        })?;
+        })?);
 
         let mut encoding_start: Option<Instant> = None;
         loop {
@@ -203,17 +216,28 @@ impl Task {
             tokio::time::sleep(Duration::from_millis(250)).await;
             let phase = *progress.lock().unwrap_or_else(|error| error.into_inner());
             let done = finished.lock().ok().and_then(|mut guard| guard.take());
+            if done.is_some() {
+                // Publishing/cleanup must not race native thread teardown after
+                // it stores the result. Join before exposing a terminal status.
+                let handle = worker.take().context("native render worker is missing")?;
+                tokio::task::spawn_blocking(move || handle.join().map_err(|_| anyhow::anyhow!("native render worker panicked"))).await??;
+            }
             match done {
                 Some(Ok(stats)) => {
+                    // Serialize completion with cancel(). Once a complete video
+                    // starts publishing, late cancellation cannot delete it.
+                    let mut status = self.status.lock().await;
                     if self.request_cancel.load(Ordering::Relaxed) {
-                        let _ = tokio::fs::remove_file(&self.output).await;
-                        *self.status.lock().await = TaskStatus::Canceled;
+                        Arc::try_unwrap(output).map_err(|_| anyhow::anyhow!("native output is still in use"))?.cleanup()?;
+                        *status = TaskStatus::Canceled;
                         return Ok(());
                     }
-                    *self.status.lock().await = TaskStatus::Finalizing;
-                    let log = tokio::fs::read_to_string(self.output.with_extension("log"))
+                    *status = TaskStatus::Finalizing;
+                    output.commit()?;
+                    let log = tokio::fs::read_to_string(output.path().with_extension("log"))
                         .await
                         .unwrap_or_default();
+                    Arc::try_unwrap(output).map_err(|_| anyhow::anyhow!("native output is still in use"))?.cleanup()?;
                     let name = self
                         .output
                         .file_name()
@@ -224,27 +248,29 @@ impl Task {
                         #[cfg(target_os = "android")]
                         { crate::android_uri::publish_video(&source, &name).map(|path| (path, String::new())) }
                         #[cfg(target_os = "ios")]
-                        { let _ = name; let note = crate::apple_platform::save_to_photos(&source); Ok((source.to_string_lossy().into_owned(), note)) }
+                        { let _ = name; let publication = crate::apple_platform::save_to_photos(&source); Ok((publication.target, publication.note)) }
                         #[cfg(all(not(any(target_os = "ios", target_os = "android")), feature = "apple-render-check"))]
                         { let _ = name; Ok((source.to_string_lossy().into_owned(), String::new())) }
                     })
                     .await
                     .unwrap_or_else(|error| Err(anyhow::anyhow!("publish task failed: {error}")));
-                    let (target, photo_note) = match published {
+                    let (target, mut photo_note) = match published {
                         Ok(target) => target,
                         Err(error) => {
-                            *self.status.lock().await = TaskStatus::Failed {
+                            *status = TaskStatus::Failed {
                                 error: format!("无法保存到相册。原视频保留在：{}\n\n{error:#}\n\n{log}", self.output.display()),
                             };
                             return Ok(());
                         }
                     };
-                    // iOS may retain the private output. Android returns a media
-                    // URI only after publishing the complete video successfully.
+                    // Both platforms return a media URI only after successful
+                    // publication. Photos failure returns the private path.
                     if PathBuf::from(&target) != self.output {
-                        let _ = tokio::fs::remove_file(&self.output).await;
+                        if let Err(error) = tokio::fs::remove_file(&self.output).await {
+                            photo_note.push_str(&format!("\n相册已保存；应用内副本未能清理：{} ({error})", self.output.display()));
+                        }
                     }
-                    *self.status.lock().await = TaskStatus::Done {
+                    *status = TaskStatus::Done {
                         duration: stats.duration,
                         average_fps: stats.average_fps(),
                         output: format!("{log}\n\nSaved to: {target}\n{photo_note}"),
@@ -252,17 +278,16 @@ impl Task {
                     return Ok(());
                 }
                 Some(Err(error)) => {
-                    if self.request_cancel.load(Ordering::Relaxed) {
-                        let _ = tokio::fs::remove_file(&self.output).await;
-                        *self.status.lock().await = TaskStatus::Canceled;
-                        return Ok(());
-                    }
-                    let log = tokio::fs::read_to_string(self.output.with_extension("log"))
+                    let log = tokio::fs::read_to_string(output.path().with_extension("log"))
                         .await
                         .unwrap_or_default();
-                    *self.status.lock().await = TaskStatus::Failed {
-                        error: format!("{error:#}\n\n{log}"),
-                    };
+                    Arc::try_unwrap(output).map_err(|_| anyhow::anyhow!("native output is still in use"))?.cleanup()?;
+                    let mut status = self.status.lock().await;
+                    if self.request_cancel.load(Ordering::Relaxed) {
+                        *status = TaskStatus::Canceled;
+                    } else {
+                        *status = TaskStatus::Failed { error: format!("{error:#}\n\n{log}") };
+                    }
                     return Ok(());
                 }
                 None => {
@@ -292,10 +317,37 @@ impl Task {
         #[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
         return self.run_mobile().await;
 
-        // A task canceled while it was still queued must not spawn a renderer at all.
         if self.request_cancel.load(Ordering::Relaxed) {
             *self.status.lock().await = TaskStatus::Canceled;
             return Ok(());
+        }
+        let output = crate::output_guard::OutputGuard::new(&self.output)?;
+        let result = self.run_desktop(output.path()).await;
+        let mut status = self.status.lock().await;
+        match result {
+            Ok(next) => {
+                if self.request_cancel.load(Ordering::Relaxed) {
+                    *status = TaskStatus::Canceled;
+                } else {
+                    if matches!(&next, TaskStatus::Done { .. }) {
+                        output.commit()?;
+                    }
+                    *status = next;
+                }
+                output.cleanup()?;
+                Ok(())
+            }
+            Err(error) => {
+                output.cleanup()?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn run_desktop(&self, output: &Path) -> Result<TaskStatus> {
+        // A task canceled while it was still queued must not spawn a renderer at all.
+        if self.request_cancel.load(Ordering::Relaxed) {
+            return Ok(TaskStatus::Canceled);
         }
 
         *self.status.lock().await = TaskStatus::Loading;
@@ -316,14 +368,15 @@ impl Task {
         let stdout = child.stdout.take().unwrap();
         let stderr_reader = tokio::spawn(crate::process_output::drain(child.stderr.take().unwrap()));
 
+        let mut stop_sent = false;
+        let stream_result: Result<(Option<f64>, u64, String)> = async {
         stdin
             .write_all(format!("{}\n", serde_json::to_string(&self.params)?).as_bytes())
             .await?;
         stdin
-            .write_all(format!("{}\n", serde_json::to_string(&self.output)?).as_bytes())
+            .write_all(format!("{}\n", serde_json::to_string(output)?).as_bytes())
             .await?;
         stdin.flush().await?;
-        drop(stdin);
 
         let mut lines = BufReader::new(stdout).lines();
         // Non-JSON lines on stdout are the renderer's log records (they go through
@@ -340,23 +393,15 @@ impl Task {
         loop {
             // Log-only output can keep next_line ready forever. Check before
             // reading too, so cancellation never depends on an IPC event.
-            if self.request_cancel.load(Ordering::Relaxed) {
-                let _ = child.kill().await;
-                *self.status.lock().await = TaskStatus::Canceled;
-                return Ok(());
+            if !stop_sent && self.request_cancel.load(Ordering::Relaxed) {
+                let _ = crate::output_guard::request_stop(&mut stdin).await;
+                stop_sent = true;
             }
             // If the renderer stalls (or emits no lines), a plain `next_line().await`
             // would make cancellation impossible. Wake up periodically to check the flag.
             let line = match tokio::time::timeout(Duration::from_millis(250), lines.next_line()).await {
                 Ok(line) => line?,
-                Err(_) => {
-                    if self.request_cancel.load(Ordering::Relaxed) {
-                        let _ = child.kill().await;
-                        *self.status.lock().await = TaskStatus::Canceled;
-                        return Ok(());
-                    }
-                    continue;
-                }
+                Err(_) => continue,
             };
             let Some(line) = line else { break };
             let Ok(event): Result<IPCEvent, _> = serde_json::from_str(line.trim()) else {
@@ -426,32 +471,39 @@ impl Task {
                     completed_duration = Some(duration);
                 }
             }
-            if self.request_cancel.load(Ordering::Relaxed) {
-                let _ = child.kill().await;
-                *self.status.lock().await = TaskStatus::Canceled;
-                return Ok(());
+            if !stop_sent && self.request_cancel.load(Ordering::Relaxed) {
+                let _ = crate::output_guard::request_stop(&mut stdin).await;
+                stop_sent = true;
             }
         }
-
-        let exit_status = crate::process_output::wait(&mut child, &self.request_cancel).await?;
-        let stderr = stderr_reader.await??;
-        if self.request_cancel.load(Ordering::Relaxed) {
-            *self.status.lock().await = TaskStatus::Canceled;
-            return Ok(());
+        Ok((completed_duration, frame_count, child_log))
+        }.await;
+        if stream_result.is_err() && !stop_sent {
+            let _ = crate::output_guard::request_stop(&mut stdin).await;
+            stop_sent = true;
         }
+        // Both waits run even if IPC failed: kill_on_drop alone only terminates
+        // the renderer, not the encoder it owns, and does not join diagnostics.
+        let exit_status = crate::output_guard::wait_for_renderer(&mut child, &mut stdin, &self.request_cancel, &mut stop_sent).await;
+        let stderr = stderr_reader.await;
+        let exit_status = exit_status?;
+        let stderr = stderr??;
+        if self.request_cancel.load(Ordering::Relaxed) {
+            return Ok(TaskStatus::Canceled);
+        }
+        let (completed_duration, frame_count, child_log) = stream_result?;
         if !exit_status.success() {
-            *self.status.lock().await = TaskStatus::Failed {
+            return Ok(TaskStatus::Failed {
                 error: format!(
                     "Child process exited abnormally ({:?})\n\n[LOG]\n{}\n\n[STDERR]\n{}",
                     exit_status.code(),
                     child_log,
                     stderr
                 ),
-            };
-            return Ok(());
+            });
         }
 
-        *self.status.lock().await = match completed_duration {
+        Ok(match completed_duration {
             Some(duration) => TaskStatus::Done {
                 duration,
                 average_fps: crate::common::RenderStats { frames: frame_count, duration }.average_fps(),
@@ -460,13 +512,14 @@ impl Task {
             None => TaskStatus::Failed {
                 error: format!("The renderer exited without reporting completion\n\n[LOG]\n{child_log}\n\n[STDERR]\n{stderr}"),
             },
-        };
-
-        Ok(())
+        })
     }
 
-    pub fn cancel(&self) {
-        self.request_cancel.store(true, Ordering::Relaxed);
+    pub async fn cancel(&self) {
+        let status = self.status.lock().await;
+        if !matches!(&*status, TaskStatus::Done { .. } | TaskStatus::Canceled | TaskStatus::Failed { .. }) {
+            self.request_cancel.store(true, Ordering::Relaxed);
+        }
     }
 
     pub async fn to_view(&self) -> TaskView {
@@ -554,7 +607,7 @@ impl TaskQueue {
 
     pub async fn cancel(&self, id: u32) {
         if let Some(task) = self.tasks.lock().await.iter().find(|task| task.id == id) {
-            task.cancel();
+            task.cancel().await;
         }
     }
 
@@ -580,7 +633,14 @@ impl TaskQueue {
 
 impl Drop for TaskQueue {
     fn drop(&mut self) {
-        self.worker.abort();
+        // Do not abort run(): it would drop the output guard before detached
+        // encoders finish. Detach the queue worker and let cooperative cancel
+        // join renderers first; dropping sender then drains the canceled queue.
+        if let Ok(tasks) = self.tasks.try_lock() {
+            for task in tasks.iter() {
+                task.request_cancel.store(true, Ordering::Relaxed);
+            }
+        }
     }
 }
 
@@ -670,6 +730,23 @@ mod tests {
         assert!(queue.tasks.lock().await[0]
             .request_cancel
             .load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn queued_cancel_preserves_existing_output_and_done_cancel_is_noop() {
+        let root = tempfile::tempdir().unwrap();
+        let task = test_task(9, root.path()).await;
+        std::fs::write(&task.output, b"old successful output").unwrap();
+        task.cancel().await;
+        task.run().await.unwrap();
+        assert!(matches!(&*task.status.lock().await, TaskStatus::Canceled));
+        assert_eq!(std::fs::read(&task.output).unwrap(), b"old successful output");
+        task.request_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+        *task.status.lock().await = TaskStatus::Done { duration: 1., average_fps: 30., output: "done".into() };
+        task.cancel().await;
+        task.cancel().await;
+        assert!(!task.request_cancel.load(std::sync::atomic::Ordering::Relaxed));
+        assert_eq!(std::fs::read(&task.output).unwrap(), b"old successful output");
     }
 
     #[test]

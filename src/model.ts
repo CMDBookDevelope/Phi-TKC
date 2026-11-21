@@ -132,6 +132,8 @@ export interface RenderConfig {
   uiScore: boolean;
   uiName: boolean;
   uiLine: boolean;
+  /** Render 噪域 (blockArea/ba); missing in legacy presets means ON. */
+  uiBlockArea?: boolean;
   uiLevel: boolean;
   uiCombo: boolean;
   uiPb: boolean;

@@ -150,6 +150,7 @@ pub struct RenderConfig {
     pub ui_name: bool,
     pub ui_level: bool,
     pub ui_line: bool,
+    pub ui_block_area: bool,
     pub ui_pb: bool,
     pub ui_pause: bool,
 
@@ -238,6 +239,13 @@ fn query_encoder_availability(
             }
             support.insert(codec.to_owned(), options);
         }
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if let Some(ffmpeg) = find_prores_ffmpeg()? {
+        let path = Path::new(&ffmpeg);
+        let result = cmd_hidden(path).args(["-hide_banner", "-encoders"]).output()?;
+        let listing = String::from_utf8_lossy(&result.stdout);
+        let known = |name: &str| listing.lines().any(|line| line.split_whitespace().nth(1) == Some(name));
         for profile_name in ["prores_422_hq", "prores_422", "prores_422_lt", "prores_422_proxy", "prores_4444", "prores_4444_xq", "prores_4444_alpha"] {
             let profile = prores_profile(profile_name).unwrap();
             if color_space.is_hdr() && profile.alpha {
@@ -443,6 +451,7 @@ impl Default for RenderConfig {
             ui_name: true,
             ui_level: true,
             ui_line: true,
+            ui_block_area: true,
             ui_pb: true,
             ui_pause: true,
             bar: false,
@@ -559,6 +568,7 @@ impl RenderConfig {
             ui_name: self.ui_name,
             ui_level: self.ui_level,
             ui_line: self.ui_line,
+            ui_block_area: self.ui_block_area,
             ui_pb: self.ui_pb,
             ui_pause: self.ui_pause,
             bar: self.bar,
@@ -967,6 +977,21 @@ fn is_progress_line(line: &[u8]) -> bool {
 }
 
 
+pub(crate) fn find_prores_ffmpeg() -> Result<Option<String>> {
+    let executable = std::env::current_exe()?;
+    let name = if cfg!(target_os = "windows") { "ffmpeg-prores.exe" } else { "ffmpeg-prores" };
+    let mut candidates = vec![executable.parent().unwrap().join(name)];
+    if let Some(assets) = crate::ASSET_PATH.get() {
+        if let Some(parent) = assets.parent() { candidates.push(parent.join(name)); }
+    }
+    for path in candidates {
+        if cmd_hidden(&path).arg("-version").output().is_ok_and(|o| o.status.success()) {
+            return Ok(Some(path.to_string_lossy().into_owned()));
+        }
+    }
+    find_ffmpeg()
+}
+
 pub fn find_ffmpeg() -> Result<Option<String>> {
     fn test(path: impl AsRef<OsStr>) -> bool {
         matches!(cmd_hidden(path).arg("-version").output(), Ok(_))
@@ -1100,6 +1125,22 @@ struct VulkanPipe {
     free_rx: mpsc::Receiver<usize>,
 }
 
+struct ProresPipe {
+    writer: crate::frame_handoff::FrameHandoff,
+    readback: crate::prores_gpu::Readback,
+    packer: crate::prores_gpu::Packer,
+    pending: [Option<(u64, usize)>; 2],
+    current_read: Option<usize>,
+}
+impl Drop for ProresPipe {
+    fn drop(&mut self) {
+        let context = miniquad_context().vulkan_context().unwrap();
+        if context.frame_active { context.finish_offscreen_frame(); }
+        context.wait_offscreen_idle();
+        let _ = self.writer.finish();
+    }
+}
+
 struct Nv12Pipe {
     // Drop joins the reader before readback storage (and later the GPU context) is released.
     direct: Option<crate::frame_handoff::FrameHandoff>,
@@ -1147,6 +1188,16 @@ impl Nv12Pipe {
         } else {
             Ok((self.free.pop_front().expect("copy handoff exhausted readback slots"), 0.))
         }
+    }
+}
+
+fn rgba_unpremultiply(input: &[u8], output: &mut [u8]) {
+    for (src, dst) in input.chunks_exact(4).zip(output.chunks_exact_mut(4)) {
+        let alpha = u32::from(src[3]);
+        for channel in 0..3 {
+            dst[channel] = if alpha == 0 { 0 } else { ((u32::from(src[channel]) * 255 + alpha / 2) / alpha).min(255) as u8 };
+        }
+        dst[3] = src[3];
     }
 }
 
@@ -1601,8 +1652,11 @@ pub async fn main() -> Result<()> {
 
     set_pc_assets_folder(&std::env::args().nth(2).unwrap());
 
-    let mut stdin = std::io::stdin().lock();
-    let stdin = &mut stdin;
+    if std::env::var_os("PHI_TKC_PRORES_GPU_SMOKE").is_some() {
+        crate::prores_gpu::smoke()?;
+        std::process::exit(0);
+    }
+    let mut stdin = std::io::BufReader::new(std::io::stdin());
 
     let mut line = String::new();
     stdin.read_line(&mut line)?;
@@ -1612,7 +1666,9 @@ pub async fn main() -> Result<()> {
     stdin.read_line(&mut line)?;
     let output_path: PathBuf = serde_json::from_str(line.trim())?;
 
-    render_impl(params, output_path, true, false).await
+    let control = std::sync::Arc::new(crate::render_control::RenderControl::default());
+    control.listen(stdin)?;
+    render_impl(params, output_path, true, false, control).await
 }
 
 /// Entry used by [`render_cli`]: same pipeline, parameters supplied directly.
@@ -1622,7 +1678,7 @@ pub async fn main_with_params(
     exit_after: bool,
     log_mode: bool,
 ) -> Result<()> {
-    let result = render_impl(params, output_path, exit_after, log_mode).await;
+    let result = render_impl(params, output_path, exit_after, log_mode, std::sync::Arc::new(crate::render_control::RenderControl::default())).await;
     if exit_after && result.is_ok() {
         // The CLI historically exits once the video is written; macroquad has no
         // window to pump in headless mode, so returning would just hang.
@@ -1636,6 +1692,7 @@ async fn render_impl(
     output_path: PathBuf,
     exit_after: bool,
     log_mode: bool,
+    control: std::sync::Arc<crate::render_control::RenderControl>,
 ) -> Result<()> {
     use crate::ipc::client::*;
 
@@ -1660,6 +1717,10 @@ async fn render_impl(
     }
     let hdr_filter = color_space.ffmpeg_filter(prores.map_or("yuv420p10le", |profile| profile.pixel_format));
     let output_path = if prores.is_some() { output_path.with_extension("mov") } else { output_path };
+    let output_owner = crate::output_guard::OutputGuard::new(&output_path)?;
+    let final_output_path = output_path;
+    let output_path = output_owner.path().to_owned();
+    control.check()?;
     let path = params.path;
     info!("Preparing chart: {}", path.display());
 
@@ -1667,7 +1728,7 @@ async fn render_impl(
 
     let font = FontArc::try_from_vec(load_file("font.ttf").await?)?;
 
-    let Some(ffmpeg) = find_ffmpeg()? else {
+    let Some(ffmpeg) = (if prores.is_some() { find_prores_ffmpeg()? } else { find_ffmpeg()? }) else {
         bail!("FFmpeg not found")
     };
     debug!("Using ffmpeg: {}", ffmpeg);
@@ -1885,12 +1946,18 @@ async fn render_impl(
     send(IPCEvent::PrepareEncoder);
 
     let audio_bit = params.config.audio_bit;
+    let system_ffmpeg = find_ffmpeg()?;
+    let sidecar_audio = system_ffmpeg.is_none() && prores.is_some();
     let mut audio_format = params.config.audio_format.to_lowercase();
     if prores.is_some() && matches!(audio_format.as_str(), "flac" | "opus") {
         info!("Using 24-bit PCM audio for ProRes MOV compatibility");
         audio_format = "pcm".into();
     }
 
+    if sidecar_audio && audio_format == "mp3" {
+        info!("Using AAC audio: the bundled ProRes encoder does not include libmp3lame");
+        audio_format = "aac".into();
+    }
     let supported_formats = ["flac", "mp3", "aac", "opus", "wav", "pcm"];
     if !supported_formats.contains(&audio_format.as_str()) {
         bail!
@@ -1953,7 +2020,11 @@ async fn render_impl(
 
     let audio_suffix = format!(".{output_format}");
     let audio_output_file = NamedTempFile::with_suffix(&audio_suffix)?;
-    let mut proc = cmd_hidden(&ffmpeg)
+    let audio_ffmpeg = system_ffmpeg.unwrap_or_else(|| ffmpeg.clone());
+    let args_str = if sidecar_audio {
+        args_str.replace("aresample=resampler=soxr:precision=33:", "aresample=")
+    } else { args_str };
+    let mut proc = cmd_hidden(&audio_ffmpeg)
         .args(args_str.split_whitespace())
         .arg(audio_output_file.path())
         .arg("-loglevel")
@@ -1962,13 +2033,16 @@ async fn render_impl(
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| tl!("run-ffmpeg-failed"))?;
+    let mut proc = control.process(proc);
     let audio_stderr = drain_stderr(proc.stderr.take().unwrap());
     let input = proc.stdin.as_mut().unwrap();
     let mut writer = BufWriter::new(input);
-    for sample in output.into_iter().skip(ss_samples) {
+    for (index, sample) in output.into_iter().skip(ss_samples).enumerate() {
+        if index % 8192 == 0 { control.check()?; }
         writer.write_all(&sample.to_le_bytes())?;
     }
     drop(writer);
+    proc.stdin.take();
     let audio_status = proc.wait()?;
     if let Ok(text) = audio_stderr.join() {
         if !text.trim().is_empty() {
@@ -1997,7 +2071,7 @@ async fn render_impl(
     // RX 7900 XTX can stall inside the driver's video-session/DPB creation,
     // before a fence timeout can apply. Keep rendering through the working
     // AMF path even when an AMD user selected Vulkan; other GPUs keep Vulkan.
-    let amd_vulkan_fallback = amd_gpu && matches!(params.config.encoder.as_str(), "auto" | "vulkan");
+    let amd_vulkan_fallback = prores.is_none() && amd_gpu && matches!(params.config.encoder.as_str(), "auto" | "vulkan");
     if amd_vulkan_fallback && params.config.hardware_accel {
         info!("AMD GPU: using FFmpeg AMF instead of Vulkan Video; software encoding is the fallback");
     }
@@ -2074,7 +2148,22 @@ async fn render_impl(
         None
     };
     let nv12_mode = ffmpeg_nv12.is_some();
-    let mst_count = if nv12_mode { 2 } else { 1 };
+    let mut prores_staging = if headless_vulkan && !color_space.is_hdr()
+        && prores.is_some_and(|p| p.alpha)
+        && !std::env::var("PHITK_PRORES_CONVERSION").is_ok_and(|mode| mode == "cpu")
+    {
+        let create = || -> Result<_> {
+            let packer = crate::prores_gpu::Packer::new(vw, vh)?;
+            let readback = crate::prores_gpu::Readback::new(packer.frame_bytes(), 4)?;
+            Ok((packer, readback))
+        };
+        match create() {
+            Ok(staging) => Some(staging),
+            Err(error) => { warn!("ProRes GPU conversion unavailable: {error:#}; using RGBA fallback"); None }
+        }
+    } else { None };
+    let async_prores = prores_staging.is_some();
+    let mst_count = if nv12_mode || async_prores { 2 } else { 1 };
     let alpha = prores.is_some_and(|profile| profile.alpha);
     config.transparent_background = alpha;
     let msts: Vec<Rc<MSRenderTarget>> = (0..mst_count)
@@ -2090,7 +2179,7 @@ async fn render_impl(
     } else {
         RhythmComposite::new_with_alpha(game_width, game_height, rhythm_strip, mst_count, alpha)?
     };
-    let rgba_readback = (!nv12_mode && !vulkan_video && !config.hdr_output).then(|| RgbaReadback::new(vw, vh));
+    let rgba_readback = (!nv12_mode && !async_prores && !vulkan_video && !config.hdr_output).then(|| RgbaReadback::new(vw, vh));
     let mst_slot = Rc::new(Cell::new(0usize));
     let my_time: Rc<RefCell<f64>> = Rc::new(RefCell::new(0.));
     let tm = TimeManager::manual(Box::new({
@@ -3177,16 +3266,26 @@ async fn render_impl(
     };
 
 
+    let mut proc = control.process(proc);
     let video_stderr = drain_stderr_with_progress(proc.stderr.take().unwrap(), ffmpeg_frames.clone());
 
     let hdr_readback = color_space.is_hdr();
     let frame_size = vw as usize * vh as usize * if hdr_readback { 8 } else { 4 };
 
     let mut ffmpeg_stdin = Some(proc.stdin.take().unwrap());
+    let mut prores_pipe = if let Some((packer, readback)) = prores_staging.take() {
+        let writer = unsafe { crate::frame_handoff::FrameHandoff::new_mapped(
+            readback.addresses(), readback.frame_bytes(), ffmpeg_stdin.take().unwrap(),
+        ) }?;
+        info!("ProRes conversion: GPU straight-alpha RGBA, async mapped handoff; {} bytes/frame", readback.frame_bytes());
+        Some(ProresPipe { writer, readback, packer, pending: [None, None], current_read: None })
+    } else { None };
     let keyframe_interval = (fps.saturating_mul(KEYFRAME_INTERVAL_SECS)).max(1) as u64;
 
     let (mut vulkan_pipe, pipeline, writer, encoder_thread, mut nv12_pipe, nv12_pipeline) =
-        if let Some(context) = video_context.take() {
+        if prores_pipe.is_some() {
+            (None, None, None, None, None, None)
+        } else if let Some(context) = video_context.take() {
             let nv12_raw = (0..context.source_count())
                 .map(|slot| context.nv12_raw(slot))
                 .collect::<Vec<_>>();
@@ -3348,11 +3447,14 @@ async fn render_impl(
                     let mut busy = 0_u64;
                     // Reuse one planar frame on the writer thread. The render
                     // thread can submit the next RGBA16F frame while this runs.
-                    let mut planar = if hdr_readback { vec![0; frame_size / 8 * 12] } else { Vec::new() };
+                    let mut planar = if hdr_readback { vec![0; frame_size / 8 * 12] } else if alpha { vec![0; frame_size] } else { Vec::new() };
                     while let Some(buf) = shared.pop_job() {
                         let pixels = &shared.pool[buf];
                         let bytes = if hdr_readback {
                             hdr_rgba_to_gbr(pixels, &mut planar);
+                            planar.as_slice()
+                        } else if alpha {
+                            rgba_unpremultiply(pixels, &mut planar);
                             planar.as_slice()
                         } else {
                             pixels.as_slice()
@@ -3397,6 +3499,11 @@ async fn render_impl(
         Ok((dma_wait, pool_wait))
     }
 
+    let mut operation = control.scope();
+    struct StopFrames(Option<std::sync::Arc<FramePipeline>>);
+    impl Drop for StopFrames { fn drop(&mut self) { if let Some(pool) = &self.0 { pool.push_stop(); } } }
+    let _stop_frames = StopFrames(pipeline.clone());
+    let _stop_nv12 = StopFrames(nv12_pipeline.clone());
     let total_frames = frames;
 
     // Crate-based progress bar (indicatif). It draws on stderr, so terminal
@@ -3436,13 +3543,25 @@ async fn render_impl(
     let loop_start_time = Instant::now();
 
     for frame in 0..total_frames {
+        control.check()?;
         let current_frame_time = frame as f64 * frame_duration;
         *my_time.borrow_mut() = current_frame_time;
         let keep = frame >= skip;
         let mut nv12_frame_slot = None;
 
         if keep {
-            let mst_index = if let Some(pipe) = &mut nv12_pipe {
+            let mst_index = if let Some(pipe) = &mut prores_pipe {
+                let context = miniquad_context().vulkan_context().unwrap();
+                let start = Instant::now();
+                let frame_slot = context.begin_offscreen_frame();
+                fence_wait_time += start.elapsed().as_secs_f64();
+                if let Some((index, slot)) = pipe.pending[frame_slot].take() { pipe.writer.submit(index, slot)?; }
+                let start = Instant::now();
+                pipe.current_read = Some(pipe.writer.acquire_slot()?);
+                pool_wait_time += start.elapsed().as_secs_f64();
+                nv12_frame_slot = Some(frame_slot);
+                frame_slot
+            } else if let Some(pipe) = &mut nv12_pipe {
                 let context = miniquad_context().vulkan_context().unwrap();
                 let wait_start = Instant::now();
                 let frame_slot = context.begin_offscreen_frame();
@@ -3495,7 +3614,18 @@ async fn render_impl(
         // which made a 30 s render look like it updated every ~3 s.
         progress.set_position(frame.saturating_sub(skip).min(out_frames));
 
-        if let Some(pipe) = &mut nv12_pipe {
+        if let Some(pipe) = &mut prores_pipe {
+            let start = Instant::now();
+            pipe.packer.convert(&rendered);
+            yuv_convert_time += start.elapsed().as_secs_f64();
+            let slot = pipe.current_read.take().unwrap();
+            let start = Instant::now();
+            pipe.packer.record(pipe.readback.buffer(slot));
+            miniquad_context().vulkan_context().unwrap().finish_offscreen_frame();
+            nv12_submit_time += start.elapsed().as_secs_f64();
+            pipe.pending[nv12_frame_slot.unwrap()] = Some((output_index, slot));
+            output_index += 1;
+        } else if let Some(pipe) = &mut nv12_pipe {
             let frame_slot = nv12_frame_slot.unwrap();
             let read_slot = pipe.current_read.take().unwrap();
             {
@@ -3554,6 +3684,7 @@ async fn render_impl(
     mark!("render loop");
     send(IPCEvent::Finalizing);
     info!("Finalizing video");
+    control.check()?;
     let backlog_at_end = output_index.saturating_sub(ffmpeg_frames.load(Ordering::Relaxed) as u64);
     drop(vulkan_pipe);
     if let Some(thread) = encoder_thread {
@@ -3576,6 +3707,11 @@ async fn render_impl(
             pipeline.push_stop();
         }
     }
+    if let Some(pipe) = &mut prores_pipe {
+        miniquad_context().vulkan_context().unwrap().wait_offscreen_idle();
+        for (index, slot) in crate::frame_handoff::take_pending(&mut pipe.pending) { pipe.writer.submit(index, slot)?; }
+        direct_stats = Some(pipe.writer.finish()?);
+    }
     let writer_busy = if let Some(writer) = writer {
         match writer.join() {
             Ok(Ok(busy)) => busy as f64 / 1e9,
@@ -3590,6 +3726,7 @@ async fn render_impl(
     let video_stderr = video_stderr.join().unwrap_or_default();
     if !video_stderr.trim().is_empty() { warn!("[ffmpeg:video]\n{}", video_stderr.trim()); }
     if !video_status.success() { bail!("ffmpeg muxing failed ({video_status})"); }
+    control.check()?;
     let elapsed = render_start_time.elapsed();
     let wall = elapsed.as_secs_f64().max(1e-9);
     debug!("Render Time: {:.2?}", elapsed);
@@ -3695,7 +3832,10 @@ async fn render_impl(
         total_wall,
     );
 
-    info!("Video saved to {} ({:.2}s)", output_path.display(), total_wall);
+    output_owner.commit()?;
+    output_owner.cleanup()?;
+    operation.complete();
+    info!("Video saved to {} ({:.2}s)", final_output_path.display(), total_wall);
     send(IPCEvent::Done(render_start_time.elapsed().as_secs_f64()));
     Ok(())
 }

@@ -158,7 +158,7 @@ en:
   hit-effect-enabled: Hit Effects
   note-speed-factor: Note Speed
   bar: Judge Bar
-  render-list: Judge Line,Score,Combo,Level,Name,Progress,Percent,Time,Pause
+  render-list: Judge Line,Score,Combo,Level,Name,Progress,Percent,Time,Pause,Block Area
   presets: Presets
   preset-button: preset
   preset-create-title: Preset name
@@ -360,7 +360,7 @@ zh-CN:
   hit-effect-enabled: 打击特效
   note-speed-factor: 流速
   bar: 判定条显示
-  render-list: 判定线,分数,连击,等级,名字,进度,百分比,时间,暂停
+  render-list: 判定线,分数,连击,等级,名字,进度,百分比,时间,暂停,噪域
   presets: 预设
   preset-button: 预设
   preset-create-title: 预设名称
@@ -715,8 +715,8 @@ const aggressive = ref(false);
 const disableParticle = ref(false);
 const disableEffect = ref(false);
 const render = ref<string[]>([]);
-const DEFAULT_RENDER_LIST = ['Judge Line', 'Score', 'Combo', 'Level', 'Name', 'Progress', 'Percent', 'Time', 'Pause'];
-const renderList = ref(t('render-list').split(',').length === 9 ? t('render-list').split(',') : DEFAULT_RENDER_LIST);
+const DEFAULT_RENDER_LIST = ['Judge Line', 'Score', 'Combo', 'Level', 'Name', 'Progress', 'Percent', 'Time', 'Pause', 'Block Area'];
+const renderList = ref(t('render-list').split(',').length === 10 ? t('render-list').split(',') : DEFAULT_RENDER_LIST);
 function toggleRender(item: string) {
   const index = render.value.indexOf(item);
   if (index > -1) render.value.splice(index, 1);
@@ -840,6 +840,7 @@ const DEFAULT_PRESET: Preset = {
     handSplit: false,
     noteSpeedFactor: 1.0,
     uiLine: true,
+    uiBlockArea: true,
     uiScore: true,
     uiCombo: true,
     uiLevel: true,
@@ -1024,6 +1025,7 @@ async function buildConfig(): Promise<RenderConfig | null> {
     showProgressText: render.value.includes(renderList.value[6]),
     showTimeText: render.value.includes(renderList.value[7]),
     uiPause: render.value.includes(renderList.value[8]),
+    uiBlockArea: render.value.includes(renderList.value[9]),
   };
 }
 
@@ -1102,6 +1104,7 @@ function applyConfig(c: RenderConfig) {
   if ((c.showProgressText ?? false) && list[6]) render.value.push(list[6]);
   if ((c.showTimeText ?? false) && list[7]) render.value.push(list[7]);
   if ((c.uiPause ?? true) && list[8]) render.value.push(list[8]);
+  if ((c.uiBlockArea ?? true) && list[9]) render.value.push(list[9]);
 }
 defineExpose({ buildConfig, applyConfig });
 

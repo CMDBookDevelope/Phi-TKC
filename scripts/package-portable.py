@@ -18,6 +18,8 @@ def package(args):
     windows = args.target.startswith("windows")
     if windows and (args.webview_loader is None or not args.webview_loader.is_file()):
         raise ValueError("Windows archives require WebView2Loader.dll")
+    if windows and (args.ffmpeg_bundle is None or not (args.ffmpeg_bundle / "ffmpeg-prores.exe").is_file()):
+        raise ValueError("Windows archives require the source-complete FFmpeg ProRes sidecar")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     name = f"{args.app}_{args.version}_{args.target}"
@@ -30,6 +32,8 @@ def package(args):
             shutil.copy2(args.webview_loader, root / "WebView2Loader.dll")
             for dll in args.runtime_dll:
                 shutil.copy2(dll, root / dll.name)
+            shutil.copy2(args.ffmpeg_bundle / "ffmpeg-prores.exe", root / "ffmpeg-prores.exe")
+            shutil.copytree(args.ffmpeg_bundle / "ffmpeg-prores-distribution", root / "ffmpeg-prores-distribution")
             # Check the staged package itself. The build's PATH and adjacent
             # toolchain DLLs must not mask an incomplete portable payload.
             spec = importlib.util.spec_from_file_location(
@@ -37,7 +41,11 @@ def package(args):
             )
             runtime = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(runtime)
-            runtime.audit(root / binary.name, root, [root / "WebView2Loader.dll"])
+            runtime.audit(root / binary.name, root, [root / "WebView2Loader.dll", root / "ffmpeg-prores.exe"])
+            spec = importlib.util.spec_from_file_location("ffmpeg_bundle", Path(__file__).with_name("fetch-ffmpeg.py"))
+            ffmpeg = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(ffmpeg)
+            ffmpeg.verify_payload(root)
         else:
             # The CLI has an explicit assets flag; let the caller override it.
             cli_assets = ""
@@ -59,15 +67,19 @@ set -- --assets "$app_dir/assets" "$@"
         instructions = (
             f"{args.app} {args.version} ({args.target})\n\n"
             "Keep the assets directory beside the executable.\n"
-            "Install ffmpeg and a Vulkan-capable graphics driver to render charts.\n"
+            "Install a Vulkan-capable graphics driver to render charts.\n"
         )
         if windows:
             instructions += (
+                "ffmpeg-prores.exe is bundled for CPU/Vulkan ProRes; keep it beside the app.\n"
+                "Its exact LGPL source/configuration/licenses are in ffmpeg-prores-distribution/.\n"
+                "Install a full FFmpeg for other codecs such as libx264/libx265.\n"
                 f"Launch {binary.name} for the GUI, or pass CLI/server arguments in a terminal.\n"
                 "The GUI requires the Microsoft Edge WebView2 Runtime.\n"
             )
         else:
             instructions += (
+                "Install ffmpeg to render charts.\n"
                 "Run ./launch.sh with your usual command-line arguments.\n"
                 "Linux runtime dependencies: libasound2, libvulkan1, libgl1, libx11-6,\n"
                 "libxi6, libxcursor1, zlib1g.\n"
@@ -104,5 +116,6 @@ if __name__ == "__main__":
     parser.add_argument("--assets", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--webview-loader", type=Path)
+    parser.add_argument("--ffmpeg-bundle", type=Path)
     parser.add_argument("--runtime-dll", action="append", default=[], type=Path)
     package(parser.parse_args())

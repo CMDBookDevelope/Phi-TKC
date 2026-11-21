@@ -15,6 +15,9 @@ mod preview;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "apple-render-check"))]
 mod native_preview;
 mod process_output;
+mod output_guard;
+mod prores_gpu;
+mod render_control;
 pub mod render;
 pub mod server;
 mod task;
@@ -29,7 +32,7 @@ mod apple_prores_gpu;
 mod apple_prores_smoke;
 #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
 mod apple_lifecycle;
-#[cfg(any(target_os = "ios", feature = "apple-render-check"))]
+#[cfg(any(target_os = "ios", feature = "apple-render-check", test))]
 mod apple_platform;
 #[cfg(any(target_os = "ios", feature = "apple-render-check"))]
 mod apple_render;
@@ -885,8 +888,13 @@ fn get_rpe_charts() -> Result<Option<Vec<RPEChartInfo>>, InvokeError> {
 }
 
 #[tauri::command]
-fn test_ffmpeg() -> Result<bool, InvokeError> {
-    (|| Ok(find_ffmpeg()?.is_some()))().map_err(InvokeError::from_anyhow)
+fn test_ffmpeg(video_codec: Option<String>) -> Result<bool, InvokeError> {
+    let ffmpeg = if video_codec.as_deref().and_then(render::prores_profile).is_some() {
+        render::find_prores_ffmpeg()
+    } else {
+        find_ffmpeg()
+    };
+    ffmpeg.map(|path| path.is_some()).map_err(InvokeError::from_anyhow)
 }
 
 #[tauri::command]

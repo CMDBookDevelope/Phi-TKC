@@ -189,6 +189,11 @@ def collect(args):
     if output == binary.parent or output in binary.parents:
         raise ValueError("runtime output must be separate from the binary directory")
     extras = list(args.extra_dll)
+    ffmpeg_bundle = getattr(args, "ffmpeg_bundle", None)
+    if ffmpeg_bundle is not None:
+        extras.append(ffmpeg_bundle / "ffmpeg-prores.exe")
+        if not (ffmpeg_bundle / "ffmpeg-prores-distribution/provenance.json").is_file():
+            raise ValueError("FFmpeg sidecar source/license provenance is required")
     loader = binary.parent / "WebView2Loader.dll"
     if loader.is_file() and not any(p.name.casefold() == "webview2loader.dll" for p in extras):
         extras.append(loader)
@@ -213,7 +218,10 @@ def collect(args):
             "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),
         }
     payload_loader = next(p for p in output.iterdir() if p.name.casefold() == "webview2loader.dll")
-    audit(binary, output, [payload_loader])
+    audit(binary, output, [payload_loader, *([output / "ffmpeg-prores.exe"] if ffmpeg_bundle else [])])
+    if ffmpeg_bundle:
+        shutil.copytree(ffmpeg_bundle / "ffmpeg-prores-distribution",
+                        output / "ffmpeg-prores-distribution", dirs_exist_ok=True)
     manifest = {"binary": binary.name, "machine": "x86_64", "dlls": libraries, "imports": imports}
     (output / "dependencies.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     if args.tauri_config:
@@ -221,6 +229,8 @@ def collect(args):
         # Include assets because config merging replaces the resources value.
         resources = {"assets/": "assets/"}
         resources.update({str(output / name).replace("\\", "/"): name for name in libraries})
+        if ffmpeg_bundle:
+            resources[str(output / "ffmpeg-prores-distribution").replace("\\", "/") + "/"] = "ffmpeg-prores-distribution/"
         args.tauri_config.parent.mkdir(parents=True, exist_ok=True)
         args.tauri_config.write_text(json.dumps({"bundle": {"resources": resources}}, indent=2) + "\n", encoding="utf-8")
     print("Collected runtime DLLs: " + ", ".join(libraries))
@@ -234,6 +244,7 @@ def main():
     collector.add_argument("--output", required=True, type=Path)
     collector.add_argument("--extra-dll", action="append", default=[], type=Path)
     collector.add_argument("--search-dir", action="append", default=[], type=Path)
+    collector.add_argument("--ffmpeg-bundle", type=Path, help="source-complete ProRes sidecar directory")
     collector.add_argument("--tauri-config", type=Path)
     verifier = subparsers.add_parser("verify", help="fail if a package needs any unshipped non-system DLL")
     verifier.add_argument("--binary", required=True, type=Path)

@@ -61,10 +61,13 @@ pub struct RenderRequest {
 }
 
 pub fn run(request: RenderRequest, on_progress: impl Fn(crate::common::RenderProgress) + 'static) -> Result<crate::common::RenderStats> {
+    let output = crate::output_guard::OutputGuard::new(&request.output_path)?;
+    let cancel = request.request_cancel.clone();
+    let mut request = request;
     on_progress(RenderProgress::Preparing);
     crate::apple_platform::install_logger();
     let _log = crate::apple_platform::start_render_log(request.output_path.with_extension("log"))?;
-    let mut request = request;
+    request.output_path = output.path().to_owned();
     normalize_config(&mut request.params.config)?;
     let (vw, vh) = request.params.config.output_resolution()?;
     crate::apple_platform::debug_log(&format!("render: using requested {vw}x{vh}"));
@@ -91,11 +94,19 @@ pub fn run(request: RenderRequest, on_progress: impl Fn(crate::common::RenderPro
             macroquad::window::miniquad_context().request_quit();
         })
     });
-    shared
+    let result = shared
         .lock()
         .ok()
         .and_then(|mut guard| guard.take())
-        .unwrap_or_else(|| Err(anyhow::anyhow!("render thread did not report a result")))
+        .unwrap_or_else(|| Err(anyhow::anyhow!("render thread did not report a result")));
+    // AVAssetWriter and VideoToolbox cancellation/finalization happen in their
+    // Drops during Window teardown, before partial output is unlinked here.
+    if result.is_ok() {
+        check_canceled(&cancel)?;
+        output.commit()?;
+    }
+    output.cleanup()?;
+    result
 }
 
 async fn render_async(

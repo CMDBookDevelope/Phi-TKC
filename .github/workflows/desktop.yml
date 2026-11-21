@@ -251,6 +251,44 @@ jobs:
             ${{ runner.temp }}/apple-media-smoke/*.log
           if-no-files-found: ignore
 
+      - name: Setup Windows LGPL ProRes build tools
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make python
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-nasm
+            mingw-w64-x86_64-glslang
+            mingw-w64-x86_64-vulkan-headers
+            mingw-w64-x86_64-spirv-headers
+            mingw-w64-x86_64-zimg
+
+      - name: Build source-complete Windows ProRes sidecar
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          # Official immutable release/tag and SHA256 live in the checked-in pin.
+          # No GPL vendor binary, mutable latest download, or source offer promise.
+          source_dir="$(cygpath -u "$RUNNER_TEMP")/ffmpeg-prores-source"
+          python3 scripts/check-ffmpeg-bundle.py
+          python3 scripts/fetch-ffmpeg.py --source-dir "$source_dir" \
+            --output src-tauri/target/ffmpeg-prores
+          bash scripts/build-ffmpeg-prores.sh "$source_dir" src-tauri/target/ffmpeg-prores
+          # Listing does not create a Vulkan device; real GPU tests stay optional.
+          src-tauri/target/ffmpeg-prores/ffmpeg-prores.exe -hide_banner -encoders \
+            > src-tauri/target/ffmpeg-prores/encoders.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          lines = Path('src-tauri/target/ffmpeg-prores/encoders.txt').read_text().splitlines()
+          names = {line.split()[1] for line in lines if len(line.split()) >= 2}
+          assert {'prores_ks', 'prores_ks_vulkan'}.issubset(names), 'ProRes encoder missing'
+          PY
+
       - name: Build bundles
         shell: bash
         run: |
@@ -284,6 +322,7 @@ jobs:
           python3 scripts/windows-runtime.py collect \
             --binary src-tauri/target/x86_64-pc-windows-gnu/release/Phi-TKC.exe \
             --output dist-windows-runtime \
+            --ffmpeg-bundle src-tauri/target/ffmpeg-prores \
             --tauri-config src-tauri/target/windows-runtime-tauri.json
 
       - name: Bundle Windows installer with runtime dependencies
@@ -335,6 +374,7 @@ jobs:
             --target windows_x86_64 \
             --binary "$installed_binary" \
             --assets src-tauri/assets --output dist-portable \
+            --ffmpeg-bundle dist-windows-runtime \
             --webview-loader dist-windows-runtime/WebView2Loader.dll "${dll_args[@]}"
           7z t dist-portable/*.zip
 
@@ -428,7 +468,7 @@ jobs:
             ## Downloads
 
             - **Linux (x86_64)** — `.deb`, `.AppImage`, or a portable `.tar.gz` with renderer assets. The AppImage needs FUSE 2, or run it with `--appimage-extract-and-run`.
-            - **Windows (x86_64)** — NSIS installer or portable `.zip` / `.7z`, including renderer assets and WebView2Loader.dll. The GUI requires the WebView2 Runtime.
+            - **Windows (x86_64)** — NSIS installer or portable `.zip` / `.7z`, including renderer assets, WebView2Loader.dll, and the CPU/Vulkan ProRes `ffmpeg-prores.exe` sidecar. Its exact LGPL sources, build configuration, and licenses are inside every package (not separate Release attachments). Other codecs may require a full FFmpeg installation. The GUI requires the WebView2 Runtime.
             - **macOS (Apple Silicon)** — `.dmg`, macOS 11 or newer; unsigned, so right-click → Open the first time.
             - **Android (arm64-v8a)** — `.apk`, signed with a persistent release key. Updates from v1.3.8 onward install over the existing app; older releases need one reinstall because they used temporary signing keys.
             - **iOS / iPadOS** — unsigned `.ipa`; re-sign it with your own Apple team before sideloading.

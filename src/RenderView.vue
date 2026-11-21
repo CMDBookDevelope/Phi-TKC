@@ -308,7 +308,7 @@ async function postRender(): Promise<boolean | 'remote'> {
     }
 
     // Android encodes in-process with MediaCodec, so there is no ffmpeg to find.
-    if (!mobile && !(await invoke('test_ffmpeg'))) {
+    if (!mobile && !(await invoke('test_ffmpeg', { videoCodec: params.config.videoCodec }))) {
       await dialog.message(t('ffmpeg-not-found'));
       await invoke('open_app_folder');
       await shell.open('https://github.com/BtbN/FFmpeg-Builds/releases');

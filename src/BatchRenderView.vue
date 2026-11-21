@@ -439,9 +439,9 @@ function removeChart(id: string) {
 }
 
 async function buildRenderParams(requireFfmpeg = true) {
-  if (requireFfmpeg && !isMobile() && !(await invoke('test_ffmpeg'))) throw new Error(t('ffmpeg-not-found'));
   let config = selectedPreset.value === 'default' ? defaultConfig.value : ((await invoke('get_presets')) as Record<string, RenderConfig>)[selectedPreset.value];
   if (!config) config = defaultConfig.value;
+  if (requireFfmpeg && !isMobile() && !(await invoke('test_ffmpeg', { videoCodec: config.videoCodec }))) throw new Error(t('ffmpeg-not-found'));
   if (!config.resolution) throw new Error('Resolution missing');
   const settings = withRhythmDefaults(config);
   if (!isRhythmSpeed(settings.rhythmSpeed)) throw new Error(t('rhythm-speed-invalid'));
