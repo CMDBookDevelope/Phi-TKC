@@ -502,8 +502,12 @@ async fn preview_chart(app: tauri::AppHandle, mut params: RenderParams, show_fps
         }
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
-        let _ = show_fps;
         let mut command = Command::new(std::env::current_exe()?);
+        if show_fps.unwrap_or(false) {
+            command.env("PHI_TKC_PREVIEW_SHOW_FPS", "1");
+        } else {
+            command.env_remove("PHI_TKC_PREVIEW_SHOW_FPS");
+        }
         if params.config.is_hdr() {
             command.env("PRPR_PREVIEW_HDR", &params.config.color_space);
         } else {

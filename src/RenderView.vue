@@ -43,6 +43,7 @@
     render: Render
     play: Play
     play-fps-hint: Hold Play to show FPS
+    play-fps-desktop-hint: Right-click Play to show FPS
 
     render-started: Rendering has started!
     see-tasks: See tasks
@@ -110,6 +111,7 @@
     render: 渲染
     play: 游玩
     play-fps-hint: 长按游玩显示帧率
+    play-fps-desktop-hint: 右键游玩显示帧率
 
     render-started: 视频开始渲染了！
     see-tasks: 查看任务列表
@@ -331,7 +333,7 @@ async function startPreview(autoplay: boolean, showFps = false) {
     let params = await buildParams();
     if (!params) return false;
     params.config.autoplay = autoplay;
-    await invoke('preview_chart', { params, showFps: mobile && showFps });
+    await invoke('preview_chart', { params, showFps });
     return true;
   } catch (e) {
     toastError(e);
@@ -397,6 +399,10 @@ function clickPlay(event: MouseEvent) {
     return;
   }
   void playChart();
+}
+
+function contextPlay() {
+  if (!mobile) void playChart(true);
 }
 
 onMounted(() => window.addEventListener('blur', cancelPlayPressOnBlur));
@@ -615,10 +621,10 @@ function resetAndGoChoose() {
 
       <div class="bar-right">
         <button class="bar-btn bar-btn-tonal" v-if="step === 'options'"
-          :disabled="previewRunning" @click="clickPlay"
+          :disabled="previewRunning" @click="clickPlay" @contextmenu.prevent="contextPlay"
           @pointerdown="beginPlayPress" @pointerup="endPlayPress" @pointercancel="cancelPlayPress"
           @lostpointercapture="cancelPlayPress" @pointermove="movePlayPress"
-          :title="mobile ? t('play-fps-hint') : t('play')" :aria-label="t('play')">
+          :title="t(mobile ? 'play-fps-hint' : 'play-fps-desktop-hint')" :aria-label="t('play')">
           <v-icon icon="mdi-gamepad-variant" size="18" />
           <span>{{ t('play') }}</span>
         </button>

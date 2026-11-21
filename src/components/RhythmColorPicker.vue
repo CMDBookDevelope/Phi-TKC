@@ -29,7 +29,7 @@ import { useI18n } from 'vue-i18n';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { toastError } from '@/common';
 import { isRhythmColors, type RhythmColors } from '@/rhythmConfig';
-import ColorDot from './ColorDot.vue';
+import PlatformColorPicker from './PlatformColorPicker.vue';
 
 const props = defineProps<{ modelValue: RhythmColors | null; chartPath?: string; chartLabel?: string; chartCover?: string | null; revision?: number }>();
 const emit = defineEmits<{ 'update:modelValue': [colors: RhythmColors | null] }>();
@@ -142,18 +142,11 @@ onUnmounted(invalidate);
       </v-tooltip>
     </div>
     <div class="colors-row">
-      <v-menu v-for="(color, index) in colors" :key="index" :close-on-content-click="false" location="bottom">
-        <template #activator="{ props: menuProps }">
-          <button v-bind="menuProps" type="button" class="color-swatch" :class="{ 'is-selected': selectedColor === index }"
-            :aria-label="t('color', { number: index + 1 })" :aria-pressed="selectedColor === index" @click="selectedColor = index">
-            <ColorDot :color="color" :size="34" />
-            <span>{{ t('color', { number: index + 1 }) }}</span>
-          </button>
-        </template>
-        <div class="color-picker-panel fluent-glass glass" v-glass>
-          <v-color-picker :model-value="color" @update:model-value="setColor(index, $event)" mode="hex" :modes="['hex']" hide-inputs hide-mode-switch />
-        </div>
-      </v-menu>
+      <div v-for="(color, index) in colors" :key="index" class="color-option">
+        <PlatformColorPicker :model-value="color" :label="t('color', { number: index + 1 })"
+          :active="selectedColor === index" @activate="selectedColor = index" @update:model-value="setColor(index, $event)" />
+        <span>{{ t('color', { number: index + 1 }) }}</span>
+      </div>
     </div>
     <p class="colors-hint">{{ props.modelValue ? t('custom') : t('automatic') }}</p>
     <div class="colors-actions">
@@ -177,15 +170,12 @@ onUnmounted(invalidate);
 .eyedropper-button:disabled { opacity: 0.4; cursor: default; }
 .eyedropper-button[aria-pressed="true"] { color: rgb(var(--v-theme-primary)); outline: 2px solid currentColor; }
 .colors-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.color-swatch { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 8px; min-height: 48px; border: 1px solid rgba(var(--main-color-rgb), 0.2); border-radius: 8px; background: rgba(var(--main-color-rgb), 0.04); color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
-.color-swatch.is-selected { border-color: var(--main-color); box-shadow: 0 0 0 2px rgba(var(--main-color-rgb), 0.24); }
-.color-swatch:hover { background: rgba(var(--main-color-rgb), 0.1); }
-.color-swatch:focus-visible { outline: 2px solid var(--main-color); outline-offset: 2px; }
+.color-option { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 12px; }
 .colors-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .colors-hint { margin: 0; font-size: 12px; line-height: 1.6; opacity: 0.7; overflow-wrap: anywhere; }
 .colors-error { margin: 0; font-size: 12px; color: rgb(var(--v-theme-error)); }
 @media (max-width: 600px) {
-  .color-swatch { flex-direction: column; gap: 6px; }
+  .color-option { flex-direction: column; gap: 6px; }
   .colors-actions :deep(.v-btn) { max-width: 100%; }
 }
 </style>

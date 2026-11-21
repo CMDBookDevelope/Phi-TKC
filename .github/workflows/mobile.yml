@@ -120,7 +120,7 @@ jobs:
           ANDROID_PRORES_BUILD_DIR: ${{ runner.temp }}/android-prores-build
         run: scripts/build-android-prores.sh
 
-      - name: Prepare Android ProRes corresponding source
+      - name: Embed Android ProRes corresponding source in the APK
         shell: bash
         run: |
           set -euo pipefail
@@ -148,7 +148,11 @@ jobs:
 
           The generated libphitkc_prores.so is loaded dynamically by Phi-TKC on Android.
           EOF
-          tar -cJf Phi-TKC-android-prores-source.tar.xz \
+          # Distribute the corresponding source with the binary without an
+          # extra download on the Release page.
+          NOTICE_DIR="src-tauri/gen/android/app/src/main/assets/licenses"
+          mkdir -p "$NOTICE_DIR"
+          tar -cJf "$NOTICE_DIR/android-prores-source.tar.xz" \
             -C "$RUNNER_TEMP" android-prores-source
 
       - name: Build unsigned release APK
@@ -175,13 +179,15 @@ jobs:
           ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
         run: bash scripts/sign-android-apk.sh
 
+      - name: Verify source is bundled in the signed APK
+        run: |
+          unzip -tq Phi-TKC-android-arm64.apk assets/licenses/android-prores-source.tar.xz
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: |
-            Phi-TKC-android-arm64.apk
-            Phi-TKC-android-prores-source.tar.xz
+          path: Phi-TKC-android-arm64.apk
           if-no-files-found: error
 
   ios:
@@ -321,7 +327,7 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Download Android packages and corresponding source
+      - name: Download the Android package
         uses: actions/download-artifact@v4
         with:
           name: android-apk
@@ -359,7 +365,7 @@ jobs:
             - **Windows (x86_64)** — NSIS installer or portable `.zip` / `.7z`, including renderer assets and WebView2Loader.dll. The GUI requires the WebView2 Runtime.
             - **macOS (Apple Silicon)** — `.dmg`, macOS 11 or newer; unsigned, so right-click → Open the first time.
             - **Android (arm64-v8a)** — `.apk`, signed with a persistent release key. Updates from v1.3.8 onward install over the existing app; older releases need one reinstall because they used temporary signing keys.
-            - **Android ProRes source** — GPL/LGPL source archive and reproducible FFmpeg build script for `libphitkc_prores.so`.
+            - **Android ProRes source** — included inside the APK at `assets/licenses/android-prores-source.tar.xz`. No separate download is needed.
             - **iOS / iPadOS** — unsigned `.ipa`; re-sign it with your own Apple team before sideloading.
 
             ## Notes

@@ -250,6 +250,11 @@ fn query_encoder_availability(
             if known("prores_videotoolbox") && probe_video_encoder_for_color(path, "prores_videotoolbox", Some(profile), color_space) {
                 options.push("metal".to_owned());
             }
+            if DESKTOP_PRORES_VULKAN && known(PRORES_VULKAN_ENCODER)
+                && probe_prores_vulkan(path, profile, color_space, (320, 240)).is_ok()
+            {
+                options.push("vulkan".to_owned());
+            }
             support.insert(profile_name.to_owned(), options);
         }
     }
@@ -1310,6 +1315,101 @@ pub(crate) fn prores_profile(codec: &str) -> Option<ProresProfile> {
     Some(ProresProfile { number, pixel_format, alpha })
 }
 
+const PRORES_VULKAN_ENCODER: &str = "prores_ks_vulkan";
+const DESKTOP_PRORES_VULKAN: bool = cfg!(any(target_os = "windows", target_os = "linux"));
+const FFMPEG_VULKAN_DEVICE_ARGS: [&str; 4] = ["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"];
+
+fn prores_vulkan_video_args(profile: ProresProfile, color_space: ExportColorSpace) -> String {
+    // The Vulkan alpha shader expands 10-bit samples to 16 bits for both
+    // 4444 and XQ. Feeding the CPU path's 12-bit XQ format clips/wraps alpha.
+    let pixel_format = if profile.alpha { "yuva444p10le" } else { profile.pixel_format };
+    let filter = color_space.ffmpeg_filter(pixel_format).unwrap_or_else(|| {
+        let transfer = if color_space == ExportColorSpace::Srgb { "iec61966-2-1" } else { "bt709" };
+        format!("scale=out_color_matrix=bt709:out_range=tv,format={pixel_format},setparams=range=limited:color_primaries=bt709:color_trc={transfer}:colorspace=bt709")
+    });
+    // The encoder reads color properties from each frame. Keep them on the
+    // software frames before upload and signal them on the MOV stream too.
+    format!(
+        "-vf {filter},hwupload -pix_fmt vulkan -profile:v {} -alpha_bits {} {}",
+        profile.number,
+        if profile.alpha { 16 } else { 0 },
+        color_space.ffmpeg_signaling(),
+    )
+}
+
+fn probe_prores_vulkan(
+    ffmpeg: &Path,
+    profile: ProresProfile,
+    color_space: ExportColorSpace,
+    (width, height): (u32, u32),
+) -> Result<()> {
+    let source_format = if color_space.is_hdr() { "gbrpf32le" } else { "rgba" };
+    let source = format!("testsrc=size={width}x{height}:rate=30,format={source_format}");
+    // Some upstream shader initialization failures are logged without being
+    // propagated as return errors. Require both a packet and a clean error log.
+    let output = cmd_hidden(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-xerror", "-abort_on", "empty_output_stream"])
+        .args(FFMPEG_VULKAN_DEVICE_ARGS)
+        .args(["-f", "lavfi", "-i", &source, "-frames:v", "1"])
+        .args(prores_vulkan_video_args(profile, color_space).split_whitespace())
+        .args(["-c:v", PRORES_VULKAN_ENCODER, "-f", "null", "-"])
+        .stdout(Stdio::null())
+        .output()
+        .context("could not run FFmpeg ProRes Vulkan probe")?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() || !stderr.trim().is_empty() {
+        bail!("FFmpeg sample encode failed ({}): {}", output.status, stderr.trim());
+    }
+    Ok(())
+}
+
+fn select_prores_encoder(
+    ffmpeg: &Path,
+    config: &RenderConfig,
+    profile: ProresProfile,
+    color_space: ExportColorSpace,
+    dimensions: (u32, u32),
+) -> Result<&'static str> {
+    select_prores_encoder_with(config, DESKTOP_PRORES_VULKAN, |encoder| {
+        if encoder == PRORES_VULKAN_ENCODER {
+            probe_prores_vulkan(ffmpeg, profile, color_space, dimensions)
+        } else if probe_video_encoder_for_color(ffmpeg, encoder, Some(profile), color_space) {
+            Ok(())
+        } else {
+            bail!("sample encode failed");
+        }
+    })
+    .with_context(|| format!("ProRes profile {} ({}) for {}", profile.number, profile.pixel_format, config.color_space))
+}
+
+fn select_prores_encoder_with(
+    config: &RenderConfig,
+    desktop_vulkan: bool,
+    mut probe: impl FnMut(&str) -> Result<()>,
+) -> Result<&'static str> {
+    let encoder = match config.encoder.as_str() {
+        "auto" => {
+            if desktop_vulkan && config.hardware_accel {
+                match probe(PRORES_VULKAN_ENCODER) {
+                    Ok(()) => return Ok(PRORES_VULKAN_ENCODER),
+                    Err(error) => debug!("ProRes Vulkan probe failed: {error:#}; trying CPU"),
+                }
+            }
+            "prores_ks"
+        }
+        "cpu" => "prores_ks",
+        "metal" | "videotoolbox" => "prores_videotoolbox",
+        "vulkan" => {
+            anyhow::ensure!(desktop_vulkan, "FFmpeg ProRes Vulkan is supported on desktop Windows and Linux");
+            anyhow::ensure!(config.hardware_accel, "enable hardware acceleration to use FFmpeg ProRes Vulkan");
+            PRORES_VULKAN_ENCODER
+        }
+        selected => bail!("encoder '{selected}' does not support ProRes"),
+    };
+    probe(encoder).with_context(|| format!("FFmpeg ProRes encoder '{encoder}' is unavailable on this device"))?;
+    Ok(encoder)
+}
+
 pub(crate) fn stereo_pan(normalized_x: f32, strength: f32) -> f32 {
     if !normalized_x.is_finite() || !strength.is_finite() {
         return 0.0;
@@ -1349,6 +1449,70 @@ mod render_config_tests {
             assert_eq!(prores_profile(name), Some(ProresProfile { number, pixel_format, alpha }));
         }
         assert_eq!(prores_profile("h264"), None);
+    }
+
+    #[test]
+    fn prores_vulkan_uses_planar_upload_and_profile_specific_signaling() {
+        let hq = prores_profile("prores_422_hq").unwrap();
+        let sdr = prores_vulkan_video_args(hq, ExportColorSpace::Rec709);
+        assert!(sdr.contains("format=yuv422p10le,setparams=range=limited:"));
+        assert!(sdr.contains(",hwupload -pix_fmt vulkan -profile:v 3 -alpha_bits 0"));
+        assert!(sdr.contains("-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"));
+        let srgb = prores_vulkan_video_args(hq, ExportColorSpace::Srgb);
+        assert!(srgb.contains("-color_trc iec61966-2-1"));
+        let pq = prores_vulkan_video_args(hq, ExportColorSpace::Rec2100Pq);
+        assert!(pq.contains("t=smpte2084:npl=100:m=2020_ncl:r=limited,format=yuv422p10le,hwupload"));
+        assert!(pq.contains("-colorspace bt2020nc -color_primaries bt2020 -color_trc smpte2084 -color_range tv"));
+        let hlg = prores_vulkan_video_args(prores_profile("prores_4444").unwrap(), ExportColorSpace::Rec2100Hlg);
+        assert!(hlg.contains("t=arib-std-b67:npl=100:m=2020_ncl:r=limited,format=yuv444p10le,hwupload"));
+        assert!(hlg.contains("-pix_fmt vulkan -profile:v 4 -alpha_bits 0"));
+        let xq = prores_vulkan_video_args(prores_profile("prores_4444_xq").unwrap(), ExportColorSpace::Rec709);
+        assert!(xq.contains("format=yuva444p10le,setparams="));
+        assert!(xq.contains("-pix_fmt vulkan -profile:v 5 -alpha_bits 16"));
+        for args in [sdr, srgb, pq, hlg, xq] {
+            assert!(!args.contains("nv12"));
+            assert!(args.split_whitespace().all(|arg| !matches!(arg, "-b:v" | "-crf" | "-preset" | "-async_depth")));
+        }
+    }
+
+    #[test]
+    fn prores_vulkan_auto_falls_back_and_explicit_selection_reports_failure() {
+        let mut config = RenderConfig {
+            encoder: "auto".into(),
+            hardware_accel: true,
+            ..Default::default()
+        };
+        let mut attempts = Vec::new();
+        let mut probe_failure = |name: &str| {
+            attempts.push(name.to_owned());
+            anyhow::ensure!(name != PRORES_VULKAN_ENCODER, "missing Vulkan driver feature");
+            Ok(())
+        };
+        assert_eq!(
+            select_prores_encoder_with(&config, true, |name| {
+                assert_eq!(name, PRORES_VULKAN_ENCODER);
+                Ok(())
+            }).unwrap(),
+            PRORES_VULKAN_ENCODER
+        );
+        assert_eq!(select_prores_encoder_with(&config, true, &mut probe_failure).unwrap(), "prores_ks");
+        config.encoder = "vulkan".into();
+        let error = select_prores_encoder_with(&config, true, &mut probe_failure).unwrap_err();
+        assert!(format!("{error:#}").contains("missing Vulkan driver feature"));
+        assert_eq!(attempts, [PRORES_VULKAN_ENCODER, "prores_ks", PRORES_VULKAN_ENCODER]);
+        assert!(select_prores_encoder_with(&config, false, |_| panic!("unsupported platform")).is_err());
+        config.hardware_accel = false;
+        assert!(select_prores_encoder_with(&config, true, |_| panic!("acceleration disabled")).is_err());
+        config.encoder = "auto".into();
+        assert_eq!(select_prores_encoder_with(&config, true, |name| {
+            assert_eq!(name, "prores_ks");
+            Ok(())
+        }).unwrap(), "prores_ks");
+        config.encoder = "metal".into();
+        assert_eq!(select_prores_encoder_with(&config, false, |name| {
+            assert_eq!(name, "prores_videotoolbox");
+            Ok(())
+        }).unwrap(), "prores_videotoolbox");
     }
 
     #[test]
@@ -1508,16 +1672,9 @@ async fn render_impl(
     };
     debug!("Using ffmpeg: {}", ffmpeg);
     let ffmpeg_path = Path::new(&ffmpeg);
-    if let Some(profile) = prores {
-        let encoder = match params.config.encoder.as_str() {
-            "auto" | "cpu" => "prores_ks",
-            "metal" | "videotoolbox" => "prores_videotoolbox",
-            selected => bail!("encoder '{selected}' does not support ProRes"),
-        };
-        if !probe_video_encoder_for_color(ffmpeg_path, encoder, Some(profile), color_space) {
-            bail!("FFmpeg ProRes encoder '{encoder}' cannot encode profile {} ({}) on this device", profile.number, profile.pixel_format);
-        }
-    }
+    let prores_encoder = prores
+        .map(|profile| select_prores_encoder(ffmpeg_path, &params.config, profile, color_space, (vw, vh)))
+        .transpose()?;
 
     let hdr_encoder = if color_space.is_hdr() && prores.is_none() {
         Some(select_hdr_encoder(ffmpeg_path, &params.config, color_space)?)
@@ -2517,16 +2674,8 @@ async fn render_impl(
     };
 
 
-    let mut ffmpeg_encoder = if let Some(encoder) = hdr_encoder.as_deref() {
+    let mut ffmpeg_encoder = if let Some(encoder) = prores_encoder.or(hdr_encoder.as_deref()) {
         encoder
-    } else if let Some(profile) = prores {
-        match encoder_type {
-            "metal" | "videotoolbox" => "prores_videotoolbox",
-            _ => {
-                let _ = profile;
-                "prores_ks"
-            }
-        }
     } else { candidates
         .iter()
         .find(|&&(_name, available, _)| available)
@@ -2875,11 +3024,15 @@ async fn render_impl(
     );
     let dx = dx_selected;
     let vf_arg = if let Some(profile) = prores {
-        let filter = hdr_filter
-            .clone()
-            .unwrap_or_else(|| format!("format={}", profile.pixel_format));
-        format!("-vf {filter} -profile:v {} -alpha_bits {}",
-            profile.number, if profile.alpha { 16 } else { 0 })
+        if ffmpeg_encoder == PRORES_VULKAN_ENCODER {
+            prores_vulkan_video_args(profile, color_space)
+        } else {
+            let filter = hdr_filter
+                .clone()
+                .unwrap_or_else(|| format!("format={}", profile.pixel_format));
+            format!("-vf {filter} -profile:v {} -alpha_bits {}",
+                profile.number, if profile.alpha { 16 } else { 0 })
+        }
     } else if let Some(filter) = hdr_filter.as_ref() {
         format!("-vf {filter}")
     } else if nv12_mode {
@@ -2929,17 +3082,19 @@ async fn render_impl(
             debug!("  Note: for the best AV1 quality pick the VerySlow speed preset (SVT-AV1 preset 2)");
         }
     }
-    if color_space.is_hdr() || color_space == ExportColorSpace::Srgb {
-        out_extra.push(' ');
-        out_extra.push_str(color_space.ffmpeg_signaling());
-    } else {
-        out_extra.push_str(if vh > 576 {
-        " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv" } else
-        {
-        " -colorspace smpte170m -color_primaries smpte170m -color_trc smpte170m -color_range tv"
-        });
+    if ffmpeg_encoder != PRORES_VULKAN_ENCODER {
+        if color_space.is_hdr() || color_space == ExportColorSpace::Srgb {
+            out_extra.push(' ');
+            out_extra.push_str(color_space.ffmpeg_signaling());
+        } else {
+            out_extra.push_str(if vh > 576 {
+                " -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv"
+            } else {
+                " -colorspace smpte170m -color_primaries smpte170m -color_trc smpte170m -color_range tv"
+            });
+        }
     }
-    if color_space.is_hdr() {
+    if color_space.is_hdr() && ffmpeg_encoder != PRORES_VULKAN_ENCODER {
         out_extra.push_str(" -pix_fmt ");
         out_extra.push_str(hdr_encoder_pixel_format(ffmpeg_encoder, prores));
     } else if dx.is_none()
@@ -3002,8 +3157,7 @@ async fn render_impl(
         cmd.args(global_args.split_whitespace());
         cmd.args(["-progress", "pipe:2", "-nostats"]);
         if is_vulkan_encoder && !vulkan_video {
-            cmd.arg("-init_hw_device").arg("vulkan=vk")
-               .arg("-filter_hw_device").arg("vk");
+            cmd.args(FFMPEG_VULKAN_DEVICE_ARGS);
         } else if let Some(enc) = dx.as_ref().filter(|_| !vulkan_video) {
             cmd.arg("-init_hw_device")
                 .arg(format!("{}={}", enc.hw, DX_DEVICE))

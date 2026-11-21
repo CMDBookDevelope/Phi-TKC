@@ -31,6 +31,12 @@ export function isAndroid(): boolean {
   return currentPlatform() === 'unknown' && /android/i.test(navigator.userAgent);
 }
 
+export function isApple(): boolean {
+  const p = currentPlatform();
+  if (p !== 'unknown') return p === 'macos' || p === 'ios';
+  return /macintosh|mac os x|iphone|ipad|ipod/i.test(navigator.userAgent) && !/android/i.test(navigator.userAgent);
+}
+
 export function isMobile(): boolean {
   const p = currentPlatform();
   if (p === 'ios' || p === 'android') return true;

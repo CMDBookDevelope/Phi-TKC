@@ -7,7 +7,7 @@ from pathlib import Path
 
 def release_files(platform: str, version: str) -> tuple[str, ...]:
     if platform == 'mobile':
-        return ('Phi-TKC-android-arm64.apk', 'Phi-TKC.ipa', 'Phi-TKC-android-prores-source.tar.xz')
+        return ('Phi-TKC-android-arm64.apk', 'Phi-TKC.ipa')
     return tuple(f'Phi-TKC_{version}_{suffix}' for suffix in (
         'aarch64.dmg', 'amd64.AppImage', 'amd64.deb', 'linux_x86_64.tar.gz',
         'windows_x86_64.7z', 'windows_x86_64.zip', 'x64-setup.exe',

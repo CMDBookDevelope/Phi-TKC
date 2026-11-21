@@ -53,6 +53,20 @@ impl Scene for BaseScene {
     }
 }
 
+fn draw_preview_fps(text: &str, overlay: Option<RenderTarget>) {
+    if let Some(target) = overlay {
+        let mut camera = Camera2D::from_display_rect(Rect::new(0., 0., screen_width(), screen_height()));
+        camera.render_target = Some(target);
+        set_camera(&camera);
+    } else {
+        set_default_camera();
+    }
+    const FONT_SIZE: u16 = 20;
+    let text_width = measure_text(text, None, FONT_SIZE, 1.).width;
+    draw_rectangle(12., 12., text_width + 16., 30., Color::new(0., 0., 0., 0.7));
+    draw_text(text, 20., 34., f32::from(FONT_SIZE), WHITE);
+}
+
 pub async fn main() -> Result<()> {
     set_pc_assets_folder(&std::env::args().nth(2).unwrap());
 
@@ -115,6 +129,10 @@ pub async fn main() -> Result<()> {
     let mut frame_sum = 0.0;
     let mut measured = Vec::new();
     let mut last_color_space = None;
+    let show_fps = std::env::var_os("PHI_TKC_PREVIEW_SHOW_FPS").is_some();
+    let mut fps_sample_start = started;
+    let mut fps_sample_frames = 0_u32;
+    let mut fps_text = String::from("FPS: --");
     loop {
         let frame_start = Instant::now();
         if is_key_pressed(KeyCode::F11) {
@@ -143,11 +161,17 @@ pub async fn main() -> Result<()> {
             let frame = hdr_frame.borrow();
             let frame = frame.as_ref().unwrap();
             main.render_with_overlay_target(&mut painter, Some(frame.overlay()))?;
+            if show_fps {
+                draw_preview_fps(&fps_text, Some(frame.overlay()));
+            }
             frame.present(material, color_space);
         } else {
             main.update()?;
             updated = Instant::now();
             main.render(&mut painter)?;
+            if show_fps {
+                draw_preview_fps(&fps_text, None);
+            }
         }
         let rendered = Instant::now();
         if main.should_exit() {
@@ -158,6 +182,15 @@ pub async fn main() -> Result<()> {
         }
         next_frame().await;
         let now = Instant::now();
+        if show_fps {
+            fps_sample_frames += 1;
+            let interval = now.duration_since(fps_sample_start);
+            if interval >= Duration::from_millis(500) {
+                fps_text = format!("FPS: {:.0}", f64::from(fps_sample_frames) / interval.as_secs_f64());
+                fps_sample_start = now;
+                fps_sample_frames = 0;
+            }
+        }
         let update = (updated - frame_start).as_secs_f64();
         let render = (rendered - updated).as_secs_f64();
         let frame = (now - frame_start).as_secs_f64();

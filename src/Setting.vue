@@ -178,7 +178,7 @@ defineOptions({ name: 'SettingsPanel' });
 import { RULES as rules, toast, toastError, changeLocale } from './common';
 import { mainColor, bgColor, subColor } from './colorStore';
 import { isMobile } from './platform';
-import ColorDot from './components/ColorDot.vue';
+import PlatformColorPicker from './components/PlatformColorPicker.vue';
 import { extractThemeColors } from './themeColor.js';
 import { backgroundPath, backgroundUrl, customBackgroundUrl as backgroundPreviewUrl, backgroundBusy, autoColorOnRefresh, backgroundColorError, selectCustomBackground, clearCustomBackground, fixCurrentBackground, refreshApiBackground } from './background';
 
@@ -779,16 +779,8 @@ onUnmounted(stopWatching);
         <div class="color-row">
           <div class="color-item">
             <span class="color-label">{{ t('settings.colors.main') }}</span>
-            <v-menu :close-on-content-click="false" location="bottom">
-              <template v-slot:activator="{ props }">
-                <button v-bind="props" type="button" class="swatch-btn" :aria-label="t('settings.colors.editAria', { color: t('settings.colors.main') })">
-                  <ColorDot :color="tempMainColor" :size="28" />
-                </button>
-              </template>
-              <div class="color-picker-panel fluent-glass glass" v-glass>
-                <v-color-picker v-model="tempMainColor" hide-inputs mode="hex" />
-              </div>
-            </v-menu>
+            <PlatformColorPicker v-model="tempMainColor" class="theme-color-picker"
+              :label="t('settings.colors.editAria', { color: t('settings.colors.main') })" />
             <v-btn variant="tonal" color="primary" size="small" class="auto-color-btn"
               :loading="extractingColor === 'main'" :disabled="!backgroundUrl || backgroundControlsBusy"
               :aria-label="t('settings.colors.autoAria', { color: t('settings.colors.main') })"
@@ -804,16 +796,8 @@ onUnmounted(stopWatching);
 
           <div class="color-item">
             <span class="color-label">{{ t('settings.colors.bg') }}</span>
-            <v-menu :close-on-content-click="false" location="bottom">
-              <template v-slot:activator="{ props }">
-                <button v-bind="props" type="button" class="swatch-btn" :aria-label="t('settings.colors.editAria', { color: t('settings.colors.bg') })">
-                  <ColorDot :color="tempBgColor" :size="28" />
-                </button>
-              </template>
-              <div class="color-picker-panel fluent-glass glass" v-glass>
-                <v-color-picker v-model="tempBgColor" hide-inputs mode="hex" />
-              </div>
-            </v-menu>
+            <PlatformColorPicker v-model="tempBgColor" class="theme-color-picker"
+              :label="t('settings.colors.editAria', { color: t('settings.colors.bg') })" />
             <v-btn variant="tonal" color="primary" size="small" class="auto-color-btn"
               :loading="extractingColor === 'bg'" :disabled="!backgroundUrl || backgroundControlsBusy"
               :aria-label="t('settings.colors.autoAria', { color: t('settings.colors.bg') })"
@@ -829,16 +813,8 @@ onUnmounted(stopWatching);
 
           <div class="color-item">
             <span class="color-label">{{ t('settings.colors.sub') }}</span>
-            <v-menu :close-on-content-click="false" location="bottom">
-              <template v-slot:activator="{ props }">
-                <button v-bind="props" type="button" class="swatch-btn" :aria-label="t('settings.colors.editAria', { color: t('settings.colors.sub') })">
-                  <ColorDot :color="tempSubColor" :size="28" />
-                </button>
-              </template>
-              <div class="color-picker-panel fluent-glass glass" v-glass>
-                <v-color-picker v-model="tempSubColor" hide-inputs mode="hex" />
-              </div>
-            </v-menu>
+            <PlatformColorPicker v-model="tempSubColor" class="theme-color-picker"
+              :label="t('settings.colors.editAria', { color: t('settings.colors.sub') })" />
             <v-btn variant="tonal" color="primary" size="small" class="auto-color-btn"
               :loading="extractingColor === 'sub'" :disabled="!backgroundUrl || backgroundControlsBusy"
               :aria-label="t('settings.colors.autoAria', { color: t('settings.colors.sub') })"
@@ -955,28 +931,6 @@ onUnmounted(stopWatching);
   color: var(--main-color);
   font-weight: 500;
 }
-.swatch-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 36px;
-  min-height: 36px;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  border-radius: 50%;
-  cursor: pointer;
-  transition: transform 0.12s ease;
-}
-.swatch-btn:hover {
-  transform: scale(1.08);
-}
-
-.swatch-btn:focus-visible {
-  outline: 2px solid var(--main-color);
-  outline-offset: 3px;
-}
-
 /* ===== Responsive ===== */
 @media (max-width: 600px) {
   .settings-container {
@@ -990,7 +944,7 @@ onUnmounted(stopWatching);
   .color-label {
     min-width: 0;
   }
-  .swatch-btn {
+  .theme-color-picker {
     justify-self: end;
   }
   .auto-color-btn {

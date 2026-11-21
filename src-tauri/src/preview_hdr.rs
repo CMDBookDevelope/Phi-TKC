@@ -42,8 +42,18 @@ impl Frame {
             PresentationColorSpace::ExtendedLinearSrgb => 4,
             PresentationColorSpace::AppleEdr => 5,
         };
+        // Vulkan's negative-height swapchain viewport reverses the final HDR
+        // texture sample relative to its positive-height render-target viewport.
+        // Keep SDR and Metal presentation on their existing UV convention.
+        let flip_y = miniquad_context().rendering_backend()
+            == macroquad::miniquad::conf::RenderingBackend::Vulkan
+            && matches!(
+                color_space,
+                PresentationColorSpace::Rec2100Pq | PresentationColorSpace::Rec2100Hlg
+            );
         set_default_camera();
         material.set_uniform("transfer", transfer);
+        material.set_uniform("flip_y", i32::from(flip_y));
         material.set_texture("Overlay", self.overlay().texture);
         gl_use_material(material);
         draw_texture_ex(
@@ -81,7 +91,10 @@ pub(super) fn load() -> Result<Material> {
         VERTEX,
         FRAGMENT,
         MaterialParams {
-            uniforms: vec![("transfer".into(), UniformType::Int1)],
+            uniforms: vec![
+                ("transfer".into(), UniformType::Int1),
+                ("flip_y".into(), UniformType::Int1),
+            ],
             textures: vec!["Overlay".into()],
             ..Default::default()
         },
@@ -91,7 +104,7 @@ pub(super) fn load() -> Result<Material> {
 const VERTEX: &str = r#"#version 450 core
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 texcoord;
-layout(set = 0, binding = 0) uniform Uniforms { mat4 Projection; mat4 Model; vec4 _Time; int transfer; };
+layout(set = 0, binding = 0) uniform Uniforms { mat4 Projection; mat4 Model; vec4 _Time; int transfer; int flip_y; };
 layout(location = 0) out vec2 uv;
 void main() {
     gl_Position = Projection * Model * vec4(position, 1.0);
@@ -101,7 +114,7 @@ void main() {
 
 const FRAGMENT: &str = r#"#version 450 core
 layout(location = 0) in vec2 uv;
-layout(set = 0, binding = 0) uniform Uniforms { mat4 Projection; mat4 Model; vec4 _Time; int transfer; };
+layout(set = 0, binding = 0) uniform Uniforms { mat4 Projection; mat4 Model; vec4 _Time; int transfer; int flip_y; };
 layout(set = 0, binding = 1) uniform sampler2D Texture;
 layout(set = 0, binding = 3) uniform sampler2D Overlay;
 layout(location = 0) out vec4 fragColor;
@@ -144,8 +157,9 @@ vec3 hlg(vec3 rgb) {
 }
 
 void main() {
-    vec3 scene = texture(Texture, uv).rgb;
-    vec4 overlay = texture(Overlay, uv);
+    vec2 sample_uv = vec2(uv.x, flip_y != 0 ? 1.0 - uv.y : uv.y);
+    vec3 scene = texture(Texture, sample_uv).rgb;
+    vec4 overlay = texture(Overlay, sample_uv);
     // The overlay is drawn into a transparent SDR target using normal alpha blending.
     vec3 overlayLinear = srgbToLinear(clamp(overlay.rgb / max(overlay.a, 0.000001), 0.0, 1.0));
     vec3 rgb = mix(scene, SRGB_TO_BT2020 * overlayLinear, overlay.a);
@@ -172,3 +186,34 @@ void main() {
     fragColor = vec4(encoded, 1.0);
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    fn source_corner(output_uv: (f32, f32), flip_y: bool) -> (usize, usize) {
+        let source_uv = (
+            output_uv.0,
+            if flip_y {
+                1.0 - output_uv.1
+            } else {
+                output_uv.1
+            },
+        );
+        (source_uv.0.round() as usize, source_uv.1.round() as usize)
+    }
+
+    #[test]
+    fn asymmetric_corners_follow_hdr_origin_without_changing_sdr() {
+        // Rows are top-to-bottom: [A, B] / [C, D].
+        let fixture = [[b'A', b'B'], [b'C', b'D']];
+        let output_corners = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)];
+        let sample = |flip_y| {
+            output_corners.map(|uv| {
+                let (x, y) = source_corner(uv, flip_y);
+                fixture[y][x]
+            })
+        };
+
+        assert_eq!(sample(true), [b'C', b'D', b'A', b'B']);
+        assert_eq!(sample(false), [b'A', b'B', b'C', b'D']);
+    }
+}

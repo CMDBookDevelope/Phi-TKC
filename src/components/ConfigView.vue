@@ -176,7 +176,7 @@ en:
   back: Back
   head-categories:
     output: Output
-    record: Record
+    audio: Audio
     game: Game
     effect: Effect
     player: Player
@@ -377,7 +377,7 @@ zh-CN:
   back: 返回
   head-categories:
     output: 输出
-    record: 录制
+    audio: 音频
     game: 游戏
     effect: 效果
     player: 玩家
@@ -417,6 +417,7 @@ import { renderAppearance, STEREO_STRENGTH_MAX } from '@/renderAppearance';
 import { RHYTHM_DEFAULTS, RHYTHM_SPEED_MIN, RHYTHM_SPEED_MAX, isRhythmSpeed, withRhythmDefaults, type RhythmColors } from '@/rhythmConfig';
 import TipSwitch from './TipSwitch.vue';
 import RhythmColorPicker from './RhythmColorPicker.vue';
+import PlatformColorPicker from './PlatformColorPicker.vue';
 import { isMobile } from '@/platform';
 const props = defineProps<{ initialConfig?: RenderConfig; chartPath?: string; chartLabel?: string; chartCover?: string | null; presetTarget?: string }>();
 const mobile = isMobile();
@@ -482,7 +483,7 @@ function revealCategory(event: FocusEvent) {
 
 const categories = [
   { key: 'output', icon: 'mdi-video-outline', labelKey: 'head-categories.output' },
-  { key: 'recording', icon: 'mdi-music-note', labelKey: 'head-categories.record' },
+  { key: 'recording', icon: 'mdi-music-note', labelKey: 'head-categories.audio' },
   { key: 'game', icon: 'mdi-gamepad-variant-outline', labelKey: 'head-categories.game' },
   { key: 'graphics', icon: 'mdi-palette-outline', labelKey: 'head-categories.effect' },
   { key: 'player', icon: 'mdi-account-outline', labelKey: 'head-categories.player' },
@@ -1393,10 +1394,10 @@ async function replacePreset() {
               <div class="card-label">{{ t('section.ui') }}</div>
               <v-select v-model="backgroundMode" :items="backgroundOptions" :label="t('background-type')"
                 density="compact" variant="outlined" hide-details />
-              <label v-if="backgroundMode === 'solid'" class="color-picker-row field-label">
-                {{ t('background-color') }}
-                <input v-model="backgroundColor" class="color-input" type="color" />
-              </label>
+              <div v-if="backgroundMode === 'solid'" class="color-picker-row field-label">
+                <span>{{ t('background-color') }}</span>
+                <PlatformColorPicker v-model="backgroundColor" :label="t('background-color')" />
+              </div>
               <template v-if="backgroundMode === 'video'">
                 <div class="field-row background-video-row">
                   <v-text-field
@@ -1482,10 +1483,10 @@ async function replacePreset() {
               <template v-if="handSplit">
                 <fieldset v-for="side in handSides" :key="side.value" class="hand-overlay">
                   <legend class="card-label">{{ t(side.label) }}</legend>
-                  <label class="color-picker-row field-label">
-                    {{ t('hand-overlay-color') }}
-                    <input v-model="appearance[side.colorKey]" :aria-label="t('hand-color-for-side', { side: t(side.label) })" class="color-input" type="color" />
-                  </label>
+                  <div class="color-picker-row field-label">
+                    <span>{{ t('hand-overlay-color') }}</span>
+                    <PlatformColorPicker v-model="appearance[side.colorKey]" :label="t('hand-color-for-side', { side: t(side.label) })" />
+                  </div>
                   <div class="slider-block">
                     <div class="slider-header">
                       <span>{{ t('hand-overlay-opacity') }}</span>
@@ -1504,14 +1505,30 @@ async function replacePreset() {
             <div class="md3-card glass fluent-glass hdr-card" v-glass :aria-disabled="!hdrEnabled">
               <div class="card-label">{{ t('hdr') }}</div>
               <p v-if="!hdrEnabled" class="field-hint">{{ t('hdr-disabled') }}</p>
-              <v-select v-model="activeHdrSection" :items="hdrSections" :label="t('hdr-section')"
-                density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
-              <v-select v-if="activeHdrSection === 'ui'" v-model="activeHdrUi" :items="hdrUiOptions" :label="t('hdr-ui-element')"
-                density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
-              <v-select v-else-if="activeHdrSection === 'rhythm'" v-model="activeHdrRhythm" :items="hdrRhythmOptions" :label="t('hdr-rhythm-element')"
-                density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
-              <v-select v-else-if="activeHdrSection === 'handIndicator'" v-model="activeHdrHand" :items="hdrHandOptions" :label="t('hdr-hand-side')"
-                density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
+              <v-tabs v-model="activeHdrSection" :aria-label="t('hdr-section')"
+                class="hdr-tabs clear-glass" height="48" :show-arrows="true" :disabled="!hdrEnabled">
+                <v-tab v-for="section in hdrSections" :key="section.value" :value="section.value" :ripple="false">
+                  {{ section.title }}
+                </v-tab>
+              </v-tabs>
+              <v-tabs v-if="activeHdrSection === 'ui'" v-model="activeHdrUi" :aria-label="t('hdr-ui-element')"
+                class="hdr-tabs clear-glass" height="48" :show-arrows="true" :disabled="!hdrEnabled">
+                <v-tab v-for="option in hdrUiOptions" :key="option.value" :value="option.value" :ripple="false">
+                  {{ option.title }}
+                </v-tab>
+              </v-tabs>
+              <v-tabs v-else-if="activeHdrSection === 'rhythm'" v-model="activeHdrRhythm" :aria-label="t('hdr-rhythm-element')"
+                class="hdr-tabs clear-glass" height="48" :show-arrows="true" :disabled="!hdrEnabled">
+                <v-tab v-for="option in hdrRhythmOptions" :key="option.value" :value="option.value" :ripple="false">
+                  {{ option.title }}
+                </v-tab>
+              </v-tabs>
+              <v-tabs v-else-if="activeHdrSection === 'handIndicator'" v-model="activeHdrHand" :aria-label="t('hdr-hand-side')"
+                class="hdr-tabs clear-glass" height="48" :show-arrows="true" :disabled="!hdrEnabled">
+                <v-tab v-for="option in hdrHandOptions" :key="option.value" :value="option.value" :ripple="false">
+                  {{ option.title }}
+                </v-tab>
+              </v-tabs>
               <v-select v-model="activeHdrSetting.mode" :items="hdrModes" :label="t('hdr-mode')"
                 density="compact" variant="outlined" hide-details :disabled="!hdrEnabled" />
               <template v-if="hdrEnabled && activeHdrSetting.mode === 'custom'">
@@ -1640,14 +1657,47 @@ async function replacePreset() {
   transition-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
   font-family: inherit;
 }
-.cat-chip:hover {
+.hdr-tabs {
+  min-width: 0;
+  border-radius: 12px;
+}
+/* Vuetify scrolls this inner viewport. Hiding its overflow clips the later tabs on touch. */
+.hdr-tabs :deep(.v-slide-group__container) {
+  min-width: 0;
+  overflow-x: auto;
+  touch-action: pan-x pan-y;
+  overscroll-behavior-x: contain;
+}
+.hdr-tabs :deep(.v-slide-group__prev),
+.hdr-tabs :deep(.v-slide-group__next) {
+  min-width: 36px;
+  flex-basis: 36px;
+}
+.hdr-tabs :deep(.v-tab) {
+  flex: 0 0 auto;
+  padding-inline: 12px;
+  color: rgba(var(--main-color-rgb), 0.55);
+  white-space: nowrap;
+}
+.hdr-tabs :deep(.v-btn__overlay) {
+  display: none;
+}
+.cat-chip:hover,
+.hdr-tabs :deep(.v-tab:hover) {
   background: rgba(var(--main-color-rgb), 0.08);
   color: rgba(var(--main-color-rgb), 0.85);
 }
-.cat-chip.is-active {
+.cat-chip.is-active,
+.hdr-tabs :deep(.v-tab[aria-selected='true']) {
   background: rgba(var(--main-color-rgb), 0.15);
-  border-color: rgba(var(--main-color-rgb), 0.4);
   color: var(--main-color);
+}
+.cat-chip.is-active {
+  border-color: rgba(var(--main-color-rgb), 0.4);
+}
+.hdr-tabs :deep(.v-tab:focus-visible) {
+  outline: 2px solid var(--main-color);
+  outline-offset: -2px;
 }
 
 .config-body {
@@ -1697,16 +1747,6 @@ async function replacePreset() {
 .background-video-row { align-items: center; }
 .background-video-row :deep(.v-input) { min-width: 0; }
 .field-label { color: rgba(var(--main-color-rgb), 0.75); font-size: 13px; }
-.color-input {
-  flex: none;
-  width: 52px;
-  height: 36px;
-  border: 1px solid rgba(var(--main-color-rgb), .3);
-  border-radius: 6px;
-  background: transparent;
-  padding: 2px;
-  cursor: pointer;
-}
 .hand-overlay {
   display: grid;
   gap: 8px;
@@ -1721,9 +1761,6 @@ async function replacePreset() {
 @media (max-width: 600px) {
   .background-video-row { flex-wrap: wrap; }
   .background-video-row :deep(.v-input) { flex-basis: 100%; }
-}
-@media (pointer: coarse) {
-  .color-input { min-height: 44px; }
 }
 .stereo-option { display: block; }
 .card-label {
