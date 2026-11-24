@@ -223,15 +223,21 @@ fn query_encoder_availability(
         let result = cmd_hidden(path).args(["-hide_banner", "-encoders"]).output()?;
         let listing = String::from_utf8_lossy(&result.stdout);
         let known = |name: &str| listing.lines().any(|line| line.split_whitespace().nth(1) == Some(name));
+        let sidecar = if color_space.is_hdr() { None } else { find_bundled_prores_ffmpeg()? };
         for codec in ["h264", "hevc", "av1"] {
             let mut options = Vec::new();
-            for vendor in ["nvenc", "qsv", "amf", "vulkan"] {
-                if color_space.is_hdr() && vendor == "vulkan" {
-                    continue;
-                }
+            for vendor in ["nvenc", "qsv", "amf"] {
                 let name = format!("{codec}_{vendor}");
                 if known(&name) && probe_video_encoder_for_color(path, &name, None, color_space) {
                     options.push(vendor.to_owned());
+                }
+            }
+            if !color_space.is_hdr() {
+                let name = format!("{codec}_vulkan");
+                let system = known(&name).then_some(ffmpeg.as_str());
+                match select_vulkan_video_ffmpeg(system, sidecar.as_deref(), &name, (320, 240)) {
+                    Ok(_) => options.push("vulkan".to_owned()),
+                    Err(error) => debug!("{name} probe: {error:#}"),
                 }
             }
             if software_encoders(codec).iter().any(|name| known(name) && probe_video_encoder_for_color(path, name, None, color_space)) {
@@ -246,6 +252,10 @@ fn query_encoder_availability(
         let result = cmd_hidden(path).args(["-hide_banner", "-encoders"]).output()?;
         let listing = String::from_utf8_lossy(&result.stdout);
         let known = |name: &str| listing.lines().any(|line| line.split_whitespace().nth(1) == Some(name));
+        let prores_devices = crate::encoder_probe::prores_devices().unwrap_or_else(|error| {
+            debug!("Vulkan device enumeration failed: {error:#}");
+            Vec::new()
+        });
         for profile_name in ["prores_422_hq", "prores_422", "prores_422_lt", "prores_422_proxy", "prores_4444", "prores_4444_xq", "prores_4444_alpha"] {
             let profile = prores_profile(profile_name).unwrap();
             if color_space.is_hdr() && profile.alpha {
@@ -258,10 +268,11 @@ fn query_encoder_availability(
             if known("prores_videotoolbox") && probe_video_encoder_for_color(path, "prores_videotoolbox", Some(profile), color_space) {
                 options.push("metal".to_owned());
             }
-            if DESKTOP_PRORES_VULKAN && known(PRORES_VULKAN_ENCODER)
-                && probe_prores_vulkan(path, profile, color_space, (320, 240)).is_ok()
-            {
-                options.push("vulkan".to_owned());
+            if DESKTOP_PRORES_VULKAN && known(PRORES_VULKAN_ENCODER) {
+                match probe_prores_vulkan(path, profile, color_space, (320, 240), &prores_devices) {
+                    Ok(_) => options.push("vulkan".to_owned()),
+                    Err(error) => debug!("{profile_name} Vulkan probe via {ffmpeg}: {error:#}"),
+                }
             }
             support.insert(profile_name.to_owned(), options);
         }
@@ -315,18 +326,16 @@ fn probe_video_encoder_for_color(
     profile: Option<ProresProfile>,
     color_space: ExportColorSpace,
 ) -> bool {
+    if encoder.ends_with("_vulkan") {
+        return !color_space.is_hdr() && probe_vulkan_video(ffmpeg, encoder, (320, 240)).is_ok();
+    }
     let mut command = cmd_hidden(ffmpeg);
     command.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
-    if encoder.ends_with("_vulkan") {
-        command.args(["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"]);
-    }
     command.args(["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30", "-frames:v", "1"]);
     if let Some(filter) = color_space.ffmpeg_filter(profile.map_or("yuv420p10le", |profile| profile.pixel_format)) {
         command.args(["-vf", &format!("format=gbrpf32le,{filter}")]);
         command.args(["-pix_fmt", hdr_encoder_pixel_format(encoder, profile)]);
         command.args(color_space.ffmpeg_signaling().split_whitespace());
-    } else if encoder.ends_with("_vulkan") {
-        command.args(["-vf", "format=nv12,hwupload"]);
     }
     if let Some(profile) = profile {
         command.args(["-profile:v", &profile.number.to_string(), "-pix_fmt", profile.pixel_format]);
@@ -978,6 +987,13 @@ fn is_progress_line(line: &[u8]) -> bool {
 
 
 pub(crate) fn find_prores_ffmpeg() -> Result<Option<String>> {
+    match find_bundled_prores_ffmpeg()? {
+        Some(path) => Ok(Some(path)),
+        None => find_ffmpeg(),
+    }
+}
+
+fn find_bundled_prores_ffmpeg() -> Result<Option<String>> {
     let executable = std::env::current_exe()?;
     let name = if cfg!(target_os = "windows") { "ffmpeg-prores.exe" } else { "ffmpeg-prores" };
     let mut candidates = vec![executable.parent().unwrap().join(name)];
@@ -989,12 +1005,12 @@ pub(crate) fn find_prores_ffmpeg() -> Result<Option<String>> {
             return Ok(Some(path.to_string_lossy().into_owned()));
         }
     }
-    find_ffmpeg()
+    Ok(None)
 }
 
 pub fn find_ffmpeg() -> Result<Option<String>> {
     fn test(path: impl AsRef<OsStr>) -> bool {
-        matches!(cmd_hidden(path).arg("-version").output(), Ok(_))
+        cmd_hidden(path).arg("-version").output().is_ok_and(|output| output.status.success())
     }
 
     let ffmpeg_exe = if cfg!(target_os = "windows") {
@@ -1368,7 +1384,6 @@ pub(crate) fn prores_profile(codec: &str) -> Option<ProresProfile> {
 
 const PRORES_VULKAN_ENCODER: &str = "prores_ks_vulkan";
 const DESKTOP_PRORES_VULKAN: bool = cfg!(any(target_os = "windows", target_os = "linux"));
-const FFMPEG_VULKAN_DEVICE_ARGS: [&str; 4] = ["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"];
 
 fn prores_vulkan_video_args(profile: ProresProfile, color_space: ExportColorSpace) -> String {
     // The Vulkan alpha shader expands 10-bit samples to 16 bits for both
@@ -1388,30 +1403,115 @@ fn prores_vulkan_video_args(profile: ProresProfile, color_space: ExportColorSpac
     )
 }
 
+pub fn print_encoder_diagnostics() -> Result<()> {
+    fn describe(label: &str, executable: Option<String>) -> Result<Option<(String, String)>> {
+        let Some(executable) = executable else {
+            println!("{label}: not found");
+            return Ok(None);
+        };
+        println!("{label}: {executable}");
+        let version = cmd_hidden(&executable).arg("-version").output()?;
+        if let Some(line) = String::from_utf8_lossy(&version.stdout).lines().next() {
+            println!("  {line}");
+        }
+        let encoders = cmd_hidden(&executable).args(["-hide_banner", "-encoders"]).output()?;
+        anyhow::ensure!(encoders.status.success(), "could not list encoders in {executable}: {}",
+            String::from_utf8_lossy(&encoders.stderr));
+        Ok(Some((executable, String::from_utf8_lossy(&encoders.stdout).into_owned())))
+    }
+    fn report(encoder: &str, listing: &str, probe: impl FnOnce() -> Result<String>) {
+        if !listing.lines().any(|line| line.split_whitespace().nth(1) == Some(encoder)) {
+            println!("  {encoder}: encoder absent from this FFmpeg build");
+            return;
+        }
+        match probe() {
+            Ok(device) => println!("  {encoder}: sample encode passed ({device})"),
+            Err(error) => println!("  {encoder}: {error:#}"),
+        }
+    }
+    if let Some((path, listing)) = describe("General FFmpeg", find_ffmpeg()?)? {
+        for encoder in ["h264_vulkan", "hevc_vulkan", "av1_vulkan"] {
+            report(encoder, &listing, || {
+                probe_vulkan_video(Path::new(&path), encoder, (320, 240))?;
+                Ok(crate::encoder_probe::DEFAULT_DEVICE.to_owned())
+            });
+        }
+    }
+    if let Some((path, listing)) = describe("ProRes FFmpeg", find_prores_ffmpeg()?)? {
+        if DESKTOP_PRORES_VULKAN {
+            for encoder in ["h264_vulkan", "hevc_vulkan", "av1_vulkan"] {
+                report(encoder, &listing, || {
+                    probe_vulkan_video(Path::new(&path), encoder, (320, 240))?;
+                    Ok(crate::encoder_probe::DEFAULT_DEVICE.to_owned())
+                });
+            }
+            report(PRORES_VULKAN_ENCODER, &listing, || {
+                let devices = crate::encoder_probe::prores_devices()?;
+                let profile = prores_profile("prores_4444_alpha").expect("known ProRes profile");
+                probe_prores_vulkan(Path::new(&path), profile, ExportColorSpace::Rec709, (320, 240), &devices)
+            });
+        }
+    }
+    println!("Samples: SDR 320x240. In Phi-TKC, Vulkan Video options for H.264/HEVC/AV1 require SDR and hardware acceleration.");
+    Ok(())
+}
+
+fn select_vulkan_video_ffmpeg<'a>(
+    general: Option<&'a str>,
+    sidecar: Option<&'a str>,
+    encoder: &str,
+    size: (u32, u32),
+) -> Result<&'a str> {
+    let mut errors = Vec::new();
+    for path in general.into_iter().chain(sidecar.filter(|path| Some(*path) != general)) {
+        match probe_vulkan_video(Path::new(path), encoder, size) {
+            Ok(()) => return Ok(path),
+            Err(error) => errors.push(format!("{path}: {error:#}")),
+        }
+    }
+    anyhow::ensure!(!errors.is_empty(), "no FFmpeg build lists {encoder}");
+    bail!("{}", errors.join("\n"))
+}
+
+fn probe_vulkan_video(ffmpeg: &Path, encoder: &str, (width, height): (u32, u32)) -> Result<()> {
+    let source = format!("testsrc2=size={width}x{height}:rate=30");
+    let mut command = cmd_hidden(ffmpeg);
+    command.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-xerror", "-abort_on", "empty_output_stream"])
+        .args(crate::encoder_probe::device_args(crate::encoder_probe::DEFAULT_DEVICE))
+        .args(["-f", "lavfi", "-i", &source, "-frames:v", "1", "-vf", "format=nv12,hwupload",
+            "-c:v", encoder, "-f", "null", "-"]);
+    crate::encoder_probe::run(&mut command, std::time::Duration::from_secs(8))
+}
+
 fn probe_prores_vulkan(
     ffmpeg: &Path,
     profile: ProresProfile,
     color_space: ExportColorSpace,
     (width, height): (u32, u32),
-) -> Result<()> {
+    devices: &[String],
+) -> Result<String> {
+    anyhow::ensure!(!devices.is_empty(), "no hardware Vulkan device found");
     let source_format = if color_space.is_hdr() { "gbrpf32le" } else { "rgba" };
     let source = format!("testsrc=size={width}x{height}:rate=30,format={source_format}");
-    // Some upstream shader initialization failures are logged without being
-    // propagated as return errors. Require both a packet and a clean error log.
-    let output = cmd_hidden(ffmpeg)
-        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-xerror", "-abort_on", "empty_output_stream"])
-        .args(FFMPEG_VULKAN_DEVICE_ARGS)
-        .args(["-f", "lavfi", "-i", &source, "-frames:v", "1"])
-        .args(prores_vulkan_video_args(profile, color_space).split_whitespace())
-        .args(["-c:v", PRORES_VULKAN_ENCODER, "-f", "null", "-"])
-        .stdout(Stdio::null())
-        .output()
-        .context("could not run FFmpeg ProRes Vulkan probe")?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() || !stderr.trim().is_empty() {
-        bail!("FFmpeg sample encode failed ({}): {}", output.status, stderr.trim());
+    let args = prores_vulkan_video_args(profile, color_space);
+    let mut errors = Vec::new();
+    for device in devices {
+        // Some drivers cannot use the default multi-plane texture layout for
+        // compute. Only use the compatibility layout if it actually encodes.
+        for spec in [device.clone(), format!("{device},disable_multiplane=1")] {
+            let mut command = cmd_hidden(ffmpeg);
+            command.args(["-hide_banner", "-loglevel", "error", "-nostdin", "-xerror", "-abort_on", "empty_output_stream"])
+                .args(crate::encoder_probe::device_args(&spec))
+                .args(["-f", "lavfi", "-i", &source, "-frames:v", "1"])
+                .args(args.split_whitespace())
+                .args(["-c:v", PRORES_VULKAN_ENCODER, "-f", "null", "-"]);
+            match crate::encoder_probe::run(&mut command, std::time::Duration::from_secs(8)) {
+                Ok(()) => return Ok(spec),
+                Err(error) => errors.push(format!("{spec}: {error:#}")),
+            }
+        }
     }
-    Ok(())
+    bail!("{}", errors.join("\n"))
 }
 
 fn select_prores_encoder(
@@ -1420,17 +1520,21 @@ fn select_prores_encoder(
     profile: ProresProfile,
     color_space: ExportColorSpace,
     dimensions: (u32, u32),
-) -> Result<&'static str> {
-    select_prores_encoder_with(config, DESKTOP_PRORES_VULKAN, |encoder| {
+) -> Result<(&'static str, Option<String>)> {
+    let mut device = None;
+    let selected = select_prores_encoder_with(config, DESKTOP_PRORES_VULKAN, |encoder| {
         if encoder == PRORES_VULKAN_ENCODER {
-            probe_prores_vulkan(ffmpeg, profile, color_space, dimensions)
+            let devices = crate::encoder_probe::prores_devices()?;
+            device = Some(probe_prores_vulkan(ffmpeg, profile, color_space, dimensions, &devices)?);
+            Ok(())
         } else if probe_video_encoder_for_color(ffmpeg, encoder, Some(profile), color_space) {
             Ok(())
         } else {
             bail!("sample encode failed");
         }
     })
-    .with_context(|| format!("ProRes profile {} ({}) for {}", profile.number, profile.pixel_format, config.color_space))
+    .with_context(|| format!("ProRes profile {} ({}) for {} via {}", profile.number, profile.pixel_format, config.color_space, ffmpeg.display()))?;
+    Ok((selected, device))
 }
 
 fn select_prores_encoder_with(
@@ -1728,17 +1832,38 @@ async fn render_impl(
 
     let font = FontArc::try_from_vec(load_file("font.ttf").await?)?;
 
-    let Some(ffmpeg) = (if prores.is_some() { find_prores_ffmpeg()? } else { find_ffmpeg()? }) else {
+    let Some(mut ffmpeg) = (if prores.is_some() { find_prores_ffmpeg()? } else { find_ffmpeg()? }) else {
         bail!("FFmpeg not found")
     };
     debug!("Using ffmpeg: {}", ffmpeg);
     let ffmpeg_path = Path::new(&ffmpeg);
-    let prores_encoder = prores
-        .map(|profile| select_prores_encoder(ffmpeg_path, &params.config, profile, color_space, (vw, vh)))
-        .transpose()?;
+    let (prores_encoder, prores_vulkan_device) = match prores {
+        Some(profile) => {
+            let (encoder, device) = select_prores_encoder(ffmpeg_path, &params.config, profile, color_space, (vw, vh))?;
+            (Some(encoder), device)
+        }
+        None => (None, None),
+    };
+    let explicit_vulkan = prores.is_none() && params.config.encoder == "vulkan";
+    let explicit_vulkan_encoder = if explicit_vulkan {
+        anyhow::ensure!(params.config.hardware_accel && !color_space.is_hdr(),
+            "Vulkan Video requires hardware acceleration and SDR in Phi-TKC");
+        let encoder = match params.config.video_codec.as_str() {
+            "h264" => "h264_vulkan",
+            "hevc" => "hevc_vulkan",
+            "av1" => "av1_vulkan",
+            codec => bail!("Vulkan Video does not support {codec}"),
+        };
+        let sidecar = find_bundled_prores_ffmpeg()?;
+        ffmpeg = select_vulkan_video_ffmpeg(Some(&ffmpeg), sidecar.as_deref(), encoder, (vw, vh))
+            .with_context(|| format!("{encoder} is unavailable"))?.to_owned();
+        Some(encoder)
+    } else {
+        None
+    };
 
     let hdr_encoder = if color_space.is_hdr() && prores.is_none() {
-        Some(select_hdr_encoder(ffmpeg_path, &params.config, color_space)?)
+        Some(select_hdr_encoder(Path::new(&ffmpeg), &params.config, color_space)?)
     } else {
         None
     };
@@ -2071,7 +2196,7 @@ async fn render_impl(
     // RX 7900 XTX can stall inside the driver's video-session/DPB creation,
     // before a fence timeout can apply. Keep rendering through the working
     // AMF path even when an AMD user selected Vulkan; other GPUs keep Vulkan.
-    let amd_vulkan_fallback = prores.is_none() && amd_gpu && matches!(params.config.encoder.as_str(), "auto" | "vulkan");
+    let amd_vulkan_fallback = prores.is_none() && amd_gpu && params.config.encoder == "auto";
     if amd_vulkan_fallback && params.config.hardware_accel {
         info!("AMD GPU: using FFmpeg AMF instead of Vulkan Video; software encoding is the fallback");
     }
@@ -2080,7 +2205,7 @@ async fn render_impl(
         && params.config.video_codec == "h264"
         && !headless_vulkan
         && !amd_gpu
-        && matches!(params.config.encoder.as_str(), "auto" | "vulkan");
+        && params.config.encoder == "auto";
     let mut video_context = if want_vulkan_video {
         crate::vulkan_video::VideoContext::new(vw, vh, qp, 16)
     } else {
@@ -2386,14 +2511,17 @@ async fn render_impl(
         }
     };
     let vendors: Vec<[&str; 3]> = match params.config.encoder.as_str() {
-        _ if prores.is_some() || color_space.is_hdr() => vec![],
+        _ if prores.is_some() || color_space.is_hdr() || explicit_vulkan => vec![],
         "cpu" => vec![],
-        "auto" | "vulkan" if amd_vulkan_fallback => vec![V_AMF, V_NV, V_QSV],
+        "auto" if amd_vulkan_fallback => vec![V_AMF, V_NV, V_QSV],
         "amf" => vec![V_AMF, V_NV, V_QSV, V_VK],
         "qsv" => vec![V_QSV, V_NV, V_AMF, V_VK],
         "vulkan" => vec![V_VK, V_NV, V_QSV, V_AMF],
         _ => vec![V_NV, V_QSV, V_AMF, V_VK],
     };
+    if let Some(encoder) = explicit_vulkan_encoder {
+        set_avail(&mut encoder_availability, encoder, true);
+    }
     let mut hw_errors: Vec<String> = hw_errors;
     for v in vendors {
         if amd_gpu && v == V_VK {
@@ -2763,7 +2891,7 @@ async fn render_impl(
     };
 
 
-    let mut ffmpeg_encoder = if let Some(encoder) = prores_encoder.or(hdr_encoder.as_deref()) {
+    let mut ffmpeg_encoder = if let Some(encoder) = prores_encoder.or(explicit_vulkan_encoder).or(hdr_encoder.as_deref()) {
         encoder
     } else { candidates
         .iter()
@@ -2853,7 +2981,6 @@ async fn render_impl(
 
     let ffmpeg_preset = match ffmpeg_encoder {
         "h264_amf" | "hevc_amf" | "av1_amf" => "-quality",
-        "h264_vulkan" | "hevc_vulkan" | "av1_vulkan" => "-preset",
         "libaom-av1" => "-cpu-used",
         "librav1e" => "-speed",
         _ => "-preset",
@@ -2897,11 +3024,6 @@ async fn render_impl(
             }
             .to_string(),
         },
-        "h264_vulkan" | "hevc_vulkan" | "av1_vulkan" => preset_words
-            .first()
-            .copied()
-            .unwrap_or("default")
-            .to_string(),
         "libsvtav1" => match speed_rank(preset_words.first().copied().unwrap_or("medium")) {
             0 | 1 => "12",
             2 => "10",
@@ -3214,16 +3336,8 @@ async fn render_impl(
         format!("{mux_audio} -c:v {ffmpeg_encoder} -map 0:v:0 -map 1:a:0 -shortest {out_extra} -f mov")
     } else if is_vulkan_encoder {
         format!(
-            "{} -c:v {} {} {} {} -map 0:v:0 -map 1:a:0 -shortest {} {} {} -f {}",
-            mux_audio,
-            ffmpeg_encoder,
-            bitrate_control,
+            "{mux_audio} -c:v {ffmpeg_encoder} {bitrate_control} {} -map 0:v:0 -map 1:a:0 -shortest {out_extra} {async_depth} -f {video_mux}",
             params.config.bitrate,
-            ffmpeg_preset,
-            ffmpeg_preset_name,
-            out_extra,
-            async_depth,
-            video_mux,
         )
     } else {
         format!(
@@ -3246,7 +3360,9 @@ async fn render_impl(
         cmd.args(global_args.split_whitespace());
         cmd.args(["-progress", "pipe:2", "-nostats"]);
         if is_vulkan_encoder && !vulkan_video {
-            cmd.args(FFMPEG_VULKAN_DEVICE_ARGS);
+            let device = prores_vulkan_device.as_deref().unwrap_or(crate::encoder_probe::DEFAULT_DEVICE);
+            info!("Vulkan encoder {ffmpeg_encoder} via {ffmpeg}: {device}");
+            cmd.args(crate::encoder_probe::device_args(device));
         } else if let Some(enc) = dx.as_ref().filter(|_| !vulkan_video) {
             cmd.arg("-init_hw_device")
                 .arg(format!("{}={}", enc.hw, DX_DEVICE))

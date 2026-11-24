@@ -113,6 +113,13 @@ fn main() {
         return;
     }
 
+    if args.as_slice() == ["--encoder-diagnostics"] {
+        if let Err(error) = app_lib::render::print_encoder_diagnostics() {
+            eprintln!("Encoder diagnostics failed: {error:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
         log::info!("{}", CliArgs::command().render_help());
         return;

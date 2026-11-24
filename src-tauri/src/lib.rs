@@ -9,6 +9,7 @@ mod frame_handoff;
 mod common;
 mod chart_archive;
 mod gpu_info;
+mod encoder_probe;
 pub mod ipc;
 pub mod logger;
 mod preview;
