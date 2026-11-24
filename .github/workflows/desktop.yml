@@ -274,20 +274,25 @@ jobs:
           set -euo pipefail
           # Official immutable release/tag and SHA256 live in the checked-in pin.
           # No GPL vendor binary, mutable latest download, or source offer promise.
-          source_dir="$(cygpath -u "$RUNNER_TEMP")/ffmpeg-prores-source"
+          # Keep FFmpeg out of Cargo's restored target directory. Each job
+          # starts with its own empty staging paths and publishes them only
+          # after the binary and encoder listing have been verified.
+          ffmpeg_work="$(mktemp -d "$(cygpath -u "$RUNNER_TEMP")/ffmpeg-prores.XXXXXXXX")"
+          source_dir="$ffmpeg_work/source"
+          bundle_dir="$ffmpeg_work/bundle"
           python3 scripts/check-ffmpeg-bundle.py
-          python3 scripts/fetch-ffmpeg.py --source-dir "$source_dir" \
-            --output src-tauri/target/ffmpeg-prores
-          bash scripts/build-ffmpeg-prores.sh "$source_dir" src-tauri/target/ffmpeg-prores
+          python3 scripts/fetch-ffmpeg.py --source-dir "$source_dir" --output "$bundle_dir"
+          bash scripts/build-ffmpeg-prores.sh "$source_dir" "$bundle_dir"
           # Listing does not create a Vulkan device; real GPU tests stay optional.
-          src-tauri/target/ffmpeg-prores/ffmpeg-prores.exe -hide_banner -encoders \
-            > src-tauri/target/ffmpeg-prores/encoders.txt
-          python3 - <<'PY'
+          "$bundle_dir/ffmpeg-prores.exe" -hide_banner -encoders > "$ffmpeg_work/encoders.txt"
+          python3 - "$ffmpeg_work/encoders.txt" <<'PY'
+          import sys
           from pathlib import Path
-          lines = Path('src-tauri/target/ffmpeg-prores/encoders.txt').read_text().splitlines()
+          lines = Path(sys.argv[1]).read_text().splitlines()
           names = {line.split()[1] for line in lines if len(line.split()) >= 2}
           assert {'prores_ks', 'prores_ks_vulkan'}.issubset(names), 'ProRes encoder missing'
           PY
+          printf 'PHI_TKC_FFMPEG_BUNDLE=%s\n' "$(cygpath -m "$bundle_dir")" >> "$(cygpath -u "$GITHUB_ENV")"
 
       - name: Build bundles
         shell: bash
@@ -322,7 +327,7 @@ jobs:
           python3 scripts/windows-runtime.py collect \
             --binary src-tauri/target/x86_64-pc-windows-gnu/release/Phi-TKC.exe \
             --output dist-windows-runtime \
-            --ffmpeg-bundle src-tauri/target/ffmpeg-prores \
+            --ffmpeg-bundle "${PHI_TKC_FFMPEG_BUNDLE:?missing verified FFmpeg bundle}" \
             --tauri-config src-tauri/target/windows-runtime-tauri.json
 
       - name: Bundle Windows installer with runtime dependencies
