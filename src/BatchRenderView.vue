@@ -55,7 +55,6 @@ en:
   no-charts-selected: No charts selected
   batch-completed: "Batch completed: {count} rendered"
   batch-stopped: "Batch queue stopped"
-  ffmpeg-not-found: FFmpeg not found
   chart-info-missing: Chart info missing
   adding-charts: Adding...
   invalid-chart-file: Invalid chart file
@@ -131,7 +130,6 @@ zh-CN:
   no-charts-selected: 未选择任何谱面
   batch-completed: "批量任务完成，共处理 {count} 个谱面"
   batch-stopped: "已停止队列"
-  ffmpeg-not-found: 未找到 FFmpeg 环境
   chart-info-missing: 谱面信息缺失
   adding-charts: 解析中...
   invalid-chart-file: 无效的谱面文件
@@ -231,9 +229,7 @@ async function previewChart(id: string) {
   const chart = charts.value.find((c) => c.id === id);
   if (!chart?.chartInfo) return toast(t('chart-info-missing'), 'error');
   try {
-    // Previewing does not invoke ffmpeg; requiring it here made the preview button fail
-    // on machines without ffmpeg even though the preview window itself works.
-    const config = await buildRenderParams(false);
+    const config = await buildRenderParams();
     await invoke('preview_chart', {
       params: { path: chart.path, info: chart.chartInfo, config: { ...config, autoplay: true } },
     });
@@ -438,10 +434,9 @@ function removeChart(id: string) {
   charts.value = charts.value.filter((c) => c.id !== id);
 }
 
-async function buildRenderParams(requireFfmpeg = true) {
+async function buildRenderParams() {
   let config = selectedPreset.value === 'default' ? defaultConfig.value : ((await invoke('get_presets')) as Record<string, RenderConfig>)[selectedPreset.value];
   if (!config) config = defaultConfig.value;
-  if (requireFfmpeg && !isMobile() && !(await invoke('test_ffmpeg', { videoCodec: config.videoCodec }))) throw new Error(t('ffmpeg-not-found'));
   if (!config.resolution) throw new Error('Resolution missing');
   const settings = withRhythmDefaults(config);
   if (!isRhythmSpeed(settings.rhythmSpeed)) throw new Error(t('rhythm-speed-invalid'));

@@ -64,7 +64,6 @@
     rhythm-beats-only: BPM and beat guides only
     rhythm-speed: Speed
 
-    ffmpeg-not-found: You haven't installed ffmpeg yet. Please download FFmpeg.exe and put it in the specific folder.
     remote-submitted: 'Sent to the render server (job {id})'
 
   zh-CN:
@@ -132,7 +131,6 @@
     rhythm-beats-only: 仅 BPM 与逐拍参考线
     rhythm-speed: 流速
 
-    ffmpeg-not-found: 笨蛋怎么没安装 FFmpeg。请下载 FFmpeg.exe 并放置在指定文件夹内。
     remote-submitted: 已提交到渲染服务器（任务 {id}）
 
 </i18n>
@@ -151,7 +149,6 @@ import ConfigView from './components/ConfigView.vue';
 import RenderProgressBar from './components/RenderProgressBar.vue';
 import moment from 'moment';
 import * as dialog from '@tauri-apps/plugin-dialog';
-import * as shell from '@tauri-apps/plugin-shell';
 import { isMobile } from './platform';
 import { renderStepIndex } from './appState';
 
@@ -307,13 +304,6 @@ async function postRender(): Promise<boolean | 'remote'> {
       return 'remote';
     }
 
-    // Android encodes in-process with MediaCodec, so there is no ffmpeg to find.
-    if (!mobile && !(await invoke('test_ffmpeg', { videoCodec: params.config.videoCodec }))) {
-      await dialog.message(t('ffmpeg-not-found'));
-      await invoke('open_app_folder');
-      await shell.open('https://github.com/BtbN/FFmpeg-Builds/releases');
-      return false;
-    }
     const outputPath = localStorage.getItem('outputPath');
     renderTaskId = await invoke<number>('post_render', { params, outputPath: outputPath || null });
     submittedConfig.value = { ...params.config };

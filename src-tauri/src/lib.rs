@@ -75,7 +75,7 @@ use prpr::{
     fs::{self, FileSystem},
     info::ChartInfo,
 };
-use render::{find_ffmpeg, RenderConfig, RenderParams};
+use render::{RenderConfig, RenderParams};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -227,7 +227,6 @@ pub async fn run() -> Result<()> {
             set_rpe_dir,
             unset_rpe_dir,
             get_rpe_charts,
-            test_ffmpeg,
             open_app_folder,
             list_chart_files,
             save_text_file,
@@ -886,16 +885,6 @@ fn get_rpe_charts() -> Result<Option<Vec<RPEChartInfo>>, InvokeError> {
         Ok(Some(results))
     })()
     .map_err(InvokeError::from_anyhow)
-}
-
-#[tauri::command]
-fn test_ffmpeg(video_codec: Option<String>) -> Result<bool, InvokeError> {
-    let ffmpeg = if video_codec.as_deref().and_then(render::prores_profile).is_some() {
-        render::find_prores_ffmpeg()
-    } else {
-        find_ffmpeg()
-    };
-    ffmpeg.map(|path| path.is_some()).map_err(InvokeError::from_anyhow)
 }
 
 #[tauri::command]
